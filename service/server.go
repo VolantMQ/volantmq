@@ -20,6 +20,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -69,7 +70,7 @@ type Server struct {
 
 	// Authenticator is the authenticator used to check username and password sent
 	// in the CONNECT message. If not set then default to "mockSuccess".
-	Authenticator string
+	Authenticators string
 
 	// SessionsProvider is the session store that keeps all the Session objects.
 	// This is the store to check if CleanSession is set to 0 in the CONNECT message.
@@ -82,7 +83,7 @@ type Server struct {
 
 	// authMgr is the authentication manager that we are going to use for authenticating
 	// incoming connections
-	authMgr *auth.Manager
+	authMgrs map[int]*auth.Manager
 
 	// sessMgr is the sessions manager for keeping track of the sessions
 	sessMgr *sessions.Manager
@@ -126,6 +127,7 @@ func (this *Server) ListenAndServe(uri string) error {
 	}
 
 	this.quit = make(chan struct{})
+	this.authMgrs = make(map[int]*auth.Manager)
 
 	u, err := url.Parse(uri)
 	if err != nil {
@@ -290,7 +292,17 @@ func (this *Server) handleConnection(c io.Closer) (svc *service, err error) {
 	}
 
 	// Authenticate the user, if error, return error and exit
-	if err = this.authMgr.Authenticate(string(req.Username()), string(req.Password())); err != nil {
+	// Go through all of authenticators
+	authenticated := false
+
+	for i := range this.authMgrs {
+		if err = this.authMgrs[i].Authenticate(string(req.Username()), string(req.Password())); err == nil {
+			authenticated = true
+			break
+		}
+	}
+
+	if !authenticated {
 		resp.SetReturnCode(message.ErrBadUsernameOrPassword)
 		resp.SetSessionPresent(false)
 		writeMessage(conn, resp)
@@ -363,13 +375,18 @@ func (this *Server) checkConfiguration() error {
 			this.TimeoutRetries = DefaultTimeoutRetries
 		}
 
-		if this.Authenticator == "" {
-			this.Authenticator = "mockSuccess"
+		if this.Authenticators == "" {
+			this.Authenticators = "mockSuccess"
 		}
 
-		this.authMgr, err = auth.NewManager(this.Authenticator)
-		if err != nil {
-			return
+		authenticators := strings.Split(this.Authenticators, ";")
+		for i, a := range authenticators {
+			if mngr, err := auth.NewManager(a); err != nil {
+				glog.Errorf("Couldn't register authenticator [%s]. %v", a, err)
+				return
+			} else {
+				this.authMgrs[i] = mngr
+			}
 		}
 
 		if this.SessionsProvider == "" {
