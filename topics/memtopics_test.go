@@ -76,7 +76,7 @@ func TestNextTopicLevelFailure(t *testing.T) {
 	_, rem, err = nextTopicLevel(topics[0])
 	require.NoError(t, err)
 
-	_, rem, err = nextTopicLevel(rem)
+	_, _, err = nextTopicLevel(rem)
 	require.Error(t, err)
 
 	_, rem, err = nextTopicLevel(topics[1])
@@ -85,10 +85,10 @@ func TestNextTopicLevelFailure(t *testing.T) {
 	_, rem, err = nextTopicLevel(rem)
 	require.NoError(t, err)
 
-	_, rem, err = nextTopicLevel(rem)
+	_, _, err = nextTopicLevel(rem)
 	require.Error(t, err)
 
-	_, rem, err = nextTopicLevel(topics[2])
+	_, _, err = nextTopicLevel(topics[2])
 	require.Error(t, err)
 }
 
@@ -204,8 +204,8 @@ func TestSNodeInsertDup(t *testing.T) {
 	n := newSNode()
 	topic := []byte("/finance")
 
+	n.sinsert(topic, 1, "sub1")
 	err := n.sinsert(topic, 1, "sub1")
-	err = n.sinsert(topic, 1, "sub1")
 
 	require.NoError(t, err)
 	require.Equal(t, 1, len(n.snodes))
@@ -525,11 +525,11 @@ func TestRNodeMatch(t *testing.T) {
 }
 
 func TestMemTopicsSubscription(t *testing.T) {
-	Unregister("mem")
+	UnRegister("mem")
 	p := NewMemProvider()
 	Register("mem", p)
 
-	mgr, err := NewManager("mem")
+	mgr, _ := NewManager("mem")
 
 	MaxQosAllowed = 1
 	qos, err := mgr.Subscribe([]byte("sports/tennis/+/stats"), 2, "sub1")
@@ -537,7 +537,7 @@ func TestMemTopicsSubscription(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, int(qos))
 
-	err = mgr.Unsubscribe([]byte("sports/tennis"), "sub1")
+	err = mgr.UnSubscribe([]byte("sports/tennis"), "sub1")
 
 	require.Error(t, err)
 
@@ -555,13 +555,13 @@ func TestMemTopicsSubscription(t *testing.T) {
 	require.Equal(t, 1, len(subs))
 	require.Equal(t, 1, int(qoss[0]))
 
-	err = mgr.Unsubscribe([]byte("sports/tennis/+/stats"), "sub1")
+	err = mgr.UnSubscribe([]byte("sports/tennis/+/stats"), "sub1")
 
 	require.NoError(t, err)
 }
 
 func TestMemTopicsRetained(t *testing.T) {
-	Unregister("mem")
+	UnRegister("mem")
 	p := NewMemProvider()
 	Register("mem", p)
 

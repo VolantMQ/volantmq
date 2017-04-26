@@ -22,7 +22,7 @@ import (
 	"runtime/pprof"
 
 	"github.com/surge/glog"
-	"github.com/surgemq/surgemq/service"
+	"github.com/troian/surgemq/service"
 )
 
 var (
@@ -99,14 +99,14 @@ func main() {
 
 	if len(wsAddr) > 0 || len(wssAddr) > 0 {
 		addr := "tcp://127.0.0.1:1883"
-		AddWebsocketHandler("/mqtt", addr)
+		addWebSocketHandler("/mqtt", addr)
 		/* start a plain websocket listener */
 		if len(wsAddr) > 0 {
-			go ListenAndServeWebsocket(wsAddr)
+			go listenAndServeWebSocket(wsAddr)
 		}
 		/* start a secure websocket listener */
 		if len(wssAddr) > 0 && len(wssCertPath) > 0 && len(wssKeyPath) > 0 {
-			go ListenAndServeWebsocketSecure(wssAddr, wssCertPath, wssKeyPath)
+			go listenAndServeWebSocketSecure(wssAddr, wssCertPath, wssKeyPath)
 		}
 	}
 

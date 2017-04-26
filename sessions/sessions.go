@@ -17,19 +17,19 @@ package sessions
 import (
 	"crypto/rand"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"io"
 )
 
 var (
-	ErrSessionsProviderNotFound = errors.New("Session: Session provider not found")
-	ErrKeyNotAvailable          = errors.New("Session: not item found for key.")
+	//ErrSessionsProviderNotFound = errors.New("Session: Session provider not found")
+	//ErrKeyNotAvailable          = errors.New("Session: not item found for key.")
 
-	providers = make(map[string]SessionsProvider)
+	providers = make(map[string]Provider)
 )
 
-type SessionsProvider interface {
+// Provider interface
+type Provider interface {
 	New(id string) (*Session, error)
 	Get(id string) (*Session, error)
 	Del(id string)
@@ -41,7 +41,7 @@ type SessionsProvider interface {
 // Register makes a session provider available by the provided name.
 // If a Register is called twice with the same name or if the driver is nil,
 // it panics.
-func Register(name string, provider SessionsProvider) {
+func Register(name string, provider Provider) {
 	if provider == nil {
 		panic("session: Register provide is nil")
 	}
@@ -53,14 +53,17 @@ func Register(name string, provider SessionsProvider) {
 	providers[name] = provider
 }
 
-func Unregister(name string) {
+// UnRegister unregister
+func UnRegister(name string) {
 	delete(providers, name)
 }
 
+// Manager interface
 type Manager struct {
-	p SessionsProvider
+	p Provider
 }
 
+// NewManager alloc new
 func NewManager(providerName string) (*Manager, error) {
 	p, ok := providers[providerName]
 	if !ok {
@@ -70,34 +73,40 @@ func NewManager(providerName string) (*Manager, error) {
 	return &Manager{p: p}, nil
 }
 
-func (this *Manager) New(id string) (*Session, error) {
+// New session
+func (m *Manager) New(id string) (*Session, error) {
 	if id == "" {
-		id = this.sessionId()
+		id = m.sessionID()
 	}
-	return this.p.New(id)
+	return m.p.New(id)
 }
 
-func (this *Manager) Get(id string) (*Session, error) {
-	return this.p.Get(id)
+// Get session
+func (m *Manager) Get(id string) (*Session, error) {
+	return m.p.Get(id)
 }
 
-func (this *Manager) Del(id string) {
-	this.p.Del(id)
+// Del session
+func (m *Manager) Del(id string) {
+	m.p.Del(id)
 }
 
-func (this *Manager) Save(id string) error {
-	return this.p.Save(id)
+// Save session
+func (m *Manager) Save(id string) error {
+	return m.p.Save(id)
 }
 
-func (this *Manager) Count() int {
-	return this.p.Count()
+// Count sessions
+func (m *Manager) Count() int {
+	return m.p.Count()
 }
 
-func (this *Manager) Close() error {
-	return this.p.Close()
+// Close manager
+func (m *Manager) Close() error {
+	return m.p.Close()
 }
 
-func (manager *Manager) sessionId() string {
+func (m *Manager) sessionID() string {
 	b := make([]byte, 15)
 	if _, err := io.ReadFull(rand.Reader, b); err != nil {
 		return ""

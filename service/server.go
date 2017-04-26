@@ -33,21 +33,23 @@ import (
 	"github.com/troian/surgemq/topics"
 )
 
+// Errors
 var (
-	ErrInvalidConnectionType  error = errors.New("service: Invalid connection type")
-	ErrInvalidSubscriber      error = errors.New("service: Invalid subscriber")
+	ErrInvalidConnectionType error = errors.New("service: Invalid connection type")
+	//ErrInvalidSubscriber      error = errors.New("service: Invalid subscriber")
 	ErrBufferNotReady         error = errors.New("service: buffer is not ready")
-	ErrBufferInsufficientData error = errors.New("service: buffer has insufficient data.")
+	ErrBufferInsufficientData error = errors.New("service: buffer has insufficient data")
 )
 
+// Default configs
 const (
-	DefaultKeepAlive        = 300
-	DefaultConnectTimeout   = 2
-	DefaultAckTimeout       = 20
-	DefaultTimeoutRetries   = 3
-	DefaultSessionsProvider = "mem"
-	DefaultAuthenticator    = "mockSuccess"
-	DefaultTopicsProvider   = "mem"
+	DefaultKeepAlive        = 300           // DefaultKeepAlive default keep
+	DefaultConnectTimeout   = 2             // DefaultConnectTimeout connect timeout
+	DefaultAckTimeout       = 20            // DefaultAckTimeout ack timeout
+	DefaultTimeoutRetries   = 3             // DefaultTimeoutRetries retries
+	DefaultSessionsProvider = "mem"         // DefaultSessionsProvider default session provider
+	DefaultAuthenticator    = "mockSuccess" // DefaultAuthenticator default auth provider
+	DefaultTopicsProvider   = "mem"         // DefaultTopicsProvider default topics provider
 )
 
 // Server is a library implementation of the MQTT server that, as best it can, complies
@@ -134,6 +136,7 @@ func cloneTLSConfig(cfg *tls.Config) *tls.Config {
 	return cfg.Clone()
 }
 
+// NewServer new server
 func NewServer() *Server {
 	s := Server{
 		quit:     make(chan struct{}),
@@ -143,7 +146,7 @@ func NewServer() *Server {
 	return &s
 }
 
-func (this *Server) serve(l net.Listener) error {
+func (s *Server) serve(l net.Listener) error {
 	defer l.Close()
 
 	var tempDelay time.Duration // how long to sleep on accept failure
@@ -154,7 +157,7 @@ func (this *Server) serve(l net.Listener) error {
 		if err != nil {
 			// http://zhen.org/blog/graceful-shutdown-of-go-net-dot-listeners/
 			select {
-			case <-this.quit:
+			case <-s.quit:
 				return nil
 			default:
 			}
@@ -176,10 +179,9 @@ func (this *Server) serve(l net.Listener) error {
 			return err
 		}
 
-		go this.handleConnection(conn)
+		go s.handleConnection(conn)
 	}
-
-	return nil
+	//return nil
 }
 
 // ListenAndServe listents to connections on the URI requested, and handles any
@@ -187,10 +189,10 @@ func (this *Server) serve(l net.Listener) error {
 // or if there's some critical error that stops the server from running. The URI
 // supplied should be of the form "protocol://host:port" that can be parsed by
 // url.Parse(). For example, an URI could be "tcp://0.0.0.0:1883".
-func (this *Server) ListenAndServe(uri string) error {
-	defer atomic.CompareAndSwapInt32(&this.running, 1, 0)
+func (s *Server) ListenAndServe(uri string) error {
+	defer atomic.CompareAndSwapInt32(&s.running, 1, 0)
 
-	if !atomic.CompareAndSwapInt32(&this.running, 0, 1) {
+	if !atomic.CompareAndSwapInt32(&s.running, 0, 1) {
 		return fmt.Errorf("server/ListenAndServe: Server is already running")
 	}
 
@@ -199,17 +201,18 @@ func (this *Server) ListenAndServe(uri string) error {
 		return err
 	}
 
-	this.waitServers.Add(1)
-	defer this.waitServers.Done()
+	s.waitServers.Add(1)
 
-	this.ln, err = net.Listen(u.Scheme, u.Host)
+	defer s.waitServers.Done()
+
+	s.ln, err = net.Listen(u.Scheme, u.Host)
 	if err != nil {
 		return err
 	}
 
 	glog.Infof("server/ListenAndServe: server is ready...")
 
-	return this.serve(this.ln)
+	return s.serve(s.ln)
 }
 
 // ListenAndServeTLS listents to connections on the URI requested, and handles any
@@ -217,10 +220,10 @@ func (this *Server) ListenAndServe(uri string) error {
 // or if there's some critical error that stops the server from running. The URI
 // supplied should be of the form "protocol://host:port" that can be parsed by
 // url.Parse(). For example, an URI could be "tcp://0.0.0.0:8883".
-func (this *Server) ListenAndServeTLS(uri string, certFile, keyFile string) error {
-	defer atomic.CompareAndSwapInt32(&this.runningTLS, 1, 0)
+func (s *Server) ListenAndServeTLS(uri string, certFile, keyFile string) error {
+	defer atomic.CompareAndSwapInt32(&s.runningTLS, 1, 0)
 
-	if !atomic.CompareAndSwapInt32(&this.runningTLS, 0, 1) {
+	if !atomic.CompareAndSwapInt32(&s.runningTLS, 0, 1) {
 		return fmt.Errorf("server/ListenAndServeTLS: Server is already running")
 	}
 
@@ -229,10 +232,9 @@ func (this *Server) ListenAndServeTLS(uri string, certFile, keyFile string) erro
 		return err
 	}
 
-	config := cloneTLSConfig(this.tlsConfig)
+	config := cloneTLSConfig(s.tlsConfig)
 	configHasCert := len(config.Certificates) > 0 || config.GetCertificate != nil
 	if !configHasCert || certFile != "" || keyFile != "" {
-		var err error
 		config.Certificates = make([]tls.Certificate, 1)
 		config.Certificates[0], err = tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
@@ -240,19 +242,21 @@ func (this *Server) ListenAndServeTLS(uri string, certFile, keyFile string) erro
 		}
 	}
 
-	this.waitServers.Add(1)
-	defer this.waitServers.Done()
+	s.waitServers.Add(1)
+	defer s.waitServers.Done()
 
-	ln, err := net.Listen(u.Scheme, u.Host)
+	var ln net.Listener
+
+	ln, err = net.Listen(u.Scheme, u.Host)
 	if err != nil {
 		return err
 	}
 
-	this.lnTLS = tls.NewListener(ln, config)
+	s.lnTLS = tls.NewListener(ln, config)
 
 	glog.Infof("server/ListenAndServeTLS: server is ready...")
 
-	return this.serve(this.lnTLS)
+	return s.serve(s.lnTLS)
 }
 
 // Publish sends a single MQTT PUBLISH message to the server. On completion, the
@@ -260,30 +264,32 @@ func (this *Server) ListenAndServeTLS(uri string, certFile, keyFile string) erro
 // immediately after the message is sent to the outgoing buffer. For QOS 1 messages,
 // onComplete is called when PUBACK is received. For QOS 2 messages, onComplete is
 // called after the PUBCOMP message is received.
-func (this *Server) Publish(msg *message.PublishMessage, onComplete OnCompleteFunc) error {
-	if err := this.checkConfiguration(); err != nil {
+func (s *Server) Publish(msg *message.PublishMessage, onComplete OnCompleteFunc) error {
+	if err := s.checkConfiguration(); err != nil {
 		return err
 	}
 
 	if msg.Retain() {
-		if err := this.topicsMgr.Retain(msg); err != nil {
+		if err := s.topicsMgr.Retain(msg); err != nil {
 			glog.Errorf("Error retaining message: %v", err)
 		}
 	}
 
-	if err := this.topicsMgr.Subscribers(msg.Topic(), msg.QoS(), &this.subs, &this.qoss); err != nil {
+	if err := s.topicsMgr.Subscribers(msg.Topic(), msg.QoS(), &s.subs, &s.qoss); err != nil {
 		return err
 	}
 
 	msg.SetRetain(false)
 
 	//glog.Debugf("(server) Publishing to topic %q and %d subscribers", string(msg.Topic()), len(this.subs))
-	for _, s := range this.subs {
+	for _, s := range s.subs {
 		if s != nil {
 			if fn, ok := s.(*OnPublishFunc); !ok {
 				glog.Errorf("Invalid onPublish Function")
 			} else {
-				(*fn)(msg)
+				if err := (*fn)(msg); err != nil {
+					glog.Errorf("Error onPublish Function")
+				}
 			}
 		}
 	}
@@ -293,41 +299,41 @@ func (this *Server) Publish(msg *message.PublishMessage, onComplete OnCompleteFu
 
 // Close terminates the server by shutting down all the client connections and closing
 // the listener. It will, as best it can, clean up after itself.
-func (this *Server) Close() error {
+func (s *Server) Close() error {
 	// By closing the quit channel, we are telling the server to stop accepting new
 	// connection.
-	close(this.quit)
+	close(s.quit)
 
 	// We then close the net.Listener, which will force Accept() to return if it's
 	// blocked waiting for new connections.
-	if this.ln != nil {
-		this.ln.Close()
+	if s.ln != nil {
+		s.ln.Close()
 	}
 
-	if this.lnTLS != nil {
-		this.lnTLS.Close()
+	if s.lnTLS != nil {
+		s.lnTLS.Close()
 	}
 
-	this.waitServers.Wait()
+	s.waitServers.Wait()
 
-	for _, svc := range this.svcs {
+	for _, svc := range s.svcs {
 		glog.Infof("Stopping service %d", svc.id)
 		svc.stop()
 	}
 
-	if this.sessMgr != nil {
-		this.sessMgr.Close()
+	if s.sessMgr != nil {
+		s.sessMgr.Close()
 	}
 
-	if this.topicsMgr != nil {
-		this.topicsMgr.Close()
+	if s.topicsMgr != nil {
+		s.topicsMgr.Close()
 	}
 
 	return nil
 }
 
 // HandleConnection is for the broker to handle an incoming connection from a client
-func (this *Server) handleConnection(c io.Closer) (svc *service, err error) {
+func (s *Server) handleConnection(c io.Closer) (svc *service, err error) {
 	if c == nil {
 		return nil, ErrInvalidConnectionType
 	}
@@ -338,7 +344,7 @@ func (this *Server) handleConnection(c io.Closer) (svc *service, err error) {
 		}
 	}()
 
-	err = this.checkConfiguration()
+	err = s.checkConfiguration()
 	if err != nil {
 		return nil, err
 	}
@@ -361,7 +367,7 @@ func (this *Server) handleConnection(c io.Closer) (svc *service, err error) {
 	// a CONNACK error. If it's CONNACK error, send the proper CONNACK error back
 	// to client. Exit regardless of error type.
 
-	conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(this.ConnectTimeout)))
+	conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(s.ConnectTimeout)))
 
 	resp := message.NewConnackMessage()
 
@@ -380,8 +386,8 @@ func (this *Server) handleConnection(c io.Closer) (svc *service, err error) {
 	// Go through all of authenticators
 	authenticated := false
 
-	for i := range this.authMgrs {
-		if err = this.authMgrs[i].Authenticate(string(req.Username()), string(req.Password())); err == nil {
+	for i := range s.authMgrs {
+		if err = s.authMgrs[i].Authenticate(string(req.Username()), string(req.Password())); err == nil {
 			authenticated = true
 			break
 		}
@@ -403,16 +409,16 @@ func (this *Server) handleConnection(c io.Closer) (svc *service, err error) {
 		client: false,
 
 		keepAlive:      int(req.KeepAlive()),
-		connectTimeout: this.ConnectTimeout,
-		ackTimeout:     this.AckTimeout,
-		timeoutRetries: this.TimeoutRetries,
+		connectTimeout: s.ConnectTimeout,
+		ackTimeout:     s.AckTimeout,
+		timeoutRetries: s.TimeoutRetries,
 
 		conn:      conn,
-		sessMgr:   this.sessMgr,
-		topicsMgr: this.topicsMgr,
+		sessMgr:   s.sessMgr,
+		topicsMgr: s.topicsMgr,
 	}
 
-	err = this.getSession(svc, req, resp)
+	err = s.getSession(svc, req, resp)
 	if err != nil {
 		return nil, err
 	}
@@ -440,54 +446,55 @@ func (this *Server) handleConnection(c io.Closer) (svc *service, err error) {
 	return svc, nil
 }
 
-func (this *Server) checkConfiguration() error {
+func (s *Server) checkConfiguration() error {
 	var err error
 
-	this.configOnce.Do(func() {
-		if this.KeepAlive == 0 {
-			this.KeepAlive = DefaultKeepAlive
+	s.configOnce.Do(func() {
+		if s.KeepAlive == 0 {
+			s.KeepAlive = DefaultKeepAlive
 		}
 
-		if this.ConnectTimeout == 0 {
-			this.ConnectTimeout = DefaultConnectTimeout
+		if s.ConnectTimeout == 0 {
+			s.ConnectTimeout = DefaultConnectTimeout
 		}
 
-		if this.AckTimeout == 0 {
-			this.AckTimeout = DefaultAckTimeout
+		if s.AckTimeout == 0 {
+			s.AckTimeout = DefaultAckTimeout
 		}
 
-		if this.TimeoutRetries == 0 {
-			this.TimeoutRetries = DefaultTimeoutRetries
+		if s.TimeoutRetries == 0 {
+			s.TimeoutRetries = DefaultTimeoutRetries
 		}
 
-		if this.Authenticators == "" {
-			this.Authenticators = "mockSuccess"
+		if s.Authenticators == "" {
+			s.Authenticators = "mockSuccess"
 		}
 
-		authenticators := strings.Split(this.Authenticators, ";")
+		authenticators := strings.Split(s.Authenticators, ";")
 		for i, a := range authenticators {
-			if mngr, err := auth.NewManager(a); err != nil {
+			mngr, err := auth.NewManager(a)
+			if err != nil {
 				glog.Errorf("Couldn't register authenticator [%s]. %v", a, err)
 				return
-			} else {
-				this.authMgrs[i] = mngr
 			}
+
+			s.authMgrs[i] = mngr
 		}
 
-		if this.SessionsProvider == "" {
-			this.SessionsProvider = "mem"
+		if s.SessionsProvider == "" {
+			s.SessionsProvider = "mem"
 		}
 
-		this.sessMgr, err = sessions.NewManager(this.SessionsProvider)
+		s.sessMgr, err = sessions.NewManager(s.SessionsProvider)
 		if err != nil {
 			return
 		}
 
-		if this.TopicsProvider == "" {
-			this.TopicsProvider = "mem"
+		if s.TopicsProvider == "" {
+			s.TopicsProvider = "mem"
 		}
 
-		this.topicsMgr, err = topics.NewManager(this.TopicsProvider)
+		s.topicsMgr, err = topics.NewManager(s.TopicsProvider)
 
 		return
 	})
@@ -495,7 +502,7 @@ func (this *Server) checkConfiguration() error {
 	return err
 }
 
-func (this *Server) getSession(svc *service, req *message.ConnectMessage, resp *message.ConnackMessage) error {
+func (s *Server) getSession(svc *service, req *message.ConnectMessage, resp *message.ConnackMessage) error {
 	// If CleanSession is set to 0, the server MUST resume communications with the
 	// client based on state from the current session, as identified by the client
 	// identifier. If there is no session associated with the client identifier the
@@ -520,7 +527,7 @@ func (this *Server) getSession(svc *service, req *message.ConnectMessage, resp *
 	// If CleanSession is NOT set, check the session store for existing session.
 	// If found, return it.
 	if !req.CleanSession() {
-		if svc.sess, err = this.sessMgr.Get(cid); err == nil {
+		if svc.sess, err = s.sessMgr.Get(cid); err == nil {
 			resp.SetSessionPresent(true)
 
 			if err := svc.sess.Update(req); err != nil {
@@ -531,7 +538,7 @@ func (this *Server) getSession(svc *service, req *message.ConnectMessage, resp *
 
 	// If CleanSession, or no existing session found, then create a new one
 	if svc.sess == nil {
-		if svc.sess, err = this.sessMgr.New(cid); err != nil {
+		if svc.sess, err = s.sessMgr.New(cid); err != nil {
 			return err
 		}
 

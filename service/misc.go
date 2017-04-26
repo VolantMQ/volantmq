@@ -78,10 +78,10 @@ func getMessageBuffer(c io.Closer) ([]byte, error) {
 		buf []byte
 
 		// tmp buffer to read a single byte
-		b []byte = make([]byte, 1)
+		b = make([]byte, 1)
 
 		// total bytes read
-		l int = 0
+		l int
 	)
 
 	// Let's read enough bytes to get the message header (msg type, remaining length)
@@ -142,7 +142,7 @@ func writeMessageBuffer(c io.Closer, b []byte) error {
 }
 
 // Copied from http://golang.org/src/pkg/net/timeout_test.go
-func isTimeout(err error) bool {
-	e, ok := err.(net.Error)
-	return ok && e.Timeout()
-}
+//func isTimeout(err error) bool {
+//	e, ok := err.(net.Error)
+//	return ok && e.Timeout()
+//}

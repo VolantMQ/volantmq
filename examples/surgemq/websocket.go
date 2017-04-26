@@ -9,14 +9,14 @@ import (
 	"net/url"
 )
 
-func DefaultListenAndServeWebsocket() error {
-	if err := AddWebsocketHandler("/mqtt", "test.mosquitto.org:1883"); err != nil {
-		return err
-	}
-	return ListenAndServeWebsocket(":1234")
-}
+//func DefaultListenAndServeWebsocket() error {
+//	if err := AddWebsocketHandler("/mqtt", "test.mosquitto.org:1883"); err != nil {
+//		return err
+//	}
+//	return ListenAndServeWebsocket(":1234")
+//}
 
-func AddWebsocketHandler(urlPattern string, uri string) error {
+func addWebSocketHandler(urlPattern string, uri string) error {
 	glog.Debugf("AddWebsocketHandler urlPattern=%s, uri=%s", urlPattern, uri)
 	u, err := url.Parse(uri)
 	if err != nil {
@@ -25,24 +25,24 @@ func AddWebsocketHandler(urlPattern string, uri string) error {
 	}
 
 	h := func(ws *websocket.Conn) {
-		WebsocketTcpProxy(ws, u.Scheme, u.Host)
+		webSocketTCPProxy(ws, u.Scheme, u.Host)
 	}
 	http.Handle(urlPattern, websocket.Handler(h))
 	return nil
 }
 
 /* start a listener that proxies websocket <-> tcp */
-func ListenAndServeWebsocket(addr string) error {
+func listenAndServeWebSocket(addr string) error {
 	return http.ListenAndServe(addr, nil)
 }
 
 /* starts an HTTPS listener */
-func ListenAndServeWebsocketSecure(addr string, cert string, key string) error {
+func listenAndServeWebSocketSecure(addr string, cert string, key string) error {
 	return http.ListenAndServeTLS(addr, cert, key, nil)
 }
 
 /* copy from websocket to writer, this copies the binary frames as is */
-func io_copy_ws(src *websocket.Conn, dst io.Writer) (int, error) {
+func ioCopyWs(src *websocket.Conn, dst io.Writer) (int, error) {
 	var buffer []byte
 	count := 0
 	for {
@@ -57,11 +57,11 @@ func io_copy_ws(src *websocket.Conn, dst io.Writer) (int, error) {
 			return count, err
 		}
 	}
-	return count, nil
+	//	return count, nil
 }
 
 /* copy from reader to websocket, this copies the binary frames as is */
-func io_ws_copy(src io.Reader, dst *websocket.Conn) (int, error) {
+func ioWsCopy(src io.Reader, dst *websocket.Conn) (int, error) {
 	buffer := make([]byte, 2048)
 	count := 0
 	for {
@@ -75,11 +75,12 @@ func io_ws_copy(src io.Reader, dst *websocket.Conn) (int, error) {
 			return count, err
 		}
 	}
-	return count, nil
+
+	//	return count, nil
 }
 
 /* handler that proxies websocket <-> unix domain socket */
-func WebsocketTcpProxy(ws *websocket.Conn, nettype string, host string) error {
+func webSocketTCPProxy(ws *websocket.Conn, nettype string, host string) error {
 	client, err := net.Dial(nettype, host)
 	if err != nil {
 		return err
@@ -89,11 +90,11 @@ func WebsocketTcpProxy(ws *websocket.Conn, nettype string, host string) error {
 	chDone := make(chan bool)
 
 	go func() {
-		io_ws_copy(client, ws)
+		ioWsCopy(client, ws)
 		chDone <- true
 	}()
 	go func() {
-		io_copy_ws(ws, client)
+		ioCopyWs(ws, client)
 		chDone <- true
 	}()
 	<-chDone

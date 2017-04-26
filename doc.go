@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// SurgeMQ is a high performance MQTT broker and client library that aims to be
+// Package surgemq is a high performance MQTT broker and client library that aims to be
 // fully compliant with MQTT 3.1 and 3.1.1 specs.
 //
 // The primary package that's of interest is package service. It provides the

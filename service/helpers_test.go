@@ -27,12 +27,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/surge/glog"
 	"github.com/surgemq/message"
-	"github.com/surgemq/surgemq/sessions"
-	"github.com/surgemq/surgemq/topics"
+	"github.com/troian/surgemq/sessions"
+	"github.com/troian/surgemq/topics"
 )
 
 var (
-	gTestClientId uint64 = 0
+	gTestClientID uint64
 )
 
 func runClientServerTests(t testing.TB, f func(*Client)) {
@@ -56,7 +56,7 @@ func runClientServerTests(t testing.TB, f func(*Client)) {
 		return
 	}
 
-	defer topics.Unregister(c.svc.sess.ID())
+	defer topics.UnRegister(c.svc.sess.ID())
 
 	if f != nil {
 		f(c)
@@ -72,11 +72,11 @@ func runClientServerTests(t testing.TB, f func(*Client)) {
 func startServiceN(t testing.TB, u *url.URL, wg *sync.WaitGroup, ready1, ready2 chan struct{}, cnt int) {
 	defer wg.Done()
 
-	topics.Unregister("mem")
+	topics.UnRegister("mem")
 	tp := topics.NewMemProvider()
 	topics.Register("mem", tp)
 
-	sessions.Unregister("mem")
+	sessions.UnRegister("mem")
 	sp := sessions.NewMemProvider()
 	sessions.Register("mem", sp)
 
@@ -87,7 +87,7 @@ func startServiceN(t testing.TB, u *url.URL, wg *sync.WaitGroup, ready1, ready2 
 	close(ready1)
 
 	svr := &Server{
-		Authenticator: authenticator,
+		Authenticators: authenticator,
 	}
 
 	for i := 0; i < cnt; i++ {
@@ -98,9 +98,9 @@ func startServiceN(t testing.TB, u *url.URL, wg *sync.WaitGroup, ready1, ready2 
 		if authenticator == "mockFailure" {
 			require.Error(t, err)
 			return
-		} else {
-			require.NoError(t, err)
 		}
+
+		require.NoError(t, err)
 	}
 
 	<-ready2
@@ -125,9 +125,9 @@ func connectToServer(t testing.TB, uri string) *Client {
 	if authenticator == "mockFailure" {
 		require.Error(t, err)
 		return nil
-	} else {
-		require.NoError(t, err)
 	}
+
+	require.NoError(t, err)
 
 	return c
 }
@@ -178,7 +178,7 @@ func newConnectMessage() *message.ConnectMessage {
 	msg.SetWillQos(1)
 	msg.SetVersion(4)
 	msg.SetCleanSession(true)
-	msg.SetClientId([]byte(fmt.Sprintf("surgemq%d", atomic.AddUint64(&gTestClientId, 1))))
+	msg.SetClientId([]byte(fmt.Sprintf("surgemq%d", atomic.AddUint64(&gTestClientID, 1))))
 	msg.SetKeepAlive(10)
 	msg.SetWillTopic([]byte("will"))
 	msg.SetWillMessage([]byte("send me home"))

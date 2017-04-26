@@ -23,22 +23,22 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/surgemq/message"
-	"github.com/surgemq/surgemq/service"
+	"github.com/troian/surgemq/service"
 )
 
 var (
-	messages    int    = 100000
-	publishers  int    = 1
-	subscribers int    = 1
-	size        int    = 1024
-	topic       []byte = []byte("test")
-	qos         byte   = 0
-	nap         int    = 10
-	host        string = "127.0.0.1"
-	port        int    = 1883
-	user        string = "surgemq"
-	pass        string = "surgemq"
-	version     int    = 4
+	messages    = 100000
+	publishers  = 1
+	subscribers = 1
+	size        = 1024
+	topic       = []byte("test")
+	qos         = byte(0)
+	nap         = 10
+	host        = "127.0.0.1"
+	port        = 1883
+	user        = "surgemq"
+	pass        = "surgemq"
+	version     = 4
 
 	subdone, rcvdone, sentdone int64
 

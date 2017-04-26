@@ -19,17 +19,20 @@ import (
 	"fmt"
 )
 
+// Auth errors
 var (
-	ErrAuthFailure          = errors.New("auth: Authentication failure")
-	ErrAuthProviderNotFound = errors.New("auth: Authentication provider not found")
+	ErrAuthFailure = errors.New("auth: Authentication failure")
+	//	ErrAuthProviderNotFound = errors.New("auth: Authentication provider not found")
 
 	providers = make(map[string]Authenticator)
 )
 
+// Authenticator interface
 type Authenticator interface {
 	Authenticate(id string, cred interface{}) error
 }
 
+// Register authenticator
 func Register(name string, provider Authenticator) {
 	if provider == nil {
 		panic("auth: Register provide is nil")
@@ -42,14 +45,17 @@ func Register(name string, provider Authenticator) {
 	providers[name] = provider
 }
 
-func Unregister(name string) {
+// UnRegister authenticator
+func UnRegister(name string) {
 	delete(providers, name)
 }
 
+// Manager auth
 type Manager struct {
 	p Authenticator
 }
 
+// NewManager new auth manager
 func NewManager(providerName string) (*Manager, error) {
 	p, ok := providers[providerName]
 	if !ok {
@@ -59,6 +65,7 @@ func NewManager(providerName string) (*Manager, error) {
 	return &Manager{p: p}, nil
 }
 
-func (this *Manager) Authenticate(id string, cred interface{}) error {
-	return this.p.Authenticate(id, cred)
+// Authenticate over manager
+func (m *Manager) Authenticate(id string, cred interface{}) error {
+	return m.p.Authenticate(id, cred)
 }

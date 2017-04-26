@@ -23,7 +23,6 @@
 package topics
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/surgemq/message"
@@ -37,37 +36,38 @@ const (
 	SWC = "+"
 
 	// SEP is the topic level separator
-	SEP = "/"
+	//SEP = "/"
 
 	// SYS is the starting character of the system level topics
-	SYS = "$"
+	//SYS = "$"
 
 	// Both wildcards
-	_WC = "#+"
+	//_WC = "#+"
 )
 
 var (
 	// ErrAuthFailure is returned when the user/pass supplied are invalid
-	ErrAuthFailure = errors.New("auth: Authentication failure")
+	//ErrAuthFailure = errors.New("auth: Authentication failure")
 
 	// ErrAuthProviderNotFound is returned when the requested provider does not exist.
 	// It probably hasn't been registered yet.
-	ErrAuthProviderNotFound = errors.New("auth: Authentication provider not found")
+	//ErrAuthProviderNotFound = errors.New("auth: Authentication provider not found")
 
-	providers = make(map[string]TopicsProvider)
+	providers = make(map[string]Provider)
 )
 
-// TopicsProvider
-type TopicsProvider interface {
+// Provider interface
+type Provider interface {
 	Subscribe(topic []byte, qos byte, subscriber interface{}) (byte, error)
-	Unsubscribe(topic []byte, subscriber interface{}) error
+	UnSubscribe(topic []byte, subscriber interface{}) error
 	Subscribers(topic []byte, qos byte, subs *[]interface{}, qoss *[]byte) error
 	Retain(msg *message.PublishMessage) error
 	Retained(topic []byte, msgs *[]*message.PublishMessage) error
 	Close() error
 }
 
-func Register(name string, provider TopicsProvider) {
+// Register topic provider
+func Register(name string, provider Provider) {
 	if provider == nil {
 		panic("topics: Register provide is nil")
 	}
@@ -79,14 +79,17 @@ func Register(name string, provider TopicsProvider) {
 	providers[name] = provider
 }
 
-func Unregister(name string) {
+// UnRegister topic provider
+func UnRegister(name string) {
 	delete(providers, name)
 }
 
+// Manager of topics
 type Manager struct {
-	p TopicsProvider
+	p Provider
 }
 
+// NewManager add new manager
 func NewManager(providerName string) (*Manager, error) {
 	p, ok := providers[providerName]
 	if !ok {
@@ -96,26 +99,32 @@ func NewManager(providerName string) (*Manager, error) {
 	return &Manager{p: p}, nil
 }
 
-func (this *Manager) Subscribe(topic []byte, qos byte, subscriber interface{}) (byte, error) {
-	return this.p.Subscribe(topic, qos, subscriber)
+// Subscribe to topic
+func (m *Manager) Subscribe(topic []byte, qos byte, subscriber interface{}) (byte, error) {
+	return m.p.Subscribe(topic, qos, subscriber)
 }
 
-func (this *Manager) Unsubscribe(topic []byte, subscriber interface{}) error {
-	return this.p.Unsubscribe(topic, subscriber)
+// UnSubscribe from topic
+func (m *Manager) UnSubscribe(topic []byte, subscriber interface{}) error {
+	return m.p.UnSubscribe(topic, subscriber)
 }
 
-func (this *Manager) Subscribers(topic []byte, qos byte, subs *[]interface{}, qoss *[]byte) error {
-	return this.p.Subscribers(topic, qos, subs, qoss)
+// Subscribers get
+func (m *Manager) Subscribers(topic []byte, qos byte, subs *[]interface{}, qoss *[]byte) error {
+	return m.p.Subscribers(topic, qos, subs, qoss)
 }
 
-func (this *Manager) Retain(msg *message.PublishMessage) error {
-	return this.p.Retain(msg)
+// Retain messages
+func (m *Manager) Retain(msg *message.PublishMessage) error {
+	return m.p.Retain(msg)
 }
 
-func (this *Manager) Retained(topic []byte, msgs *[]*message.PublishMessage) error {
-	return this.p.Retained(topic, msgs)
+// Retained messages
+func (m *Manager) Retained(topic []byte, msgs *[]*message.PublishMessage) error {
+	return m.p.Retained(topic, msgs)
 }
 
-func (this *Manager) Close() error {
-	return this.p.Close()
+// Close manager
+func (m *Manager) Close() error {
+	return m.p.Close()
 }

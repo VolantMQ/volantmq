@@ -65,28 +65,27 @@ import (
 	"log"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/surge/netx"
 	"github.com/surgemq/message"
-	"github.com/surgemq/surgemq/service"
+	"github.com/troian/surgemq/service"
 )
 
 type strlist []string
 
-func (this *strlist) String() string {
-	return fmt.Sprint(*this)
+func (sl *strlist) String() string {
+	return fmt.Sprint(*sl)
 }
 
-func (this *strlist) Type() string {
+func (sl *strlist) Type() string {
 	return "strlist"
 }
 
-func (this *strlist) Set(value string) error {
+func (sl *strlist) Set(value string) error {
 	for _, ip := range strings.Split(value, ",") {
-		*this = append(*this, ip)
+		*sl = append(*sl, ip)
 	}
 
 	return nil
@@ -96,7 +95,7 @@ var (
 	pingmqCmd = &cobra.Command{
 		Use:   "pingmq",
 		Short: "Pingmq is a program designed to demonstrate the SurgeMQ usage.",
-		Long: `Pingmq demonstrates the use of SurgeMQ by pinging a list of hosts, 
+		Long: `Pingmq demonstrates the use of SurgeMQ by pinging a list of hosts,
 publishing the result to any clients subscribed to two topics:
 /ping/success/{ip} and /ping/failure/{ip}.`,
 	}
@@ -124,7 +123,7 @@ publishing the result to any clients subscribed to two topics:
 	c *service.Client
 	p *netx.Pinger
 
-	wg sync.WaitGroup
+	//wg sync.WaitGroup
 
 	done chan struct{}
 )
@@ -202,7 +201,7 @@ func server(cmd *cobra.Command, args []string) {
 		KeepAlive:        300,           // seconds
 		ConnectTimeout:   2,             // seconds
 		SessionsProvider: "mem",         // keeps sessions in memory
-		Authenticator:    "mockSuccess", // always succeed
+		Authenticators:   "mockSuccess", // always succeed
 		TopicsProvider:   "mem",         // keeps topic subscriptions in memory
 	}
 

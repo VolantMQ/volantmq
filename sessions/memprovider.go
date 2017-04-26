@@ -19,36 +19,35 @@ import (
 	"sync"
 )
 
-var _ SessionsProvider = (*memProvider)(nil)
-
-func init() {
-	Register("mem", NewMemProvider())
-}
-
 type memProvider struct {
 	st map[string]*Session
 	mu sync.RWMutex
 }
 
-func NewMemProvider() *memProvider {
+func init() {
+	Register("mem", NewMemProvider())
+}
+
+// NewMemProvider new provider
+func NewMemProvider() Provider {
 	return &memProvider{
 		st: make(map[string]*Session),
 	}
 }
 
-func (this *memProvider) New(id string) (*Session, error) {
-	this.mu.Lock()
-	defer this.mu.Unlock()
+func (m *memProvider) New(id string) (*Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	this.st[id] = &Session{id: id}
-	return this.st[id], nil
+	m.st[id] = &Session{id: id}
+	return m.st[id], nil
 }
 
-func (this *memProvider) Get(id string) (*Session, error) {
-	this.mu.RLock()
-	defer this.mu.RUnlock()
+func (m *memProvider) Get(id string) (*Session, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
-	sess, ok := this.st[id]
+	sess, ok := m.st[id]
 	if !ok {
 		return nil, fmt.Errorf("store/Get: No session found for key %s", id)
 	}
@@ -56,21 +55,21 @@ func (this *memProvider) Get(id string) (*Session, error) {
 	return sess, nil
 }
 
-func (this *memProvider) Del(id string) {
-	this.mu.Lock()
-	defer this.mu.Unlock()
-	delete(this.st, id)
+func (m *memProvider) Del(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.st, id)
 }
 
-func (this *memProvider) Save(id string) error {
+func (m *memProvider) Save(id string) error {
 	return nil
 }
 
-func (this *memProvider) Count() int {
-	return len(this.st)
+func (m *memProvider) Count() int {
+	return len(m.st)
 }
 
-func (this *memProvider) Close() error {
-	this.st = make(map[string]*Session)
+func (m *memProvider) Close() error {
+	m.st = make(map[string]*Session)
 	return nil
 }

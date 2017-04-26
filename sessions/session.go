@@ -26,6 +26,7 @@ const (
 	defaultQueueSize = 16
 )
 
+// Session session
 type Session struct {
 	// Ack queue for outgoing PUBLISH QoS 1 messages
 	Pub1ack *Ackqueue
@@ -72,116 +73,122 @@ type Session struct {
 	id string
 }
 
-func (this *Session) Init(msg *message.ConnectMessage) error {
-	this.mu.Lock()
-	defer this.mu.Unlock()
+// Init message
+func (s *Session) Init(msg *message.ConnectMessage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	if this.initted {
+	if s.initted {
 		return fmt.Errorf("Session already initialized")
 	}
 
-	this.cbuf = make([]byte, msg.Len())
-	this.Cmsg = message.NewConnectMessage()
+	s.cbuf = make([]byte, msg.Len())
+	s.Cmsg = message.NewConnectMessage()
 
-	if _, err := msg.Encode(this.cbuf); err != nil {
+	if _, err := msg.Encode(s.cbuf); err != nil {
 		return err
 	}
 
-	if _, err := this.Cmsg.Decode(this.cbuf); err != nil {
+	if _, err := s.Cmsg.Decode(s.cbuf); err != nil {
 		return err
 	}
 
-	if this.Cmsg.WillFlag() {
-		this.Will = message.NewPublishMessage()
-		this.Will.SetQoS(this.Cmsg.WillQos())
-		this.Will.SetTopic(this.Cmsg.WillTopic())
-		this.Will.SetPayload(this.Cmsg.WillMessage())
-		this.Will.SetRetain(this.Cmsg.WillRetain())
+	if s.Cmsg.WillFlag() {
+		s.Will = message.NewPublishMessage()
+		s.Will.SetQoS(s.Cmsg.WillQos())
+		s.Will.SetTopic(s.Cmsg.WillTopic())
+		s.Will.SetPayload(s.Cmsg.WillMessage())
+		s.Will.SetRetain(s.Cmsg.WillRetain())
 	}
 
-	this.topics = make(map[string]byte, 1)
+	s.topics = make(map[string]byte, 1)
 
-	this.id = string(msg.ClientId())
+	s.id = string(msg.ClientId())
 
-	this.Pub1ack = newAckqueue(defaultQueueSize)
-	this.Pub2in = newAckqueue(defaultQueueSize)
-	this.Pub2out = newAckqueue(defaultQueueSize)
-	this.Suback = newAckqueue(defaultQueueSize)
-	this.Unsuback = newAckqueue(defaultQueueSize)
-	this.Pingack = newAckqueue(defaultQueueSize)
+	s.Pub1ack = newAckqueue(defaultQueueSize)
+	s.Pub2in = newAckqueue(defaultQueueSize)
+	s.Pub2out = newAckqueue(defaultQueueSize)
+	s.Suback = newAckqueue(defaultQueueSize)
+	s.Unsuback = newAckqueue(defaultQueueSize)
+	s.Pingack = newAckqueue(defaultQueueSize)
 
-	this.initted = true
+	s.initted = true
 
 	return nil
 }
 
-func (this *Session) Update(msg *message.ConnectMessage) error {
-	this.mu.Lock()
-	defer this.mu.Unlock()
+// Update message
+func (s *Session) Update(msg *message.ConnectMessage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	this.cbuf = make([]byte, msg.Len())
-	this.Cmsg = message.NewConnectMessage()
+	s.cbuf = make([]byte, msg.Len())
+	s.Cmsg = message.NewConnectMessage()
 
-	if _, err := msg.Encode(this.cbuf); err != nil {
+	if _, err := msg.Encode(s.cbuf); err != nil {
 		return err
 	}
 
-	if _, err := this.Cmsg.Decode(this.cbuf); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (this *Session) RetainMessage(msg *message.PublishMessage) error {
-	this.mu.Lock()
-	defer this.mu.Unlock()
-
-	this.rbuf = make([]byte, msg.Len())
-	this.Retained = message.NewPublishMessage()
-
-	if _, err := msg.Encode(this.rbuf); err != nil {
-		return err
-	}
-
-	if _, err := this.Retained.Decode(this.rbuf); err != nil {
+	if _, err := s.Cmsg.Decode(s.cbuf); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (this *Session) AddTopic(topic string, qos byte) error {
-	this.mu.Lock()
-	defer this.mu.Unlock()
+// RetainMessage message
+func (s *Session) RetainMessage(msg *message.PublishMessage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	if !this.initted {
+	s.rbuf = make([]byte, msg.Len())
+	s.Retained = message.NewPublishMessage()
+
+	if _, err := msg.Encode(s.rbuf); err != nil {
+		return err
+	}
+
+	if _, err := s.Retained.Decode(s.rbuf); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// AddTopic add topic
+func (s *Session) AddTopic(topic string, qos byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.initted {
 		return fmt.Errorf("Session not yet initialized")
 	}
 
-	this.topics[topic] = qos
+	s.topics[topic] = qos
 
 	return nil
 }
 
-func (this *Session) RemoveTopic(topic string) error {
-	this.mu.Lock()
-	defer this.mu.Unlock()
+// RemoveTopic remove
+func (s *Session) RemoveTopic(topic string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	if !this.initted {
+	if !s.initted {
 		return fmt.Errorf("Session not yet initialized")
 	}
 
-	delete(this.topics, topic)
+	delete(s.topics, topic)
 
 	return nil
 }
 
-func (this *Session) Topics() ([]string, []byte, error) {
-	this.mu.Lock()
-	defer this.mu.Unlock()
+// Topics list topics
+func (s *Session) Topics() ([]string, []byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	if !this.initted {
+	if !s.initted {
 		return nil, nil, fmt.Errorf("Session not yet initialized")
 	}
 
@@ -190,7 +197,7 @@ func (this *Session) Topics() ([]string, []byte, error) {
 		qoss   []byte
 	)
 
-	for k, v := range this.topics {
+	for k, v := range s.topics {
 		topics = append(topics, k)
 		qoss = append(qoss, v)
 	}
@@ -198,6 +205,7 @@ func (this *Session) Topics() ([]string, []byte, error) {
 	return topics, qoss, nil
 }
 
-func (this *Session) ID() string {
-	return string(this.Cmsg.ClientId())
+// ID session id
+func (s *Session) ID() string {
+	return string(s.Cmsg.ClientId())
 }

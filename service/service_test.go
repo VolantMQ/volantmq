@@ -25,10 +25,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/surge/glog"
 	"github.com/surgemq/message"
-	"github.com/surgemq/surgemq/topics"
+	"github.com/troian/surgemq/topics"
 )
 
-var authenticator string = "mockSuccess"
+var authenticator = "mockSuccess"
 
 func TestServiceConnectSuccess(t *testing.T) {
 	runClientServerTests(t, nil)
@@ -61,15 +61,15 @@ func TestServiceWillDelivery(t *testing.T) {
 
 	c1 := connectToServer(t, uri)
 	require.NotNil(t, c1)
-	defer topics.Unregister(c1.svc.sess.ID())
+	defer topics.UnRegister(c1.svc.sess.ID())
 
 	c2 := connectToServer(t, uri)
 	require.NotNil(t, c2)
-	defer topics.Unregister(c2.svc.sess.ID())
+	defer topics.UnRegister(c2.svc.sess.ID())
 
 	c3 := connectToServer(t, uri)
 	require.NotNil(t, c3)
-	defer topics.Unregister(c3.svc.sess.ID())
+	defer topics.UnRegister(c3.svc.sess.ID())
 
 	sub := message.NewSubscribeMessage()
 	sub.AddTopic([]byte("will"), 1)
@@ -141,7 +141,7 @@ func TestServiceSubUnsub(t *testing.T) {
 		c.Subscribe(sub,
 			func(msg, ack message.Message, err error) error {
 				unsub := newUnsubscribeMessage()
-				return c.Unsubscribe(unsub, func(msg, ack message.Message, err error) error {
+				return c.UnSubscribe(unsub, func(msg, ack message.Message, err error) error {
 					close(done)
 					return nil
 				})
@@ -177,7 +177,7 @@ func TestServiceSubRetain(t *testing.T) {
 		c.Subscribe(sub,
 			func(msg, ack message.Message, err error) error {
 				unsub := newUnsubscribeMessage()
-				return c.Unsubscribe(unsub, func(msg, ack message.Message, err error) error {
+				return c.UnSubscribe(unsub, func(msg, ack message.Message, err error) error {
 					close(done)
 					return nil
 				})
@@ -358,9 +358,10 @@ func TestServiceSub0Pub1(t *testing.T) {
 			require.FailNow(t, "Timed out waiting for puback messages")
 		}
 
-		select {
-		case <-time.After(time.Millisecond * 300):
-		}
+		//select {
+		//case <-time.After(time.Millisecond * 300):
+		//}
+		<-time.After(time.Millisecond * 300)
 	})
 }
 
@@ -579,9 +580,10 @@ func TestServiceSub1Pub2(t *testing.T) {
 			require.FailNow(t, "Timed out waiting for puback messages")
 		}
 
-		select {
-		case <-time.After(time.Millisecond * 300):
-		}
+		//select {
+		//case <-time.After(time.Millisecond * 300):
+		//}
+		<-time.After(time.Millisecond * 300)
 	})
 }
 

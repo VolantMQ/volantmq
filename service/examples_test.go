@@ -22,7 +22,7 @@ func ExampleServer() {
 		KeepAlive:        300,           // seconds
 		ConnectTimeout:   2,             // seconds
 		SessionsProvider: "mem",         // keeps sessions in memory
-		Authenticator:    "mockSuccess", // always succeed
+		Authenticators:   "mockSuccess", // always succeed
 		TopicsProvider:   "mem",         // keeps topic subscriptions in memory
 	}
 

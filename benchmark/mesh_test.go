@@ -23,7 +23,7 @@ import (
 
 	"github.com/surge/glog"
 	"github.com/surgemq/message"
-	"github.com/surgemq/surgemq/service"
+	"github.com/troian/surgemq/service"
 )
 
 // Usage: go test -run=Mesh
@@ -118,17 +118,17 @@ func startMeshClient(t testing.TB, cid int, wg *sync.WaitGroup) {
 				sent++
 			}
 
-			since := time.Since(now).Nanoseconds()
+			sinceIn := time.Since(now).Nanoseconds()
 
 			statMu.Lock()
 			totalSent += int64(sent)
-			totalSentTime += int64(since)
-			if since > sentSince {
-				sentSince = since
+			totalSentTime += int64(sinceIn)
+			if sinceIn > sentSince {
+				sentSince = sinceIn
 			}
 			statMu.Unlock()
 
-			glog.Debugf("(surgemq%d) Sent %d messages in %d ns, %d ns/msg, %d msgs/sec", cid, sent, since, int(float64(since)/float64(cnt)), int(float64(sent)/(float64(since)/float64(time.Second))))
+			glog.Debugf("(surgemq%d) Sent %d messages in %d ns, %d ns/msg, %d msgs/sec", cid, sent, sinceIn, int(float64(sinceIn)/float64(cnt)), int(float64(sent)/(float64(sinceIn)/float64(time.Second))))
 		}()
 
 		select {
