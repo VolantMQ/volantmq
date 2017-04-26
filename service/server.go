@@ -15,6 +15,7 @@
 package service
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -95,7 +96,11 @@ type Server struct {
 	// is closed, then it's a signal for it to shutdown as well.
 	quit chan struct{}
 
-	ln net.Listener
+	ln    net.Listener
+	lnTLS net.Listener
+
+	// optional TLS config, used by ListenAndServeTLS
+	tlsConfig *tls.Config
 
 	// A list of services created by the server. We keep track of them so we can
 	// gracefully shut them down if they are still alive when the server goes down.
@@ -104,14 +109,77 @@ type Server struct {
 	// Mutex for updating svcs
 	mu sync.Mutex
 
-	// A indicator on whether this server is running
+	// A indicator on whether none secure server is running
 	running int32
+
+	// A indicator on whether secure server is running
+	runningTLS int32
 
 	// A indicator on whether this server has already checked configuration
 	configOnce sync.Once
 
 	subs []interface{}
 	qoss []byte
+
+	waitServers sync.WaitGroup
+}
+
+// clneTLSConfig returns a shallow clone of cfg, or a new zero tls.Config if
+// cfg is nil. This is safe to call even if cfg is in active use by a TLS
+// client or server.
+func cloneTLSConfig(cfg *tls.Config) *tls.Config {
+	if cfg == nil {
+		return &tls.Config{}
+	}
+	return cfg.Clone()
+}
+
+func NewServer() *Server {
+	s := Server{
+		quit:     make(chan struct{}),
+		authMgrs: make(map[int]*auth.Manager),
+	}
+
+	return &s
+}
+
+func (this *Server) serve(l net.Listener) error {
+	defer l.Close()
+
+	var tempDelay time.Duration // how long to sleep on accept failure
+
+	for {
+		conn, err := l.Accept()
+
+		if err != nil {
+			// http://zhen.org/blog/graceful-shutdown-of-go-net-dot-listeners/
+			select {
+			case <-this.quit:
+				return nil
+			default:
+			}
+
+			// Borrowed from go1.3.3/src/pkg/net/http/server.go:1699
+			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+				if tempDelay == 0 {
+					tempDelay = 5 * time.Millisecond
+				} else {
+					tempDelay *= 2
+				}
+				if max := 1 * time.Second; tempDelay > max {
+					tempDelay = max
+				}
+				glog.Errorf("Accept error: %v; retrying in %v", err, tempDelay)
+				time.Sleep(tempDelay)
+				continue
+			}
+			return err
+		}
+
+		go this.handleConnection(conn)
+	}
+
+	return nil
 }
 
 // ListenAndServe listents to connections on the URI requested, and handles any
@@ -126,55 +194,65 @@ func (this *Server) ListenAndServe(uri string) error {
 		return fmt.Errorf("server/ListenAndServe: Server is already running")
 	}
 
-	this.quit = make(chan struct{})
-	this.authMgrs = make(map[int]*auth.Manager)
+	u, err := url.Parse(uri)
+	if err != nil {
+		return err
+	}
+
+	this.waitServers.Add(1)
+	defer this.waitServers.Done()
+
+	this.ln, err = net.Listen(u.Scheme, u.Host)
+	if err != nil {
+		return err
+	}
+
+	glog.Infof("server/ListenAndServe: server is ready...")
+
+	return this.serve(this.ln)
+}
+
+// ListenAndServeTLS listents to connections on the URI requested, and handles any
+// incoming MQTT client sessions. It should not return until Close() is called
+// or if there's some critical error that stops the server from running. The URI
+// supplied should be of the form "protocol://host:port" that can be parsed by
+// url.Parse(). For example, an URI could be "tcp://0.0.0.0:8883".
+func (this *Server) ListenAndServeTLS(uri string, certFile, keyFile string) error {
+	defer atomic.CompareAndSwapInt32(&this.runningTLS, 1, 0)
+
+	if !atomic.CompareAndSwapInt32(&this.runningTLS, 0, 1) {
+		return fmt.Errorf("server/ListenAndServeTLS: Server is already running")
+	}
 
 	u, err := url.Parse(uri)
 	if err != nil {
 		return err
 	}
 
-	this.ln, err = net.Listen(u.Scheme, u.Host)
+	config := cloneTLSConfig(this.tlsConfig)
+	configHasCert := len(config.Certificates) > 0 || config.GetCertificate != nil
+	if !configHasCert || certFile != "" || keyFile != "" {
+		var err error
+		config.Certificates = make([]tls.Certificate, 1)
+		config.Certificates[0], err = tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			return err
+		}
+	}
+
+	this.waitServers.Add(1)
+	defer this.waitServers.Done()
+
+	ln, err := net.Listen(u.Scheme, u.Host)
 	if err != nil {
 		return err
 	}
-	defer this.ln.Close()
 
-	glog.Infof("server/ListenAndServe: server is ready...")
+	this.lnTLS = tls.NewListener(ln, config)
 
-	var tempDelay time.Duration // how long to sleep on accept failure
+	glog.Infof("server/ListenAndServeTLS: server is ready...")
 
-	for {
-		conn, err := this.ln.Accept()
-
-		if err != nil {
-			// http://zhen.org/blog/graceful-shutdown-of-go-net-dot-listeners/
-			select {
-			case <-this.quit:
-				return nil
-
-			default:
-			}
-
-			// Borrowed from go1.3.3/src/pkg/net/http/server.go:1699
-			if ne, ok := err.(net.Error); ok && ne.Temporary() {
-				if tempDelay == 0 {
-					tempDelay = 5 * time.Millisecond
-				} else {
-					tempDelay *= 2
-				}
-				if max := 1 * time.Second; tempDelay > max {
-					tempDelay = max
-				}
-				glog.Errorf("server/ListenAndServe: Accept error: %v; retrying in %v", err, tempDelay)
-				time.Sleep(tempDelay)
-				continue
-			}
-			return err
-		}
-
-		go this.handleConnection(conn)
-	}
+	return this.serve(this.lnTLS)
 }
 
 // Publish sends a single MQTT PUBLISH message to the server. On completion, the
@@ -202,8 +280,7 @@ func (this *Server) Publish(msg *message.PublishMessage, onComplete OnCompleteFu
 	//glog.Debugf("(server) Publishing to topic %q and %d subscribers", string(msg.Topic()), len(this.subs))
 	for _, s := range this.subs {
 		if s != nil {
-			fn, ok := s.(*OnPublishFunc)
-			if !ok {
+			if fn, ok := s.(*OnPublishFunc); !ok {
 				glog.Errorf("Invalid onPublish Function")
 			} else {
 				(*fn)(msg)
@@ -223,7 +300,15 @@ func (this *Server) Close() error {
 
 	// We then close the net.Listener, which will force Accept() to return if it's
 	// blocked waiting for new connections.
-	this.ln.Close()
+	if this.ln != nil {
+		this.ln.Close()
+	}
+
+	if this.lnTLS != nil {
+		this.lnTLS.Close()
+	}
+
+	this.waitServers.Wait()
 
 	for _, svc := range this.svcs {
 		glog.Infof("Stopping service %d", svc.id)
