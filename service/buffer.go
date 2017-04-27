@@ -34,13 +34,18 @@ const (
 
 type sequence struct {
 	// The current position of the producer or consumer
-	cursor,
+	cursor int64
 
 	// The previous known position of the consumer (if producer) or producer (if consumer)
-	gate,
+	gate int64
 
 	// These are fillers to pad the cache line, which is generally 64 bytes
-	p2, p3, p4, p5, p6, p7 int64
+	p2 int64
+	p3 int64
+	p4 int64
+	p5 int64
+	p6 int64
+	p7 int64
 }
 
 func newSequence() *sequence {
@@ -66,14 +71,14 @@ type buffer struct {
 
 	done int64
 
-	pseq *sequence
-	cseq *sequence
+	pSeq *sequence
+	cSeq *sequence
 
-	pcond *sync.Cond
-	ccond *sync.Cond
+	pCond *sync.Cond
+	cCond *sync.Cond
 
-	cwait int64
-	pwait int64
+	cWait int64
+	pWait int64
 }
 
 func newBuffer(size int64) (*buffer, error) {
@@ -98,12 +103,12 @@ func newBuffer(size int64) (*buffer, error) {
 		buf:   make([]byte, size),
 		size:  size,
 		mask:  size - 1,
-		pseq:  newSequence(),
-		cseq:  newSequence(),
-		pcond: sync.NewCond(new(sync.Mutex)),
-		ccond: sync.NewCond(new(sync.Mutex)),
-		cwait: 0,
-		pwait: 0,
+		pSeq:  newSequence(),
+		cSeq:  newSequence(),
+		pCond: sync.NewCond(new(sync.Mutex)),
+		cCond: sync.NewCond(new(sync.Mutex)),
+		cWait: 0,
+		pWait: 0,
 	}, nil
 }
 
@@ -114,20 +119,20 @@ func (b *buffer) ID() int64 {
 func (b *buffer) Close() error {
 	atomic.StoreInt64(&b.done, 1)
 
-	b.pcond.L.Lock()
-	b.pcond.Broadcast()
-	b.pcond.L.Unlock()
+	b.pCond.L.Lock()
+	b.pCond.Broadcast()
+	b.pCond.L.Unlock()
 
-	b.pcond.L.Lock()
-	b.ccond.Broadcast()
-	b.pcond.L.Unlock()
+	b.pCond.L.Lock()
+	b.cCond.Broadcast()
+	b.pCond.L.Unlock()
 
 	return nil
 }
 
 func (b *buffer) Len() int {
-	cpos := b.cseq.get()
-	ppos := b.pseq.get()
+	cpos := b.cSeq.get()
+	ppos := b.pSeq.get()
 	return int(ppos - cpos)
 }
 
@@ -211,8 +216,8 @@ func (b *buffer) Read(p []byte) (int, error) {
 	pl := int64(len(p))
 
 	for {
-		cpos := b.cseq.get()
-		ppos := b.pseq.get()
+		cpos := b.cSeq.get()
+		ppos := b.pSeq.get()
 		cindex := cpos & b.mask
 
 		// If consumer position is at least len(p) less than producer position, that means
@@ -227,10 +232,10 @@ func (b *buffer) Read(p []byte) (int, error) {
 		if cpos+pl < ppos {
 			n := copy(p, b.buf[cindex:])
 
-			b.cseq.set(cpos + int64(n))
-			b.pcond.L.Lock()
-			b.pcond.Broadcast()
-			b.pcond.L.Unlock()
+			b.cSeq.set(cpos + int64(n))
+			b.pCond.L.Lock()
+			b.pCond.Broadcast()
+			b.pCond.L.Unlock()
 
 			return n, nil
 		}
@@ -256,26 +261,26 @@ func (b *buffer) Read(p []byte) (int, error) {
 				n = copy(p, b.buf[cindex:])
 			}
 
-			b.cseq.set(cpos + int64(n))
-			b.pcond.L.Lock()
-			b.pcond.Broadcast()
-			b.pcond.L.Unlock()
+			b.cSeq.set(cpos + int64(n))
+			b.pCond.L.Lock()
+			b.pCond.Broadcast()
+			b.pCond.L.Unlock()
 			return n, nil
 		}
 
 		// If we got here, that means cpos >= ppos, which means there's no data available.
 		// If so, let's wait...
 
-		b.ccond.L.Lock()
-		for ppos = b.pseq.get(); cpos >= ppos; ppos = b.pseq.get() {
+		b.cCond.L.Lock()
+		for ppos = b.pSeq.get(); cpos >= ppos; ppos = b.pSeq.get() {
 			if b.isDone() {
 				return 0, io.EOF
 			}
 
-			b.cwait++
-			b.ccond.Wait()
+			b.cWait++
+			b.cCond.Wait()
 		}
-		b.ccond.L.Unlock()
+		b.cCond.L.Unlock()
 	}
 }
 
@@ -293,10 +298,10 @@ func (b *buffer) Write(p []byte) (int, error) {
 	// Let's copy from p into this.buf, starting at position ppos&this.mask.
 	total := ringCopy(b.buf, p, int64(start)&b.mask)
 
-	b.pseq.set(start + int64(len(p)))
-	b.ccond.L.Lock()
-	b.ccond.Broadcast()
-	b.ccond.L.Unlock()
+	b.pSeq.set(start + int64(len(p)))
+	b.cCond.L.Lock()
+	b.cCond.Broadcast()
+	b.cCond.L.Unlock()
 
 	return total, nil
 }
@@ -318,20 +323,20 @@ func (b *buffer) ReadPeek(n int) ([]byte, error) {
 		return nil, bufio.ErrNegativeCount
 	}
 
-	cpos := b.cseq.get()
-	ppos := b.pseq.get()
+	cpos := b.cSeq.get()
+	ppos := b.pSeq.get()
 
 	// If there's no data, then let's wait until there is some data
-	b.ccond.L.Lock()
-	for ; cpos >= ppos; ppos = b.pseq.get() {
+	b.cCond.L.Lock()
+	for ; cpos >= ppos; ppos = b.pSeq.get() {
 		if b.isDone() {
 			return nil, io.EOF
 		}
 
-		b.cwait++
-		b.ccond.Wait()
+		b.cWait++
+		b.cCond.Wait()
 	}
-	b.ccond.L.Unlock()
+	b.cCond.L.Unlock()
 
 	// m = the number of bytes available. If m is more than what's requested (n),
 	// then we make m = n, basically peek max n bytes
@@ -378,23 +383,23 @@ func (b *buffer) ReadWait(n int) ([]byte, error) {
 		return nil, bufio.ErrNegativeCount
 	}
 
-	cpos := b.cseq.get()
-	ppos := b.pseq.get()
+	cpos := b.cSeq.get()
+	ppos := b.pSeq.get()
 
 	// This is the magic read-to position. The producer position must be equal or
 	// greater than the next position we read to.
 	next := cpos + int64(n)
 
 	// If there's no data, then let's wait until there is some data
-	b.ccond.L.Lock()
-	for ; next > ppos; ppos = b.pseq.get() {
+	b.cCond.L.Lock()
+	for ; next > ppos; ppos = b.pSeq.get() {
 		if b.isDone() {
 			return nil, io.EOF
 		}
 
-		b.ccond.Wait()
+		b.cCond.Wait()
 	}
-	b.ccond.L.Unlock()
+	b.cCond.L.Unlock()
 
 	// If we are here that means we have at least n bytes of data available.
 	cindex := cpos & b.mask
@@ -427,8 +432,8 @@ func (b *buffer) ReadCommit(n int) (int, error) {
 		return 0, bufio.ErrNegativeCount
 	}
 
-	cpos := b.cseq.get()
-	ppos := b.pseq.get()
+	cpos := b.cSeq.get()
+	ppos := b.pSeq.get()
 
 	// If consumer position is at least n less than producer position, that means
 	// we have enough data to fill p. There are two scenarios that could happen:
@@ -440,10 +445,10 @@ func (b *buffer) ReadCommit(n int) (int, error) {
 	//    buffer to p, and copy will just copy until the end of the buffer and stop.
 	//    The number of bytes will NOT be len(p) but less than that.
 	if cpos+int64(n) <= ppos {
-		b.cseq.set(cpos + int64(n))
-		b.pcond.L.Lock()
-		b.pcond.Broadcast()
-		b.pcond.L.Unlock()
+		b.cSeq.set(cpos + int64(n))
+		b.pCond.L.Lock()
+		b.pCond.Broadcast()
+		b.pCond.L.Unlock()
 		return n, nil
 	}
 
@@ -475,11 +480,11 @@ func (b *buffer) WriteCommit(n int) (int, error) {
 	}
 
 	// If we are here then there's enough bytes to commit
-	b.pseq.set(start + int64(cnt))
+	b.pSeq.set(start + int64(cnt))
 
-	b.ccond.L.Lock()
-	b.ccond.Broadcast()
-	b.ccond.L.Unlock()
+	b.cCond.L.Lock()
+	b.cCond.Broadcast()
+	b.cCond.L.Unlock()
 
 	return cnt, nil
 }
@@ -491,13 +496,13 @@ func (b *buffer) waitForWriteSpace(n int) (int64, int, error) {
 
 	// The current producer position, remember it's a forever inreasing int64,
 	// NOT the position relative to the buffer
-	ppos := b.pseq.get()
+	ppos := b.pSeq.get()
 
 	// The next producer position we will get to if we write len(p)
 	next := ppos + int64(n)
 
 	// For the producer, gate is the previous consumer sequence.
-	gate := b.pseq.gate
+	gate := b.pSeq.gate
 
 	wrap := next - b.size
 
@@ -540,18 +545,18 @@ func (b *buffer) waitForWriteSpace(n int) (int64, int, error) {
 	//
 	if wrap > gate || gate > ppos {
 		var cpos int64
-		b.pcond.L.Lock()
-		for cpos = b.cseq.get(); wrap > cpos; cpos = b.cseq.get() {
+		b.pCond.L.Lock()
+		for cpos = b.cSeq.get(); wrap > cpos; cpos = b.cSeq.get() {
 			if b.isDone() {
 				return 0, 0, io.EOF
 			}
 
-			b.pwait++
-			b.pcond.Wait()
+			b.pWait++
+			b.pCond.Wait()
 		}
 
-		b.pseq.gate = cpos
-		b.pcond.L.Unlock()
+		b.pSeq.gate = cpos
+		b.pCond.L.Unlock()
 	}
 
 	return ppos, n, nil

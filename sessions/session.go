@@ -15,9 +15,9 @@
 package sessions
 
 import (
-	"fmt"
 	"sync"
 
+	"errors"
 	"github.com/troian/surgemq/message"
 )
 
@@ -28,26 +28,26 @@ const (
 
 // Session session
 type Session struct {
-	// Ack queue for outgoing PUBLISH QoS 1 messages
-	Pub1ack *Ackqueue
+	// Pub1ack queue for outgoing PUBLISH QoS 1 messages
+	Pub1ack *AckQueue
 
-	// Ack queue for incoming PUBLISH QoS 2 messages
-	Pub2in *Ackqueue
+	// Pub2in queue for incoming PUBLISH QoS 2 messages
+	Pub2in *AckQueue
 
-	// Ack queue for outgoing PUBLISH QoS 2 messages
-	Pub2out *Ackqueue
+	// Pub2out queue for outgoing PUBLISH QoS 2 messages
+	Pub2out *AckQueue
 
-	// Ack queue for outgoing SUBSCRIBE messages
-	Suback *Ackqueue
+	// SubAck queue for outgoing SUBSCRIBE messages
+	SubAck *AckQueue
 
-	// Ack queue for outgoing UNSUBSCRIBE messages
-	Unsuback *Ackqueue
+	// UnSubAck queue for outgoing UNSUBSCRIBE messages
+	UnSubAck *AckQueue
 
-	// Ack queue for outgoing PINGREQ messages
-	Pingack *Ackqueue
+	// PingAck queue for outgoing PINGREQ messages
+	PingAck *AckQueue
 
-	// cmsg is the CONNECT message
-	Cmsg *message.ConnectMessage
+	// CMsg is the CONNECT message
+	CMsg *message.ConnectMessage
 
 	// Will message to publish if connect is closed unexpectedly
 	Will *message.PublishMessage
@@ -55,17 +55,17 @@ type Session struct {
 	// Retained publish message
 	Retained *message.PublishMessage
 
-	// cbuf is the CONNECT message buffer, this is for storing all the will stuff
-	cbuf []byte
+	// cBuf is the CONNECT message buffer, this is for storing all the will stuff
+	cBuf []byte
 
-	// rbuf is the retained PUBLISH message buffer
-	rbuf []byte
+	// rBuf is the retained PUBLISH message buffer
+	rBuf []byte
 
 	// topics stores all the topis for this session/client
 	topics map[string]byte
 
 	// Initialized?
-	initted bool
+	initialized bool
 
 	// Serialize access to this session
 	mu sync.Mutex
@@ -78,41 +78,41 @@ func (s *Session) Init(msg *message.ConnectMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.initted {
-		return fmt.Errorf("Session already initialized")
+	if s.initialized {
+		return errors.New("Session already initialized")
 	}
 
-	s.cbuf = make([]byte, msg.Len())
-	s.Cmsg = message.NewConnectMessage()
+	s.cBuf = make([]byte, msg.Len())
+	s.CMsg = message.NewConnectMessage()
 
-	if _, err := msg.Encode(s.cbuf); err != nil {
+	if _, err := msg.Encode(s.cBuf); err != nil {
 		return err
 	}
 
-	if _, err := s.Cmsg.Decode(s.cbuf); err != nil {
+	if _, err := s.CMsg.Decode(s.cBuf); err != nil {
 		return err
 	}
 
-	if s.Cmsg.WillFlag() {
+	if s.CMsg.WillFlag() {
 		s.Will = message.NewPublishMessage()
-		s.Will.SetQoS(s.Cmsg.WillQos())
-		s.Will.SetTopic(s.Cmsg.WillTopic())
-		s.Will.SetPayload(s.Cmsg.WillMessage())
-		s.Will.SetRetain(s.Cmsg.WillRetain())
+		s.Will.SetQoS(s.CMsg.WillQos())
+		s.Will.SetTopic(s.CMsg.WillTopic())
+		s.Will.SetPayload(s.CMsg.WillMessage())
+		s.Will.SetRetain(s.CMsg.WillRetain())
 	}
 
 	s.topics = make(map[string]byte, 1)
 
 	s.id = string(msg.ClientId())
 
-	s.Pub1ack = newAckqueue(defaultQueueSize)
-	s.Pub2in = newAckqueue(defaultQueueSize)
-	s.Pub2out = newAckqueue(defaultQueueSize)
-	s.Suback = newAckqueue(defaultQueueSize)
-	s.Unsuback = newAckqueue(defaultQueueSize)
-	s.Pingack = newAckqueue(defaultQueueSize)
+	s.Pub1ack = newAckQueue(defaultQueueSize)
+	s.Pub2in = newAckQueue(defaultQueueSize)
+	s.Pub2out = newAckQueue(defaultQueueSize)
+	s.SubAck = newAckQueue(defaultQueueSize)
+	s.UnSubAck = newAckQueue(defaultQueueSize)
+	s.PingAck = newAckQueue(defaultQueueSize)
 
-	s.initted = true
+	s.initialized = true
 
 	return nil
 }
@@ -122,14 +122,14 @@ func (s *Session) Update(msg *message.ConnectMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.cbuf = make([]byte, msg.Len())
-	s.Cmsg = message.NewConnectMessage()
+	s.cBuf = make([]byte, msg.Len())
+	s.CMsg = message.NewConnectMessage()
 
-	if _, err := msg.Encode(s.cbuf); err != nil {
+	if _, err := msg.Encode(s.cBuf); err != nil {
 		return err
 	}
 
-	if _, err := s.Cmsg.Decode(s.cbuf); err != nil {
+	if _, err := s.CMsg.Decode(s.cBuf); err != nil {
 		return err
 	}
 
@@ -141,14 +141,14 @@ func (s *Session) RetainMessage(msg *message.PublishMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.rbuf = make([]byte, msg.Len())
+	s.rBuf = make([]byte, msg.Len())
 	s.Retained = message.NewPublishMessage()
 
-	if _, err := msg.Encode(s.rbuf); err != nil {
+	if _, err := msg.Encode(s.rBuf); err != nil {
 		return err
 	}
 
-	if _, err := s.Retained.Decode(s.rbuf); err != nil {
+	if _, err := s.Retained.Decode(s.rBuf); err != nil {
 		return err
 	}
 
@@ -160,8 +160,8 @@ func (s *Session) AddTopic(topic string, qos byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if !s.initted {
-		return fmt.Errorf("Session not yet initialized")
+	if !s.initialized {
+		return errors.New("Session not yet initialized")
 	}
 
 	s.topics[topic] = qos
@@ -174,8 +174,8 @@ func (s *Session) RemoveTopic(topic string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if !s.initted {
-		return fmt.Errorf("Session not yet initialized")
+	if !s.initialized {
+		return errors.New("Session not yet initialized")
 	}
 
 	delete(s.topics, topic)
@@ -188,8 +188,8 @@ func (s *Session) Topics() ([]string, []byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if !s.initted {
-		return nil, nil, fmt.Errorf("Session not yet initialized")
+	if !s.initialized {
+		return nil, nil, errors.New("Session not yet initialized")
 	}
 
 	var (
@@ -207,5 +207,5 @@ func (s *Session) Topics() ([]string, []byte, error) {
 
 // ID session id
 func (s *Session) ID() string {
-	return string(s.Cmsg.ClientId())
+	return string(s.CMsg.ClientId())
 }

@@ -36,22 +36,25 @@ type (
 
 type stat struct {
 	bytes int64
-	msgs  int64
+	mSgs  int64
 }
 
 func (s *stat) increment(n int64) {
 	atomic.AddInt64(&s.bytes, n)
-	atomic.AddInt64(&s.msgs, 1)
+	atomic.AddInt64(&s.mSgs, 1)
 }
 
 var (
-	gsvcid uint64
+	gSvcID uint64
 )
 
 type service struct {
 	// The ID of this service, it's not related to the Client ID, just a number that's
 	// incremented for every new service.
 	id uint64
+
+	// used during permissions check
+	clientID string
 
 	// Is this a client or server. It's set by either Connect (client) or
 	// HandleConnection (server).
@@ -106,24 +109,24 @@ type service struct {
 	// Outgoing data buffer. Bytes written here are in turn written out to the connection.
 	out *buffer
 
-	// onpub is the method that gets added to the topic subscribers list by the
+	// onPub is the method that gets added to the topic subscribers list by the
 	// processSubscribe() method. When the server finishes the ack cycle for a
 	// PUBLISH message, it will call the subscriber, which is this method.
 	//
 	// For the server, when this method is called, it means there's a message that
 	// should be published to the client on the other end of this connection. So we
 	// will call publish() to send the message.
-	onpub OnPublishFunc
+	onPub OnPublishFunc
 
 	inStat  stat
 	outStat stat
 
-	intmp  []byte
-	outtmp []byte
+	inTmp  []byte
+	outTmp []byte
 
 	subs  []interface{}
 	qoss  []byte
-	rmsgs []*message.PublishMessage
+	rmSgs []*message.PublishMessage
 }
 
 func (s *service) start() error {
@@ -143,8 +146,8 @@ func (s *service) start() error {
 
 	// If this is a server
 	if !s.client {
-		// Creat the onPublishFunc so it can be used for published messages
-		s.onpub = func(msg *message.PublishMessage) error {
+		// Create the onPublishFunc so it can be used for published messages
+		s.onPub = func(msg *message.PublishMessage) error {
 			if err := s.publish(msg, nil); err != nil {
 				glog.Errorf("service/onPublish: Error publishing message: %v", err)
 				return err
@@ -160,7 +163,7 @@ func (s *service) start() error {
 		}
 
 		for i, t := range topics {
-			s.topicsMgr.Subscribe([]byte(t), qoss[i], &s.onpub)
+			s.topicsMgr.Subscribe([]byte(t), qoss[i], &s.onPub)
 		}
 	}
 
@@ -188,7 +191,7 @@ func (s *service) start() error {
 }
 
 // FIXME: The order of closing here causes panic sometimes. For example, if receiver
-// calls this, and closes the buffers, somehow it causes buffer.go:476 to panid.
+// calls this, and closes the buffers, somehow it causes buffer.go:476 to panic.
 func (s *service) stop() {
 	defer func() {
 		// Let's recover from panic
@@ -197,8 +200,7 @@ func (s *service) stop() {
 		}
 	}()
 
-	doit := atomic.CompareAndSwapInt64(&s.closed, 0, 1)
-	if !doit {
+	if doIT := atomic.CompareAndSwapInt64(&s.closed, 0, 1); !doIT {
 		return
 	}
 
@@ -220,17 +222,17 @@ func (s *service) stop() {
 	// Wait for all the goroutines to stop.
 	s.wgStopped.Wait()
 
-	glog.Debugf("(%s) Received %d bytes in %d messages.", s.cid(), s.inStat.bytes, s.inStat.msgs)
-	glog.Debugf("(%s) Sent %d bytes in %d messages.", s.cid(), s.outStat.bytes, s.outStat.msgs)
+	glog.Debugf("(%s) Received %d bytes in %d messages.", s.cid(), s.inStat.bytes, s.inStat.mSgs)
+	glog.Debugf("(%s) Sent %d bytes in %d messages.", s.cid(), s.outStat.bytes, s.outStat.mSgs)
 
-	// Unsubscribe from all the topics for this client, only for the server side though
+	// UnSubscribe from all the topics for this client, only for the server side though
 	if !s.client && s.sess != nil {
 		topics, _, err := s.sess.Topics()
 		if err != nil {
 			glog.Errorf("(%s/%d): %v", s.cid(), s.id, err)
 		} else {
 			for _, t := range topics {
-				if err := s.topicsMgr.UnSubscribe([]byte(t), &s.onpub); err != nil {
+				if err := s.topicsMgr.UnSubscribe([]byte(t), &s.onPub); err != nil {
 					glog.Errorf("(%s): Error unsubscribing topic %q: %v", s.cid(), t, err)
 				}
 			}
@@ -238,7 +240,7 @@ func (s *service) stop() {
 	}
 
 	// Publish will message if WillFlag is set. Server side only.
-	if !s.client && s.sess.Cmsg.WillFlag() {
+	if !s.client && s.sess.CMsg.WillFlag() {
 		glog.Infof("(%s) service/stop: connection unexpectedly closed. Sending Will.", s.cid())
 		s.onPublish(s.sess.Will)
 	}
@@ -249,7 +251,7 @@ func (s *service) stop() {
 	}
 
 	// Remove the session from session store if it's suppose to be clean session
-	if s.sess.Cmsg.CleanSession() && s.sessMgr != nil {
+	if s.sess.CMsg.CleanSession() && s.sessMgr != nil {
 		s.sessMgr.Del(s.sess.ID())
 	}
 
@@ -259,9 +261,7 @@ func (s *service) stop() {
 }
 
 func (s *service) publish(msg *message.PublishMessage, onComplete OnCompleteFunc) error {
-	//glog.Debugf("service/publish: Publishing %s", msg)
-	_, err := s.writeMessage(msg)
-	if err != nil {
+	if _, err := s.writeMessage(msg); err != nil {
 		return fmt.Errorf("(%s) Error sending %s message: %v", s.cid(), msg.Name(), err)
 	}
 
@@ -312,7 +312,7 @@ func (s *service) subscribe(msg *message.SubscribeMessage, onComplete OnComplete
 			return nil
 		}
 
-		suback, ok := ack.(*message.SubAckMessage)
+		subAck, ok := ack.(*message.SubAckMessage)
 		if !ok {
 			if onComplete != nil {
 				return onComplete(msg, ack, errors.New("Invalid SubackMessage received"))
@@ -320,19 +320,21 @@ func (s *service) subscribe(msg *message.SubscribeMessage, onComplete OnComplete
 			return nil
 		}
 
-		if sub.PacketId() != suback.PacketId() {
+		if sub.PacketId() != subAck.PacketId() {
 			if onComplete != nil {
-				return onComplete(msg, ack, fmt.Errorf("Sub and Suback packet ID not the same. %d != %d.", sub.PacketId(), suback.PacketId()))
+				fmtMsg := "Sub and Suback packet ID not the same. %d != %d"
+				return onComplete(msg, ack, fmt.Errorf(fmtMsg, sub.PacketId(), subAck.PacketId()))
 			}
 			return nil
 		}
 
-		retcodes := suback.ReturnCodes()
+		retCodes := subAck.ReturnCodes()
 		topics := sub.Topics()
 
-		if len(topics) != len(retcodes) {
+		if len(topics) != len(retCodes) {
 			if onComplete != nil {
-				return onComplete(msg, ack, fmt.Errorf("Incorrect number of return codes received. Expecting %d, got %d.", len(topics), len(retcodes)))
+				fmtMsg := "Incorrect number of return codes received. Expecting %d, got %d"
+				return onComplete(msg, ack, fmt.Errorf(fmtMsg, len(topics), len(retCodes)))
 			}
 			return nil
 		}
@@ -340,7 +342,7 @@ func (s *service) subscribe(msg *message.SubscribeMessage, onComplete OnComplete
 		var err2 error = nil
 
 		for i, t := range topics {
-			c := retcodes[i]
+			c := retCodes[i]
 
 			if c == message.QosFailure {
 				err2 = fmt.Errorf("Failed to subscribe to '%s'\n%v", string(t), err2)
@@ -360,12 +362,11 @@ func (s *service) subscribe(msg *message.SubscribeMessage, onComplete OnComplete
 		return err2
 	}
 
-	return s.sess.Suback.Wait(msg, onc)
+	return s.sess.SubAck.Wait(msg, onc)
 }
 
 func (s *service) unSubscribe(msg *message.UnSubscribeMessage, onComplete OnCompleteFunc) error {
-	_, err := s.writeMessage(msg)
-	if err != nil {
+	if _, err := s.writeMessage(msg); err != nil {
 		return fmt.Errorf("(%s) Error sending %s message: %v", s.cid(), msg.Name(), err)
 	}
 
@@ -379,32 +380,32 @@ func (s *service) unSubscribe(msg *message.UnSubscribeMessage, onComplete OnComp
 			return err
 		}
 
-		unsub, ok := msg.(*message.UnSubscribeMessage)
+		unSub, ok := msg.(*message.UnSubscribeMessage)
 		if !ok {
 			if onComplete != nil {
-				return onComplete(msg, ack, fmt.Errorf("Invalid UnsubscribeMessage received"))
+				return onComplete(msg, ack, errors.New("Invalid UnsubscribeMessage received"))
 			}
 			return nil
 		}
 
-		unsuback, ok := ack.(*message.UnSubAckMessage)
+		unSubAck, ok := ack.(*message.UnSubAckMessage)
 		if !ok {
 			if onComplete != nil {
-				return onComplete(msg, ack, fmt.Errorf("Invalid UnsubackMessage received"))
+				return onComplete(msg, ack, errors.New("Invalid UnsubackMessage received"))
 			}
 			return nil
 		}
 
-		if unsub.PacketId() != unsuback.PacketId() {
+		if unSub.PacketId() != unSubAck.PacketId() {
 			if onComplete != nil {
-				return onComplete(msg, ack, fmt.Errorf("Unsub and Unsuback packet ID not the same. %d != %d.", unsub.PacketId(), unsuback.PacketId()))
+				return onComplete(msg, ack, fmt.Errorf("Unsub and Unsuback packet ID not the same. %d != %d.", unSub.PacketId(), unSubAck.PacketId()))
 			}
 			return nil
 		}
 
 		var err2 error = nil
 
-		for _, tb := range unsub.Topics() {
+		for _, tb := range unSub.Topics() {
 			// Remove all subscribers, which basically it's just this client, since
 			// each client has it's own topic tree.
 			err := s.topicsMgr.UnSubscribe(tb, nil)
@@ -422,7 +423,7 @@ func (s *service) unSubscribe(msg *message.UnSubscribeMessage, onComplete OnComp
 		return err2
 	}
 
-	return s.sess.Unsuback.Wait(msg, onc)
+	return s.sess.UnSubAck.Wait(msg, onc)
 }
 
 func (s *service) ping(onComplete OnCompleteFunc) error {
@@ -433,7 +434,7 @@ func (s *service) ping(onComplete OnCompleteFunc) error {
 		return fmt.Errorf("(%s) Error sending %s message: %v", s.cid(), msg.Name(), err)
 	}
 
-	return s.sess.Pingack.Wait(msg, onComplete)
+	return s.sess.PingAck.Wait(msg, onComplete)
 }
 
 func (s *service) isDone() bool {

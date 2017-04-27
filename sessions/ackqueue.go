@@ -33,29 +33,29 @@ var (
 // AckMsg message
 type AckMsg struct {
 	// Message type of the message waiting for ack
-	Mtype message.MessageType
+	MType message.MessageType
 
 	// Current state of the ack-waiting message
 	State message.MessageType
 
 	// Packet ID of the message. Every message that require ack'ing must have a valid
 	// packet ID. Messages that have message I
-	Pktid uint16
+	PktID uint16
 
 	// Slice containing the message bytes
-	Msgbuf []byte
+	MsgBuf []byte
 
 	// Slice containing the ack message bytes
-	Ackbuf []byte
+	AckBuf []byte
 
 	// When ack cycle completes, call this function
 	OnComplete interface{}
 }
 
-// Ackqueue is a growing queue implemented based on a ring buffer. As the buffer
+// AckQueue is a growing queue implemented based on a ring buffer. As the buffer
 // gets full, it will auto-grow.
 //
-// Ackqueue is used to store messages that are waiting for acks to come back. There
+// AckQueue is used to store messages that are waiting for acks to come back. There
 // are a few scenarios in which acks are required.
 //   1. Client sends SUBSCRIBE message to server, waits for SUBACK.
 //   2. Client sends UNSUBSCRIBE message to server, waits for UNSUBACK.
@@ -68,7 +68,7 @@ type AckMsg struct {
 //   9. Client sends PUBREC message to server, waits for PUBREL.
 //   10. Server sends PUBREL message to client, waits for PUBCOMP.
 //   11. Client sends PINGREQ message to server, waits for PINGRESP.
-type Ackqueue struct {
+type AckQueue struct {
 	size  int64
 	mask  int64
 	count int64
@@ -77,34 +77,34 @@ type Ackqueue struct {
 
 	ping AckMsg
 	ring []AckMsg
-	emap map[uint16]int64
+	eMap map[uint16]int64
 
-	ackdone []AckMsg
+	ackDone []AckMsg
 
 	mu sync.Mutex
 }
 
-func newAckqueue(n int) *Ackqueue {
+func newAckQueue(n int) *AckQueue {
 	m := int64(n)
 	if !powerOfTwo64(m) {
 		m = roundUpPowerOfTwo64(m)
 	}
 
-	return &Ackqueue{
+	return &AckQueue{
 		size:    m,
 		mask:    m - 1,
 		count:   0,
 		head:    0,
 		tail:    0,
 		ring:    make([]AckMsg, m),
-		emap:    make(map[uint16]int64, m),
-		ackdone: make([]AckMsg, 0),
+		eMap:    make(map[uint16]int64, m),
+		ackDone: make([]AckMsg, 0),
 	}
 }
 
 // Wait copies the message into a waiting queue, and waits for the corresponding
 // ack message to be received.
-func (a *Ackqueue) Wait(msg message.Message, onComplete interface{}) error {
+func (a *AckQueue) Wait(msg message.Message, onComplete interface{}) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -125,7 +125,7 @@ func (a *Ackqueue) Wait(msg message.Message, onComplete interface{}) error {
 
 	case *message.PingReqMessage:
 		a.ping = AckMsg{
-			Mtype:      message.PINGREQ,
+			MType:      message.PINGREQ,
 			State:      message.RESERVED,
 			OnComplete: onComplete,
 		}
@@ -138,23 +138,23 @@ func (a *Ackqueue) Wait(msg message.Message, onComplete interface{}) error {
 }
 
 // Ack takes the ack message supplied and updates the status of messages waiting.
-func (a *Ackqueue) Ack(msg message.Message) error {
+func (a *AckQueue) Ack(msg message.Message) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	switch msg.Type() {
 	case message.PUBACK, message.PUBREC, message.PUBREL, message.PUBCOMP, message.SUBACK, message.UNSUBACK:
 		// Check to see if the message w/ the same packet ID is in the queue
-		i, ok := a.emap[msg.PacketId()]
+		i, ok := a.eMap[msg.PacketId()]
 		if ok {
 			// If message w/ the packet ID exists, update the message state and copy
 			// the ack message
 			a.ring[i].State = msg.Type()
 
 			ml := msg.Len()
-			a.ring[i].Ackbuf = make([]byte, ml)
+			a.ring[i].AckBuf = make([]byte, ml)
 
-			_, err := msg.Encode(a.ring[i].Ackbuf)
+			_, err := msg.Encode(a.ring[i].AckBuf)
 			if err != nil {
 				return err
 			}
@@ -164,7 +164,7 @@ func (a *Ackqueue) Ack(msg message.Message) error {
 		}
 
 	case message.PINGRESP:
-		if a.ping.Mtype == message.PINGREQ {
+		if a.ping.MType == message.PINGREQ {
 			a.ping.State = message.PINGRESP
 		}
 
@@ -176,14 +176,14 @@ func (a *Ackqueue) Ack(msg message.Message) error {
 }
 
 // Acked returns the list of messages that have completed the ack cycle.
-func (a *Ackqueue) Acked() []AckMsg {
+func (a *AckQueue) GetAckMsg() []AckMsg {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	a.ackdone = a.ackdone[0:0]
+	a.ackDone = a.ackDone[0:0]
 
 	if a.ping.State == message.PINGRESP {
-		a.ackdone = append(a.ackdone, a.ping)
+		a.ackDone = append(a.ackDone, a.ping)
 		a.ping = AckMsg{}
 	}
 
@@ -191,7 +191,7 @@ FORNOTEMPTY:
 	for !a.empty() {
 		switch a.ring[a.head].State {
 		case message.PUBACK, message.PUBREL, message.PUBCOMP, message.SUBACK, message.UNSUBACK:
-			a.ackdone = append(a.ackdone, a.ring[a.head])
+			a.ackDone = append(a.ackDone, a.ring[a.head])
 			a.removeHead()
 
 		default:
@@ -199,33 +199,33 @@ FORNOTEMPTY:
 		}
 	}
 
-	return a.ackdone
+	return a.ackDone
 }
 
-func (a *Ackqueue) insert(pktid uint16, msg message.Message, onComplete interface{}) error {
+func (a *AckQueue) insert(pktid uint16, msg message.Message, onComplete interface{}) error {
 	if a.full() {
 		a.grow()
 	}
 
-	if _, ok := a.emap[pktid]; !ok {
+	if _, ok := a.eMap[pktid]; !ok {
 		// message length
 		ml := msg.Len()
 
 		// ackmsg
 		am := AckMsg{
-			Mtype:      msg.Type(),
+			MType:      msg.Type(),
 			State:      message.RESERVED,
-			Pktid:      msg.PacketId(),
-			Msgbuf:     make([]byte, ml),
+			PktID:      msg.PacketId(),
+			MsgBuf:     make([]byte, ml),
 			OnComplete: onComplete,
 		}
 
-		if _, err := msg.Encode(am.Msgbuf); err != nil {
+		if _, err := msg.Encode(am.MsgBuf); err != nil {
 			return err
 		}
 
 		a.ring[a.tail] = am
-		a.emap[pktid] = a.tail
+		a.eMap[pktid] = a.tail
 		a.tail = a.increment(a.tail)
 		a.count++
 	} else {
@@ -239,7 +239,7 @@ func (a *Ackqueue) insert(pktid uint16, msg message.Message, onComplete interfac
 		// If this is a publish message, then the DUP flag must be set. This is the
 		// only scenario in which we will receive duplicate messages.
 		if pm.Dup() {
-			return fmt.Errorf("ack/insert: duplicate packet ID for PUBLISH message, but DUP flag is not set")
+			return errors.New("ack/insert: duplicate packet ID for PUBLISH message, but DUP flag is not set")
 		}
 
 		// Since it's a dup, there's really nothing we need to do. Moving on...
@@ -248,7 +248,7 @@ func (a *Ackqueue) insert(pktid uint16, msg message.Message, onComplete interfac
 	return nil
 }
 
-func (a *Ackqueue) removeHead() error {
+func (a *AckQueue) removeHead() error {
 	if a.empty() {
 		return errQueueEmpty
 	}
@@ -258,61 +258,61 @@ func (a *Ackqueue) removeHead() error {
 	a.ring[a.head] = AckMsg{}
 	a.head = a.increment(a.head)
 	a.count--
-	delete(a.emap, it.Pktid)
+	delete(a.eMap, it.PktID)
 
 	return nil
 }
 
-func (a *Ackqueue) grow() {
+func (a *AckQueue) grow() {
 	if math.MaxInt64/2 < a.size {
 		panic("new size will overflow int64")
 	}
 
-	newsize := a.size << 1
-	newmask := newsize - 1
-	newring := make([]AckMsg, newsize)
+	newSize := a.size << 1
+	newMask := newSize - 1
+	newRing := make([]AckMsg, newSize)
 
 	if a.tail > a.head {
-		copy(newring, a.ring[a.head:a.tail])
+		copy(newRing, a.ring[a.head:a.tail])
 	} else {
-		copy(newring, a.ring[a.head:])
-		copy(newring[a.size-a.head:], a.ring[:a.tail])
+		copy(newRing, a.ring[a.head:])
+		copy(newRing[a.size-a.head:], a.ring[:a.tail])
 	}
 
-	a.size = newsize
-	a.mask = newmask
-	a.ring = newring
+	a.size = newSize
+	a.mask = newMask
+	a.ring = newRing
 	a.head = 0
 	a.tail = a.count
 
-	a.emap = make(map[uint16]int64, a.size)
+	a.eMap = make(map[uint16]int64, a.size)
 
 	for i := int64(0); i < a.tail; i++ {
-		a.emap[a.ring[i].Pktid] = i
+		a.eMap[a.ring[i].PktID] = i
 	}
 }
 
-func (a *Ackqueue) len() int {
+func (a *AckQueue) len() int {
 	return int(a.count)
 }
 
-func (a *Ackqueue) cap() int {
+func (a *AckQueue) cap() int {
 	return int(a.size)
 }
 
-func (a *Ackqueue) index(n int64) int64 {
+func (a *AckQueue) index(n int64) int64 {
 	return n & a.mask
 }
 
-func (a *Ackqueue) full() bool {
+func (a *AckQueue) full() bool {
 	return a.count == a.size
 }
 
-func (a *Ackqueue) empty() bool {
+func (a *AckQueue) empty() bool {
 	return a.count == 0
 }
 
-func (a *Ackqueue) increment(n int64) int64 {
+func (a *AckQueue) increment(n int64) int64 {
 	return a.index(n + 1)
 }
 

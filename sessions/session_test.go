@@ -99,10 +99,10 @@ func newConnectMessage() *message.ConnectMessage {
 
 func newPublishMessage(pktid uint16, qos byte) *message.PublishMessage {
 	msg := message.NewPublishMessage()
-	msg.SetPacketId(pktid)
-	msg.SetTopic([]byte("abc"))
-	msg.SetPayload([]byte("abc"))
-	msg.SetQoS(qos)
+	msg.SetPacketId(pktid)        // nolint
+	msg.SetTopic([]byte("abc"))   // nolint
+	msg.SetPayload([]byte("abc")) // nolint
+	msg.SetQoS(qos)               // nolint
 
 	return msg
 }

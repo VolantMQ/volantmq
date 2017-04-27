@@ -53,7 +53,7 @@ func Register(name string, provider Provider) {
 	providers[name] = provider
 }
 
-// UnRegister unregister
+// UnRegister provider
 func UnRegister(name string) {
 	delete(providers, name)
 }

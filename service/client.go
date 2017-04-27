@@ -92,7 +92,7 @@ func (c *Client) Connect(uri string, msg *message.ConnectMessage) (err error) {
 
 	conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(c.ConnectTimeout)))
 
-	resp, err := getConnackMessage(conn)
+	resp, err := getConnAckMessage(conn)
 	if err != nil {
 		return err
 	}
@@ -102,7 +102,7 @@ func (c *Client) Connect(uri string, msg *message.ConnectMessage) (err error) {
 	}
 
 	c.svc = &service{
-		id:     atomic.AddUint64(&gsvcid, 1),
+		id:     atomic.AddUint64(&gSvcID, 1),
 		client: true,
 		conn:   conn,
 

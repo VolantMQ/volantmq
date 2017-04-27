@@ -127,7 +127,7 @@ func TestMessageHeaderEncode2(t *testing.T) {
 	err := header.SetType(PUBREL)
 	require.NoError(t, err)
 
-	header.remlen = 268435456
+	header.remLen = 268435456
 
 	buf := make([]byte, 5)
 	_, err = header.encode(buf)

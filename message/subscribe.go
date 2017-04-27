@@ -45,13 +45,13 @@ func NewSubscribeMessage() *SubscribeMessage {
 }
 
 func (sm SubscribeMessage) String() string {
-	msgstr := fmt.Sprintf("%s, Packet ID=%d", sm.header, sm.PacketId())
+	msgStr := fmt.Sprintf("%s, Packet ID=%d", sm.header, sm.PacketId())
 
 	for i, t := range sm.topics {
-		msgstr = fmt.Sprintf("%s, Topic[%d]=%q/%d", msgstr, i, string(t), sm.qos[i])
+		msgStr = fmt.Sprintf("%s, Topic[%d]=%q/%d", msgStr, i, string(t), sm.qos[i])
 	}
 
-	return msgstr
+	return msgStr
 }
 
 // Topics returns a list of topics sent by the Client.
@@ -141,16 +141,16 @@ func (sm *SubscribeMessage) Qos() []byte {
 
 func (sm *SubscribeMessage) Len() int {
 	if !sm.dirty {
-		return len(sm.dbuf)
+		return len(sm.dBuf)
 	}
 
-	ml := sm.msglen()
+	ml := sm.msgLen()
 
 	if err := sm.SetRemainingLength(int32(ml)); err != nil {
 		return 0
 	}
 
-	return sm.header.msglen() + ml
+	return sm.header.msgLen() + ml
 }
 
 func (sm *SubscribeMessage) Decode(src []byte) (int, error) {
@@ -163,10 +163,10 @@ func (sm *SubscribeMessage) Decode(src []byte) (int, error) {
 	}
 
 	//this.packetId = binary.BigEndian.Uint16(src[total:])
-	sm.packetId = src[total : total+2]
+	sm.packetID = src[total : total+2]
 	total += 2
 
-	remlen := int(sm.remlen) - (total - hn)
+	remlen := int(sm.remLen) - (total - hn)
 	for remlen > 0 {
 		t, n, err := readLPBytes(src[total:])
 		total += n
@@ -193,15 +193,15 @@ func (sm *SubscribeMessage) Decode(src []byte) (int, error) {
 
 func (sm *SubscribeMessage) Encode(dst []byte) (int, error) {
 	if !sm.dirty {
-		if len(dst) < len(sm.dbuf) {
-			return 0, fmt.Errorf("subscribe/Encode: Insufficient buffer size. Expecting %d, got %d.", len(sm.dbuf), len(dst))
+		if len(dst) < len(sm.dBuf) {
+			return 0, fmt.Errorf("subscribe/Encode: Insufficient buffer size. Expecting %d, got %d.", len(sm.dBuf), len(dst))
 		}
 
-		return copy(dst, sm.dbuf), nil
+		return copy(dst, sm.dBuf), nil
 	}
 
-	hl := sm.header.msglen()
-	ml := sm.msglen()
+	hl := sm.header.msgLen()
+	ml := sm.msgLen()
 
 	if len(dst) < hl+ml {
 		return 0, fmt.Errorf("subscribe/Encode: Insufficient buffer size. Expecting %d, got %d.", hl+ml, len(dst))
@@ -221,10 +221,10 @@ func (sm *SubscribeMessage) Encode(dst []byte) (int, error) {
 
 	if sm.PacketId() == 0 {
 		sm.SetPacketId(uint16(atomic.AddUint64(&gPacketId, 1) & 0xffff))
-		//this.packetId = uint16(atomic.AddUint64(&gPacketId, 1) & 0xffff)
+		//this.packetID = uint16(atomic.AddUint64(&gPacketId, 1) & 0xffff)
 	}
 
-	n = copy(dst[total:], sm.packetId)
+	n = copy(dst[total:], sm.packetID)
 	//binary.BigEndian.PutUint16(dst[total:], this.packetId)
 	total += n
 
@@ -242,7 +242,7 @@ func (sm *SubscribeMessage) Encode(dst []byte) (int, error) {
 	return total, nil
 }
 
-func (sm *SubscribeMessage) msglen() int {
+func (sm *SubscribeMessage) msgLen() int {
 	// packet ID
 	total := 2
 

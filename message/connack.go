@@ -15,8 +15,8 @@
 package message
 
 import (
-	"errors"
 	"fmt"
+	"errors"
 )
 
 // The CONNACK Packet is the packet sent by the Server in response to a CONNECT Packet
@@ -77,16 +77,16 @@ func (cm *ConnAckMessage) SetReturnCode(ret ConnAckCode) {
 
 func (cm *ConnAckMessage) Len() int {
 	if !cm.dirty {
-		return len(cm.dbuf)
+		return len(cm.dBuf)
 	}
 
-	ml := cm.msglen()
+	ml := cm.msgLen()
 
 	if err := cm.SetRemainingLength(int32(ml)); err != nil {
 		return 0
 	}
 
-	return cm.header.msglen() + ml
+	return cm.header.msgLen() + ml
 }
 
 func (cm *ConnAckMessage) Decode(src []byte) (int, error) {
@@ -124,16 +124,16 @@ func (cm *ConnAckMessage) Decode(src []byte) (int, error) {
 
 func (cm *ConnAckMessage) Encode(dst []byte) (int, error) {
 	if !cm.dirty {
-		if len(dst) < len(cm.dbuf) {
-			return 0, fmt.Errorf("connack/Encode: Insufficient buffer size. Expecting %d, got %d.", len(cm.dbuf), len(dst))
+		if len(dst) < len(cm.dBuf) {
+			return 0, fmt.Errorf("connack/Encode: Insufficient buffer size. Expecting %d, got %d.", len(cm.dBuf), len(dst))
 		}
 
-		return copy(dst, cm.dbuf), nil
+		return copy(dst, cm.dBuf), nil
 	}
 
 	// CONNACK remaining length fixed at 2 bytes
-	hl := cm.header.msglen()
-	ml := cm.msglen()
+	hl := cm.header.msgLen()
+	ml := cm.msgLen()
 
 	if len(dst) < hl+ml {
 		return 0, fmt.Errorf("connack/Encode: Insufficient buffer size. Expecting %d, got %d.", hl+ml, len(dst))
@@ -166,6 +166,6 @@ func (cm *ConnAckMessage) Encode(dst []byte) (int, error) {
 	return total, nil
 }
 
-func (cm *ConnAckMessage) msglen() int {
+func (cm *ConnAckMessage) msgLen() int {
 	return 2
 }

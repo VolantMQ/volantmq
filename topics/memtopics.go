@@ -19,6 +19,7 @@ import (
 	"reflect"
 	"sync"
 
+	"errors"
 	"github.com/troian/surgemq/message"
 )
 
@@ -31,12 +32,13 @@ type memTopics struct {
 	// Sub/unsub mutex
 	smu sync.RWMutex
 	// Subscription tree
-	sroot *snode
+	sRoot *sNode
 
 	// Retained message mutex
 	rmu sync.RWMutex
+
 	// Retained messages topic tree
-	rroot *rnode
+	rRoot *rNode
 }
 
 func init() {
@@ -51,8 +53,8 @@ func init() {
 // when the server goes, everything will be gone. Use with care.
 func NewMemProvider() Provider {
 	return &memTopics{
-		sroot: newSNode(),
-		rroot: newRNode(),
+		sRoot: newSNode(),
+		rRoot: newRNode(),
 	}
 }
 
@@ -62,7 +64,7 @@ func (mT *memTopics) Subscribe(topic []byte, qos byte, sub interface{}) (byte, e
 	}
 
 	if sub == nil {
-		return message.QosFailure, fmt.Errorf("Subscriber cannot be nil")
+		return message.QosFailure, errors.New("Subscriber cannot be nil")
 	}
 
 	mT.smu.Lock()
@@ -72,7 +74,7 @@ func (mT *memTopics) Subscribe(topic []byte, qos byte, sub interface{}) (byte, e
 		qos = MaxQosAllowed
 	}
 
-	if err := mT.sroot.sinsert(topic, qos, sub); err != nil {
+	if err := mT.sRoot.insert(topic, qos, sub); err != nil {
 		return message.QosFailure, err
 	}
 
@@ -83,7 +85,7 @@ func (mT *memTopics) UnSubscribe(topic []byte, sub interface{}) error {
 	mT.smu.Lock()
 	defer mT.smu.Unlock()
 
-	return mT.sroot.sremove(topic, sub)
+	return mT.sRoot.remove(topic, sub)
 }
 
 // Returned values will be invalidated by the next Subscribers call
@@ -98,7 +100,7 @@ func (mT *memTopics) Subscribers(topic []byte, qos byte, subs *[]interface{}, qo
 	*subs = (*subs)[0:0]
 	*qoss = (*qoss)[0:0]
 
-	return mT.sroot.smatch(topic, qos, subs, qoss)
+	return mT.sRoot.match(topic, qos, subs, qoss)
 }
 
 func (mT *memTopics) Retain(msg *message.PublishMessage) error {
@@ -109,42 +111,42 @@ func (mT *memTopics) Retain(msg *message.PublishMessage) error {
 	// Testing, that a payload of 0 means delete the retain message.
 	// https://eclipse.org/paho/clients/testing/
 	if len(msg.Payload()) == 0 {
-		return mT.rroot.rremove(msg.Topic())
+		return mT.rRoot.remove(msg.Topic())
 	}
 
-	return mT.rroot.rinsert(msg.Topic(), msg)
+	return mT.rRoot.insert(msg.Topic(), msg)
 }
 
 func (mT *memTopics) Retained(topic []byte, msgs *[]*message.PublishMessage) error {
 	mT.rmu.RLock()
 	defer mT.rmu.RUnlock()
 
-	return mT.rroot.rmatch(topic, msgs)
+	return mT.rRoot.match(topic, msgs)
 }
 
 func (mT *memTopics) Close() error {
-	mT.sroot = nil
-	mT.rroot = nil
+	mT.sRoot = nil
+	mT.rRoot = nil
 	return nil
 }
 
-// subscrition nodes
-type snode struct {
+// subscription nodes
+type sNode struct {
 	// If this is the end of the topic string, then add subscribers here
 	subs []interface{}
 	qos  []byte
 
 	// Otherwise add the next topic level here
-	snodes map[string]*snode
+	nodes map[string]*sNode
 }
 
-func newSNode() *snode {
-	return &snode{
-		snodes: make(map[string]*snode),
+func newSNode() *sNode {
+	return &sNode{
+		nodes: make(map[string]*sNode),
 	}
 }
 
-func (sn *snode) sinsert(topic []byte, qos byte, sub interface{}) error {
+func (sn *sNode) insert(topic []byte, qos byte, sub interface{}) error {
 	// If there's no more topic levels, that means we are at the matching snode
 	// to insert the subscriber. So let's see if there's such subscriber,
 	// if so, update it. Otherwise insert it.
@@ -176,19 +178,19 @@ func (sn *snode) sinsert(topic []byte, qos byte, sub interface{}) error {
 
 	level := string(ntl)
 
-	// Add snode if it doesn't already exist
-	n, ok := sn.snodes[level]
+	// Add sNode if it doesn't already exist
+	n, ok := sn.nodes[level]
 	if !ok {
 		n = newSNode()
-		sn.snodes[level] = n
+		sn.nodes[level] = n
 	}
 
-	return n.sinsert(rem, qos, sub)
+	return n.insert(rem, qos, sub)
 }
 
 // This remove implementation ignores the QoS, as long as the subscriber
 // matches then it's removed
-func (sn *snode) sremove(topic []byte, sub interface{}) error {
+func (sn *sNode) remove(topic []byte, sub interface{}) error {
 	// If the topic is empty, it means we are at the final matching snode. If so,
 	// let's find the matching subscribers and remove them.
 	if len(topic) == 0 {
@@ -209,7 +211,7 @@ func (sn *snode) sremove(topic []byte, sub interface{}) error {
 			}
 		}
 
-		return fmt.Errorf("memtopics/remove: No topic found for subscriber")
+		return errors.New("memtopics/remove: No topic found for subscriber")
 	}
 
 	// Not the last level, so let's find the next level snode, and recursively
@@ -224,30 +226,30 @@ func (sn *snode) sremove(topic []byte, sub interface{}) error {
 	level := string(ntl)
 
 	// Find the snode that matches the topic level
-	n, ok := sn.snodes[level]
+	n, ok := sn.nodes[level]
 	if !ok {
-		return fmt.Errorf("memtopics/remove: No topic found")
+		return errors.New("memtopics/remove: No topic found")
 	}
 
 	// Remove the subscriber from the next level snode
-	if err := n.sremove(rem, sub); err != nil {
+	if err := n.remove(rem, sub); err != nil {
 		return err
 	}
 
 	// If there are no more subscribers and snodes to the next level we just visited
 	// let's remove it
-	if len(n.subs) == 0 && len(n.snodes) == 0 {
-		delete(sn.snodes, level)
+	if len(n.subs) == 0 && len(n.nodes) == 0 {
+		delete(sn.nodes, level)
 	}
 
 	return nil
 }
 
-// smatch() returns all the subscribers that are subscribed to the topic. Given a topic
+// match() returns all the subscribers that are subscribed to the topic. Given a topic
 // with no wildcards (publish topic), it returns a list of subscribers that subscribes
 // to the topic. For each of the level names, it's a match
 // - if there are subscribers to '#', then all the subscribers are added to result set
-func (sn *snode) smatch(topic []byte, qos byte, subs *[]interface{}, qoss *[]byte) error {
+func (sn *sNode) match(topic []byte, qos byte, subs *[]interface{}, qoss *[]byte) error {
 	// If the topic is empty, it means we are at the final matching snode. If so,
 	// let's find the subscribers that match the qos and append them to the list.
 	if len(topic) == 0 {
@@ -263,12 +265,12 @@ func (sn *snode) smatch(topic []byte, qos byte, subs *[]interface{}, qoss *[]byt
 
 	level := string(ntl)
 
-	for k, n := range sn.snodes {
+	for k, n := range sn.nodes {
 		// If the key is "#", then these subscribers are added to the result set
 		if k == MWC {
 			n.matchQos(qos, subs, qoss)
 		} else if k == SWC || k == level {
-			if err := n.smatch(rem, qos, subs, qoss); err != nil {
+			if err := n.match(rem, qos, subs, qoss); err != nil {
 				return err
 			}
 		}
@@ -278,22 +280,22 @@ func (sn *snode) smatch(topic []byte, qos byte, subs *[]interface{}, qoss *[]byt
 }
 
 // retained message nodes
-type rnode struct {
+type rNode struct {
 	// If this is the end of the topic string, then add retained messages here
 	msg *message.PublishMessage
 	buf []byte
 
 	// Otherwise add the next topic level here
-	rnodes map[string]*rnode
+	nodes map[string]*rNode
 }
 
-func newRNode() *rnode {
-	return &rnode{
-		rnodes: make(map[string]*rnode),
+func newRNode() *rNode {
+	return &rNode{
+		nodes: make(map[string]*rNode),
 	}
 }
 
-func (rn *rnode) rinsert(topic []byte, msg *message.PublishMessage) error {
+func (rn *rNode) insert(topic []byte, msg *message.PublishMessage) error {
 	// If there's no more topic levels, that means we are at the matching rnode.
 	if len(topic) == 0 {
 		l := msg.Len()
@@ -333,17 +335,17 @@ func (rn *rnode) rinsert(topic []byte, msg *message.PublishMessage) error {
 	level := string(ntl)
 
 	// Add snode if it doesn't already exist
-	n, ok := rn.rnodes[level]
+	n, ok := rn.nodes[level]
 	if !ok {
 		n = newRNode()
-		rn.rnodes[level] = n
+		rn.nodes[level] = n
 	}
 
-	return n.rinsert(rem, msg)
+	return n.insert(rem, msg)
 }
 
 // Remove the retained message for the supplied topic
-func (rn *rnode) rremove(topic []byte) error {
+func (rn *rNode) remove(topic []byte) error {
 	// If the topic is empty, it means we are at the final matching rnode. If so,
 	// let's remove the buffer and message.
 	if len(topic) == 0 {
@@ -364,29 +366,29 @@ func (rn *rnode) rremove(topic []byte) error {
 	level := string(ntl)
 
 	// Find the rnode that matches the topic level
-	n, ok := rn.rnodes[level]
+	n, ok := rn.nodes[level]
 	if !ok {
-		return fmt.Errorf("memtopics/rremove: No topic found")
+		return errors.New("memtopics/rremove: No topic found")
 	}
 
 	// Remove the subscriber from the next level rnode
-	if err := n.rremove(rem); err != nil {
+	if err := n.remove(rem); err != nil {
 		return err
 	}
 
-	// If there are no more rnodes to the next level we just visited let's remove it
-	if len(n.rnodes) == 0 {
-		delete(rn.rnodes, level)
+	// If there are no more rNodes to the next level we just visited let's remove it
+	if len(n.nodes) == 0 {
+		delete(rn.nodes, level)
 	}
 
 	return nil
 }
 
-// rmatch() finds the retained messages for the topic and qos provided. It's somewhat
+// match() finds the retained messages for the topic and qos provided. It's somewhat
 // of a reverse match compare to match() since the supplied topic can contain
 // wildcards, whereas the retained message topic is a full (no wildcard) topic.
-func (rn *rnode) rmatch(topic []byte, msgs *[]*message.PublishMessage) error {
-	// If the topic is empty, it means we are at the final matching rnode. If so,
+func (rn *rNode) match(topic []byte, msgs *[]*message.PublishMessage) error {
+	// If the topic is empty, it means we are at the final matching rNode. If so,
 	// add the retained msg to the list.
 	if len(topic) == 0 {
 		if rn.msg != nil {
@@ -408,15 +410,15 @@ func (rn *rnode) rmatch(topic []byte, msgs *[]*message.PublishMessage) error {
 		rn.allRetained(msgs)
 	} else if level == SWC {
 		// If '+', check all nodes at this level. Next levels must be matched.
-		for _, n := range rn.rnodes {
-			if err := n.rmatch(rem, msgs); err != nil {
+		for _, n := range rn.nodes {
+			if err := n.match(rem, msgs); err != nil {
 				return err
 			}
 		}
 	} else {
 		// Otherwise, find the matching node, go to the next level
-		if n, ok := rn.rnodes[level]; ok {
-			if err := n.rmatch(rem, msgs); err != nil {
+		if n, ok := rn.nodes[level]; ok {
+			if err := n.match(rem, msgs); err != nil {
 				return err
 			}
 		}
@@ -425,12 +427,12 @@ func (rn *rnode) rmatch(topic []byte, msgs *[]*message.PublishMessage) error {
 	return nil
 }
 
-func (rn *rnode) allRetained(msgs *[]*message.PublishMessage) {
+func (rn *rNode) allRetained(msgs *[]*message.PublishMessage) {
 	if rn.msg != nil {
 		*msgs = append(*msgs, rn.msg)
 	}
 
-	for _, n := range rn.rnodes {
+	for _, n := range rn.nodes {
 		n.allRetained(msgs)
 	}
 }
@@ -451,7 +453,7 @@ func nextTopicLevel(topic []byte) ([]byte, []byte, error) {
 		switch c {
 		case '/':
 			if s == stateMWC {
-				return nil, nil, fmt.Errorf("memtopics/nextTopicLevel: Multi-level wildcard found in topic and it's not at the last level")
+				return nil, nil, errors.New("memtopics/nextTopicLevel: Multi-level wildcard found in topic and it's not at the last level")
 			}
 
 			if i == 0 {
@@ -462,28 +464,28 @@ func nextTopicLevel(topic []byte) ([]byte, []byte, error) {
 
 		case '#':
 			if i != 0 {
-				return nil, nil, fmt.Errorf("memtopics/nextTopicLevel: Wildcard character '#' must occupy entire topic level")
+				return nil, nil, errors.New("memtopics/nextTopicLevel: Wildcard character '#' must occupy entire topic level")
 			}
 
 			s = stateMWC
 
 		case '+':
 			if i != 0 {
-				return nil, nil, fmt.Errorf("memtopics/nextTopicLevel: Wildcard character '+' must occupy entire topic level")
+				return nil, nil, errors.New("memtopics/nextTopicLevel: Wildcard character '+' must occupy entire topic level")
 			}
 
 			s = stateSWC
 
 		case '$':
 			if i == 0 {
-				return nil, nil, fmt.Errorf("memtopics/nextTopicLevel: Cannot publish to $ topics")
+				return nil, nil, errors.New("memtopics/nextTopicLevel: Cannot publish to $ topics")
 			}
 
 			s = stateSYS
 
 		default:
 			if s == stateMWC || s == stateSWC {
-				return nil, nil, fmt.Errorf("memtopics/nextTopicLevel: Wildcard characters '#' and '+' must occupy entire topic level")
+				return nil, nil, errors.New("memtopics/nextTopicLevel: Wildcard characters '#' and '+' must occupy entire topic level")
 			}
 
 			s = stateCHR
@@ -505,7 +507,7 @@ func nextTopicLevel(topic []byte) ([]byte, []byte, error) {
 // due to the QoS granted is lower than the published message QoS. For example,
 // if the client is granted only QoS 0, and the publish message is QoS 1, then this
 // client is not to be send the published message.
-func (sn *snode) matchQos(qos byte, subs *[]interface{}, qoss *[]byte) {
+func (sn *sNode) matchQos(qos byte, subs *[]interface{}, qoss *[]byte) {
 	for i, sub := range sn.subs {
 		// If the published QoS is higher than the subscriber QoS, then we skip the
 		// subscriber. Otherwise, add to the list.

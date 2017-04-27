@@ -70,16 +70,16 @@ func (sam *SubAckMessage) AddReturnCode(ret byte) error {
 
 func (sam *SubAckMessage) Len() int {
 	if !sam.dirty {
-		return len(sam.dbuf)
+		return len(sam.dBuf)
 	}
 
-	ml := sam.msglen()
+	ml := sam.msgLen()
 
 	if err := sam.SetRemainingLength(int32(ml)); err != nil {
 		return 0
 	}
 
-	return sam.header.msglen() + ml
+	return sam.header.msgLen() + ml
 }
 
 func (sam *SubAckMessage) Decode(src []byte) (int, error) {
@@ -91,11 +91,11 @@ func (sam *SubAckMessage) Decode(src []byte) (int, error) {
 		return total, err
 	}
 
-	//this.packetId = binary.BigEndian.Uint16(src[total:])
-	sam.packetId = src[total : total+2]
+	//this.packetID = binary.BigEndian.Uint16(src[total:])
+	sam.packetID = src[total : total+2]
 	total += 2
 
-	l := int(sam.remlen) - (total - hn)
+	l := int(sam.remLen) - (total - hn)
 	sam.returnCodes = src[total : total+l]
 	total += len(sam.returnCodes)
 
@@ -112,11 +112,11 @@ func (sam *SubAckMessage) Decode(src []byte) (int, error) {
 
 func (sam *SubAckMessage) Encode(dst []byte) (int, error) {
 	if !sam.dirty {
-		if len(dst) < len(sam.dbuf) {
-			return 0, fmt.Errorf("suback/Encode: Insufficient buffer size. Expecting %d, got %d.", len(sam.dbuf), len(dst))
+		if len(dst) < len(sam.dBuf) {
+			return 0, fmt.Errorf("suback/Encode: Insufficient buffer size. Expecting %d, got %d.", len(sam.dBuf), len(dst))
 		}
 
-		return copy(dst, sam.dbuf), nil
+		return copy(dst, sam.dBuf), nil
 	}
 
 	for i, code := range sam.returnCodes {
@@ -125,8 +125,8 @@ func (sam *SubAckMessage) Encode(dst []byte) (int, error) {
 		}
 	}
 
-	hl := sam.header.msglen()
-	ml := sam.msglen()
+	hl := sam.header.msgLen()
+	ml := sam.msgLen()
 
 	if len(dst) < hl+ml {
 		return 0, fmt.Errorf("suback/Encode: Insufficient buffer size. Expecting %d, got %d.", hl+ml, len(dst))
@@ -144,7 +144,7 @@ func (sam *SubAckMessage) Encode(dst []byte) (int, error) {
 		return total, err
 	}
 
-	if copy(dst[total:total+2], sam.packetId) != 2 {
+	if copy(dst[total:total+2], sam.packetID) != 2 {
 		dst[total], dst[total+1] = 0, 0
 	}
 	total += 2
@@ -155,6 +155,6 @@ func (sam *SubAckMessage) Encode(dst []byte) (int, error) {
 	return total, nil
 }
 
-func (sam *SubAckMessage) msglen() int {
+func (sam *SubAckMessage) msgLen() int {
 	return 2 + len(sam.returnCodes)
 }

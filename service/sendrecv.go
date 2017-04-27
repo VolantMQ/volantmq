@@ -193,7 +193,7 @@ func (s *service) peekMessage(mtype message.MessageType, total int) (message.Mes
 
 	// Peek until we get total bytes
 	for i = 0; ; i++ {
-		// Peek remlen bytes from the input buffer.
+		// Peek remLen bytes from the input buffer.
 		b, err = s.in.ReadWait(total)
 		if err != nil && err != ErrBufferInsufficientData {
 			return nil, 0, err
@@ -216,7 +216,7 @@ func (s *service) peekMessage(mtype message.MessageType, total int) (message.Mes
 
 // readMessage() reads and copies a message from the buffer. The buffer bytes are
 // committed as a result of the read.
-func (s *service) readMessage(mtype message.MessageType, total int) (message.Message, int, error) {
+func (s *service) readMessage(mType message.MessageType, total int) (message.Message, int, error) {
 	var (
 		b   []byte
 		err error
@@ -229,14 +229,14 @@ func (s *service) readMessage(mtype message.MessageType, total int) (message.Mes
 		return nil, 0, err
 	}
 
-	if len(s.intmp) < total {
-		s.intmp = make([]byte, total)
+	if len(s.inTmp) < total {
+		s.inTmp = make([]byte, total)
 	}
 
 	// Read until we get total bytes
 	l := 0
 	for l < total {
-		n, err = s.in.Read(s.intmp[l:])
+		n, err = s.in.Read(s.inTmp[l:])
 		l += n
 		glog.Debugf("read %d bytes, total %d", n, l)
 		if err != nil {
@@ -244,9 +244,9 @@ func (s *service) readMessage(mtype message.MessageType, total int) (message.Mes
 		}
 	}
 
-	b = s.intmp[:total]
+	b = s.inTmp[:total]
 
-	msg, err = mtype.New()
+	msg, err = mType.New()
 	if err != nil {
 		return msg, 0, err
 	}
@@ -272,7 +272,7 @@ func (s *service) writeMessage(msg message.Message) (int, error) {
 	// This is to serialize writes to the underlying buffer. Multiple goroutines could
 	// potentially get here because of calling Publish() or Subscribe() or other
 	// functions that will send messages. For example, if a message is received in
-	// another connetion, and the message needs to be published to this client, then
+	// another connection, and the message needs to be published to this client, then
 	// the Publish() function is called, and at the same time, another client could
 	// do exactly the same thing.
 	//
@@ -290,16 +290,16 @@ func (s *service) writeMessage(msg message.Message) (int, error) {
 	}
 
 	if wrap {
-		if len(s.outtmp) < l {
-			s.outtmp = make([]byte, l)
+		if len(s.outTmp) < l {
+			s.outTmp = make([]byte, l)
 		}
 
-		n, err = msg.Encode(s.outtmp[0:])
+		n, err = msg.Encode(s.outTmp[0:])
 		if err != nil {
 			return 0, err
 		}
 
-		m, err = s.out.Write(s.outtmp[0:n])
+		m, err = s.out.Write(s.outTmp[0:n])
 		if err != nil {
 			return m, err
 		}

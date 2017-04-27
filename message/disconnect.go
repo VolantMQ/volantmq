@@ -38,11 +38,11 @@ func (dm *DisconnectMessage) Decode(src []byte) (int, error) {
 
 func (dm *DisconnectMessage) Encode(dst []byte) (int, error) {
 	if !dm.dirty {
-		if len(dst) < len(dm.dbuf) {
-			return 0, fmt.Errorf("disconnect/Encode: Insufficient buffer size. Expecting %d, got %d.", len(dm.dbuf), len(dst))
+		if len(dst) < len(dm.dBuf) {
+			return 0, fmt.Errorf("disconnect/Encode: Insufficient buffer size. Expecting %d, got %d.", len(dm.dBuf), len(dst))
 		}
 
-		return copy(dst, dm.dbuf), nil
+		return copy(dst, dm.dBuf), nil
 	}
 
 	return dm.header.encode(dst)

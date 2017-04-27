@@ -41,7 +41,7 @@ func NewPublishMessage() *PublishMessage {
 
 func (pm PublishMessage) String() string {
 	return fmt.Sprintf("%s, Topic=%q, Packet ID=%d, QoS=%d, Retained=%t, Dup=%t, Payload=%v",
-		pm.header, pm.topic, pm.packetId, pm.QoS(), pm.Retain(), pm.Dup(), pm.payload)
+		pm.header, pm.topic, pm.packetID, pm.QoS(), pm.Retain(), pm.Dup(), pm.payload)
 }
 
 // Dup returns the value specifying the duplicate delivery of a PUBLISH Control Packet.
@@ -56,9 +56,9 @@ func (pm *PublishMessage) Dup() bool {
 // SetDup sets the value specifying the duplicate delivery of a PUBLISH Control Packet.
 func (pm *PublishMessage) SetDup(v bool) {
 	if v {
-		pm.mtypeflags[0] |= 0x8 // 00001000
+		pm.mTypeFlags[0] |= 0x8 // 00001000
 	} else {
-		pm.mtypeflags[0] &= 247 // 11110111
+		pm.mTypeFlags[0] &= 247 // 11110111
 	}
 }
 
@@ -73,9 +73,9 @@ func (pm *PublishMessage) Retain() bool {
 // SetRetain sets the value of the RETAIN flag.
 func (pm *PublishMessage) SetRetain(v bool) {
 	if v {
-		pm.mtypeflags[0] |= 0x1 // 00000001
+		pm.mTypeFlags[0] |= 0x1 // 00000001
 	} else {
-		pm.mtypeflags[0] &= 254 // 11111110
+		pm.mTypeFlags[0] &= 254 // 11111110
 	}
 }
 
@@ -93,7 +93,7 @@ func (pm *PublishMessage) SetQoS(v byte) error {
 		return fmt.Errorf("publish/SetQoS: Invalid QoS %d.", v)
 	}
 
-	pm.mtypeflags[0] = (pm.mtypeflags[0] & 249) | (v << 1) // 249 = 11111001
+	pm.mTypeFlags[0] = (pm.mTypeFlags[0] & 249) | (v << 1) // 249 = 11111001
 
 	return nil
 }
@@ -130,16 +130,16 @@ func (pm *PublishMessage) SetPayload(v []byte) {
 
 func (pm *PublishMessage) Len() int {
 	if !pm.dirty {
-		return len(pm.dbuf)
+		return len(pm.dBuf)
 	}
 
-	ml := pm.msglen()
+	ml := pm.msgLen()
 
 	if err := pm.SetRemainingLength(int32(ml)); err != nil {
 		return 0
 	}
 
-	return pm.header.msglen() + ml
+	return pm.header.msgLen() + ml
 }
 
 func (pm *PublishMessage) Decode(src []byte) (int, error) {
@@ -167,11 +167,11 @@ func (pm *PublishMessage) Decode(src []byte) (int, error) {
 	// QoS level is 1 or 2
 	if pm.QoS() != 0 {
 		//pm.packetId = binary.BigEndian.Uint16(src[total:])
-		pm.packetId = src[total : total+2]
+		pm.packetID = src[total : total+2]
 		total += 2
 	}
 
-	l := int(pm.remlen) - (total - hn)
+	l := int(pm.remLen) - (total - hn)
 	pm.payload = src[total : total+l]
 	total += len(pm.payload)
 
@@ -182,11 +182,11 @@ func (pm *PublishMessage) Decode(src []byte) (int, error) {
 
 func (pm *PublishMessage) Encode(dst []byte) (int, error) {
 	if !pm.dirty {
-		if len(dst) < len(pm.dbuf) {
-			return 0, fmt.Errorf("publish/Encode: Insufficient buffer size. Expecting %d, got %d.", len(pm.dbuf), len(dst))
+		if len(dst) < len(pm.dBuf) {
+			return 0, fmt.Errorf("publish/Encode: Insufficient buffer size. Expecting %d, got %d.", len(pm.dBuf), len(dst))
 		}
 
-		return copy(dst, pm.dbuf), nil
+		return copy(dst, pm.dBuf), nil
 	}
 
 	if len(pm.topic) == 0 {
@@ -197,13 +197,13 @@ func (pm *PublishMessage) Encode(dst []byte) (int, error) {
 		return 0, errors.New("publish/Encode: Payload is empty.")
 	}
 
-	ml := pm.msglen()
+	ml := pm.msgLen()
 
 	if err := pm.SetRemainingLength(int32(ml)); err != nil {
 		return 0, err
 	}
 
-	hl := pm.header.msglen()
+	hl := pm.header.msgLen()
 
 	if len(dst) < hl+ml {
 		return 0, fmt.Errorf("publish/Encode: Insufficient buffer size. Expecting %d, got %d.", hl+ml, len(dst))
@@ -230,7 +230,7 @@ func (pm *PublishMessage) Encode(dst []byte) (int, error) {
 			//this.packetId = uint16(atomic.AddUint64(&gPacketId, 1) & 0xffff)
 		}
 
-		n = copy(dst[total:], pm.packetId)
+		n = copy(dst[total:], pm.packetID)
 		//binary.BigEndian.PutUint16(dst[total:], this.packetId)
 		total += n
 	}
@@ -241,7 +241,7 @@ func (pm *PublishMessage) Encode(dst []byte) (int, error) {
 	return total, nil
 }
 
-func (pm *PublishMessage) msglen() int {
+func (pm *PublishMessage) msgLen() int {
 	total := 2 + len(pm.topic) + len(pm.payload)
 	if pm.QoS() != 0 {
 		total += 2

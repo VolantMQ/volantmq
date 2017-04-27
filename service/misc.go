@@ -16,10 +16,10 @@ package service
 
 import (
 	"encoding/binary"
-	"fmt"
 	"io"
 	"net"
 
+	"errors"
 	"github.com/troian/surgemq/message"
 )
 
@@ -37,7 +37,7 @@ func getConnectMessage(conn io.Closer) (*message.ConnectMessage, error) {
 	return msg, err
 }
 
-func getConnackMessage(conn io.Closer) (*message.ConnAckMessage, error) {
+func getConnAckMessage(conn io.Closer) (*message.ConnAckMessage, error) {
 	buf, err := getMessageBuffer(conn)
 	if err != nil {
 		//glog.Debugf("Receive error: %v", err)
@@ -88,7 +88,7 @@ func getMessageBuffer(c io.Closer) ([]byte, error) {
 	for {
 		// If we have read 5 bytes and still not done, then there's a problem.
 		if l > 5 {
-			return nil, fmt.Errorf("connect/getMessage: 4th byte of remaining length has continuation bit set")
+			return nil, errors.New("connect/getMessage: 4th byte of remaining length has continuation bit set")
 		}
 
 		n, err := conn.Read(b[0:])
@@ -105,7 +105,7 @@ func getMessageBuffer(c io.Closer) ([]byte, error) {
 		buf = append(buf, b...)
 		l += n
 
-		// Check the remlen byte (1+) to see if the continuation bit is set. If so,
+		// Check the remLen byte (1+) to see if the continuation bit is set. If so,
 		// increment cnt and continue reading. Otherwise break.
 		if l > 1 && b[0] < 0x80 {
 			break
@@ -113,8 +113,8 @@ func getMessageBuffer(c io.Closer) ([]byte, error) {
 	}
 
 	// Get the remaining length of the message
-	remlen, _ := binary.Uvarint(buf[1:])
-	buf = append(buf, make([]byte, remlen)...)
+	remLen, _ := binary.Uvarint(buf[1:])
+	buf = append(buf, make([]byte, remLen)...)
 
 	for l < len(buf) {
 		n, err := conn.Read(buf[l:])

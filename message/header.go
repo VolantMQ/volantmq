@@ -28,18 +28,18 @@ var (
 // - up to 4 byte for remaining length
 type header struct {
 	// Header fields
-	//mtype  MessageType
-	//flags  byte
-	remlen int32
+	// mType  MessageType
+	// flags  byte
+	remLen int32
 
-	// mtypeflags is the first byte of the buffer, 4 bits for mtype, 4 bits for flags
-	mtypeflags []byte
+	// mTypeFlags is the first byte of the buffer, 4 bits for mType, 4 bits for flags
+	mTypeFlags []byte
 
 	// Some messages need packet ID, 2 byte uint16
-	packetId []byte
+	packetID []byte
 
 	// Points to the decoding buffer
-	dbuf []byte
+	dBuf []byte
 
 	// Whether the message has changed since last decode
 	dirty bool
@@ -47,7 +47,7 @@ type header struct {
 
 // String returns a string representation of the message.
 func (h header) String() string {
-	return fmt.Sprintf("Type=%q, Flags=%08b, Remaining Length=%d", h.Type().Name(), h.Flags(), h.remlen)
+	return fmt.Sprintf("Type=%q, Flags=%08b, Remaining Length=%d", h.Type().Name(), h.Flags(), h.remLen)
 }
 
 // Name returns a string representation of the message type. Examples include
@@ -69,12 +69,12 @@ func (h *header) Desc() string {
 // of the constants defined for MessageType.
 func (h *header) Type() MessageType {
 	//return this.mtype
-	if len(h.mtypeflags) != 1 {
-		h.mtypeflags = make([]byte, 1)
+	if len(h.mTypeFlags) != 1 {
+		h.mTypeFlags = make([]byte, 1)
 		h.dirty = true
 	}
 
-	return MessageType(h.mtypeflags[0] >> 4)
+	return MessageType(h.mTypeFlags[0] >> 4)
 }
 
 // SetType sets the message type of this message. It also correctly sets the
@@ -88,12 +88,12 @@ func (h *header) SetType(mtype MessageType) error {
 	// buffer. In this case, it means the buffer is probably a sub-slice of another
 	// slice. If that's the case, then during encoding we would have copied the whole
 	// backing buffer anyway.
-	if len(h.mtypeflags) != 1 {
-		h.mtypeflags = make([]byte, 1)
+	if len(h.mTypeFlags) != 1 {
+		h.mTypeFlags = make([]byte, 1)
 		h.dirty = true
 	}
 
-	h.mtypeflags[0] = byte(mtype)<<4 | (mtype.DefaultFlags() & 0xf)
+	h.mTypeFlags[0] = byte(mtype)<<4 | (mtype.DefaultFlags() & 0xf)
 
 	return nil
 }
@@ -101,12 +101,12 @@ func (h *header) SetType(mtype MessageType) error {
 // Flags returns the fixed header flags for this message.
 func (h *header) Flags() byte {
 	//return this.flags
-	return h.mtypeflags[0] & 0x0f
+	return h.mTypeFlags[0] & 0x0f
 }
 
 // RemainingLength returns the length of the non-fixed-header part of the message.
 func (h *header) RemainingLength() int32 {
-	return h.remlen
+	return h.remLen
 }
 
 // SetRemainingLength sets the length of the non-fixed-header part of the message.
@@ -117,20 +117,20 @@ func (h *header) SetRemainingLength(remlen int32) error {
 		return fmt.Errorf("header/SetLength: Remaining length (%d) out of bound (max %d, min 0)", remlen, maxRemainingLength)
 	}
 
-	h.remlen = remlen
+	h.remLen = remlen
 	h.dirty = true
 
 	return nil
 }
 
 func (h *header) Len() int {
-	return h.msglen()
+	return h.msgLen()
 }
 
 // PacketId returns the ID of the packet.
 func (h *header) PacketId() uint16 {
-	if len(h.packetId) == 2 {
-		return binary.BigEndian.Uint16(h.packetId)
+	if len(h.packetID) == 2 {
+		return binary.BigEndian.Uint16(h.packetID)
 	}
 
 	return 0
@@ -145,8 +145,8 @@ func (h *header) SetPacketId(v uint16) {
 
 	// If packetId buffer is not 2 bytes (uint16), then we allocate a new one and
 	// make dirty. Then we encode the packet ID into the buffer.
-	if len(h.packetId) != 2 {
-		h.packetId = make([]byte, 2)
+	if len(h.packetID) != 2 {
+		h.packetID = make([]byte, 2)
 		h.dirty = true
 	}
 
@@ -154,11 +154,11 @@ func (h *header) SetPacketId(v uint16) {
 	// buffer. In this case, it means the buffer is probably a sub-slice of another
 	// slice. If that's the case, then during encoding we would have copied the whole
 	// backing buffer anyway.
-	binary.BigEndian.PutUint16(h.packetId, v)
+	binary.BigEndian.PutUint16(h.packetID, v)
 }
 
 func (h *header) encode(dst []byte) (int, error) {
-	ml := h.msglen()
+	ml := h.msgLen()
 
 	if len(dst) < ml {
 		return 0, fmt.Errorf("header/Encode: Insufficient buffer size. Expecting %d, got %d.", ml, len(dst))
@@ -166,18 +166,18 @@ func (h *header) encode(dst []byte) (int, error) {
 
 	total := 0
 
-	if h.remlen > maxRemainingLength || h.remlen < 0 {
-		return total, fmt.Errorf("header/Encode: Remaining length (%d) out of bound (max %d, min 0)", h.remlen, maxRemainingLength)
+	if h.remLen > maxRemainingLength || h.remLen < 0 {
+		return total, fmt.Errorf("header/Encode: Remaining length (%d) out of bound (max %d, min 0)", h.remLen, maxRemainingLength)
 	}
 
 	if !h.Type().Valid() {
 		return total, fmt.Errorf("header/Encode: Invalid message type %d", h.Type())
 	}
 
-	dst[total] = h.mtypeflags[0]
+	dst[total] = h.mTypeFlags[0]
 	total += 1
 
-	n := binary.PutUvarint(dst[total:], uint64(h.remlen))
+	n := binary.PutUvarint(dst[total:], uint64(h.remLen))
 	total += n
 
 	return total, nil
@@ -189,19 +189,19 @@ func (h *header) encode(dst []byte) (int, error) {
 func (h *header) decode(src []byte) (int, error) {
 	total := 0
 
-	h.dbuf = src
+	h.dBuf = src
 
-	mtype := h.Type()
-	//mtype := MessageType(0)
+	mType := h.Type()
+	//mType := MessageType(0)
 
-	h.mtypeflags = src[total : total+1]
-	//mtype := MessageType(src[total] >> 4)
+	h.mTypeFlags = src[total : total+1]
+	//mType := MessageType(src[total] >> 4)
 	if !h.Type().Valid() {
-		return total, fmt.Errorf("header/Decode: Invalid message type %d.", mtype)
+		return total, fmt.Errorf("header/Decode: Invalid message type %d.", mType)
 	}
 
-	if mtype != h.Type() {
-		return total, fmt.Errorf("header/Decode: Invalid message type %d. Expecting %d.", h.Type(), mtype)
+	if mType != h.Type() {
+		return total, fmt.Errorf("header/Decode: Invalid message type %d. Expecting %d.", h.Type(), mType)
 	}
 
 	//this.flags = src[total] & 0x0f
@@ -215,30 +215,30 @@ func (h *header) decode(src []byte) (int, error) {
 
 	total++
 
-	remlen, m := binary.Uvarint(src[total:])
+	remLen, m := binary.Uvarint(src[total:])
 	total += m
-	h.remlen = int32(remlen)
+	h.remLen = int32(remLen)
 
-	if h.remlen > maxRemainingLength || remlen < 0 {
-		return total, fmt.Errorf("header/Decode: Remaining length (%d) out of bound (max %d, min 0)", h.remlen, maxRemainingLength)
+	if h.remLen > maxRemainingLength || remLen < 0 {
+		return total, fmt.Errorf("header/Decode: Remaining length (%d) out of bound (max %d, min 0)", h.remLen, maxRemainingLength)
 	}
 
-	if int(h.remlen) > len(src[total:]) {
-		return total, fmt.Errorf("header/Decode: Remaining length (%d) is greater than remaining buffer (%d)", h.remlen, len(src[total:]))
+	if int(h.remLen) > len(src[total:]) {
+		return total, fmt.Errorf("header/Decode: Remaining length (%d) is greater than remaining buffer (%d)", h.remLen, len(src[total:]))
 	}
 
 	return total, nil
 }
 
-func (h *header) msglen() int {
+func (h *header) msgLen() int {
 	// message type and flag byte
 	total := 1
 
-	if h.remlen <= 127 {
+	if h.remLen <= 127 {
 		total += 1
-	} else if h.remlen <= 16383 {
+	} else if h.remLen <= 16383 {
 		total += 2
-	} else if h.remlen <= 2097151 {
+	} else if h.remLen <= 2097151 {
 		total += 3
 	} else {
 		total += 4

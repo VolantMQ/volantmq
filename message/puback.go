@@ -32,21 +32,21 @@ func NewPubAckMessage() *PubAckMessage {
 }
 
 func (pam PubAckMessage) String() string {
-	return fmt.Sprintf("%s, Packet ID=%d", pam.header, pam.packetId)
+	return fmt.Sprintf("%s, Packet ID=%d", pam.header, pam.packetID)
 }
 
 func (pam *PubAckMessage) Len() int {
 	if !pam.dirty {
-		return len(pam.dbuf)
+		return len(pam.dBuf)
 	}
 
-	ml := pam.msglen()
+	ml := pam.msgLen()
 
 	if err := pam.SetRemainingLength(int32(ml)); err != nil {
 		return 0
 	}
 
-	return pam.header.msglen() + ml
+	return pam.header.msgLen() + ml
 }
 
 func (pam *PubAckMessage) Decode(src []byte) (int, error) {
@@ -58,8 +58,8 @@ func (pam *PubAckMessage) Decode(src []byte) (int, error) {
 		return total, err
 	}
 
-	//this.packetId = binary.BigEndian.Uint16(src[total:])
-	pam.packetId = src[total : total+2]
+	//this.packetID = binary.BigEndian.Uint16(src[total:])
+	pam.packetID = src[total : total+2]
 	total += 2
 
 	pam.dirty = false
@@ -69,15 +69,15 @@ func (pam *PubAckMessage) Decode(src []byte) (int, error) {
 
 func (pam *PubAckMessage) Encode(dst []byte) (int, error) {
 	if !pam.dirty {
-		if len(dst) < len(pam.dbuf) {
-			return 0, fmt.Errorf("puback/Encode: Insufficient buffer size. Expecting %d, got %d.", len(pam.dbuf), len(dst))
+		if len(dst) < len(pam.dBuf) {
+			return 0, fmt.Errorf("puback/Encode: Insufficient buffer size. Expecting %d, got %d.", len(pam.dBuf), len(dst))
 		}
 
-		return copy(dst, pam.dbuf), nil
+		return copy(dst, pam.dBuf), nil
 	}
 
-	hl := pam.header.msglen()
-	ml := pam.msglen()
+	hl := pam.header.msgLen()
+	ml := pam.msgLen()
 
 	if len(dst) < hl+ml {
 		return 0, fmt.Errorf("puback/Encode: Insufficient buffer size. Expecting %d, got %d.", hl+ml, len(dst))
@@ -95,7 +95,7 @@ func (pam *PubAckMessage) Encode(dst []byte) (int, error) {
 		return total, err
 	}
 
-	if copy(dst[total:total+2], pam.packetId) != 2 {
+	if copy(dst[total:total+2], pam.packetID) != 2 {
 		dst[total], dst[total+1] = 0, 0
 	}
 	total += 2
@@ -103,7 +103,7 @@ func (pam *PubAckMessage) Encode(dst []byte) (int, error) {
 	return total, nil
 }
 
-func (pam *PubAckMessage) msglen() int {
+func (pam *PubAckMessage) msgLen() int {
 	// packet ID
 	return 2
 }

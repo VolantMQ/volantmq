@@ -47,17 +47,14 @@ type ConnectMessage struct {
 	// 1: clean session
 	// 0: reserved
 	connectFlags byte
-
-	version byte
-
-	keepAlive uint16
-
-	protoName,
-	clientId,
-	willTopic,
-	willMessage,
-	username,
-	password []byte
+	version      byte
+	keepAlive    uint16
+	protoName    []byte
+	clientId     []byte
+	willTopic    []byte
+	willMessage  []byte
+	username     []byte
+	password     []byte
 }
 
 var _ Message = (*ConnectMessage)(nil)
@@ -331,7 +328,7 @@ func (cm *ConnectMessage) SetPassword(v []byte) {
 
 func (cm *ConnectMessage) Len() int {
 	if !cm.dirty {
-		return len(cm.dbuf)
+		return len(cm.dBuf)
 	}
 
 	ml := cm.msglen()
@@ -340,7 +337,7 @@ func (cm *ConnectMessage) Len() int {
 		return 0
 	}
 
-	return cm.header.msglen() + ml
+	return cm.header.msgLen() + ml
 }
 
 // For the CONNECT message, the error returned could be a ConnackReturnCode, so
@@ -371,11 +368,11 @@ func (cm *ConnectMessage) Decode(src []byte) (int, error) {
 
 func (cm *ConnectMessage) Encode(dst []byte) (int, error) {
 	if !cm.dirty {
-		if len(dst) < len(cm.dbuf) {
-			return 0, fmt.Errorf("connect/Encode: Insufficient buffer size. Expecting %d, got %d.", len(cm.dbuf), len(dst))
+		if len(dst) < len(cm.dBuf) {
+			return 0, fmt.Errorf("connect/Encode: Insufficient buffer size. Expecting %d, got %d.", len(cm.dBuf), len(dst))
 		}
 
-		return copy(dst, cm.dbuf), nil
+		return copy(dst, cm.dBuf), nil
 	}
 
 	if cm.Type() != CONNECT {
@@ -387,7 +384,7 @@ func (cm *ConnectMessage) Encode(dst []byte) (int, error) {
 		return 0, ErrInvalidProtocolVersion
 	}
 
-	hl := cm.header.msglen()
+	hl := cm.header.msgLen()
 	ml := cm.msglen()
 
 	if len(dst) < hl+ml {

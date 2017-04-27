@@ -75,10 +75,16 @@ type Server struct {
 	// in the CONNECT message. If not set then default to "mockSuccess".
 	Authenticators string
 
+	// Anonymous either allow anonymous access or not
+	Anonymous bool
+
 	// SessionsProvider is the session store that keeps all the Session objects.
 	// This is the store to check if CleanSession is set to 0 in the CONNECT message.
 	// If not set then default to "mem".
 	SessionsProvider string
+
+	// ClientIDFromUser
+	ClientIDFromUser bool
 
 	// TopicsProvider is the topic store that keeps all the subscription topics.
 	// If not set then default to "mem".
@@ -193,7 +199,7 @@ func (s *Server) ListenAndServe(uri string) error {
 	defer atomic.CompareAndSwapInt32(&s.running, 1, 0)
 
 	if !atomic.CompareAndSwapInt32(&s.running, 0, 1) {
-		return fmt.Errorf("server/ListenAndServe: Server is already running")
+		return errors.New("server/ListenAndServe: Server is already running")
 	}
 
 	u, err := url.Parse(uri)
@@ -224,7 +230,7 @@ func (s *Server) ListenAndServeTLS(uri string, certFile, keyFile string) error {
 	defer atomic.CompareAndSwapInt32(&s.runningTLS, 1, 0)
 
 	if !atomic.CompareAndSwapInt32(&s.runningTLS, 0, 1) {
-		return fmt.Errorf("server/ListenAndServeTLS: Server is already running")
+		return errors.New("server/ListenAndServeTLS: Server is already running")
 	}
 
 	u, err := url.Parse(uri)
@@ -333,10 +339,12 @@ func (s *Server) Close() error {
 }
 
 // HandleConnection is for the broker to handle an incoming connection from a client
-func (s *Server) handleConnection(c io.Closer) (svc *service, err error) {
+func (s *Server) handleConnection(c io.Closer) (*service, error) {
 	if c == nil {
 		return nil, ErrInvalidConnectionType
 	}
+
+	var err error
 
 	defer func() {
 		if err != nil {
@@ -371,79 +379,87 @@ func (s *Server) handleConnection(c io.Closer) (svc *service, err error) {
 
 	resp := message.NewConnAckMessage()
 
-	req, err := getConnectMessage(conn)
-	if err != nil {
-		if cerr, ok := err.(message.ConnAckCode); ok {
-			//glog.Debugf("request   message: %s\nresponse message: %s\nerror           : %v", mreq, resp, err)
-			resp.SetReturnCode(cerr)
-			resp.SetSessionPresent(false)
-			writeMessage(conn, resp)
-		}
-		return nil, err
-	}
-
-	// Authenticate the user, if error, return error and exit
-	// Go through all of authenticators
-	authenticated := false
-
-	for i := range s.authMgrs {
-		if err = s.authMgrs[i].Authenticate(string(req.Username()), string(req.Password())); err == nil {
-			authenticated = true
-			break
-		}
-	}
-
-	if !authenticated {
-		resp.SetReturnCode(message.ErrBadUsernameOrPassword)
-		resp.SetSessionPresent(false)
-		writeMessage(conn, resp)
-		return nil, err
-	}
-
-	if req.KeepAlive() == 0 {
-		req.SetKeepAlive(minKeepAlive)
-	}
-
-	svc = &service{
-		id:     atomic.AddUint64(&gsvcid, 1),
-		client: false,
-
-		keepAlive:      int(req.KeepAlive()),
+	svc := &service{
+		client:         false,
 		connectTimeout: s.ConnectTimeout,
 		ackTimeout:     s.AckTimeout,
 		timeoutRetries: s.TimeoutRetries,
-
-		conn:      conn,
-		sessMgr:   s.sessMgr,
-		topicsMgr: s.topicsMgr,
+		conn:           conn,
+		sessMgr:        s.sessMgr,
+		topicsMgr:      s.topicsMgr,
 	}
 
-	err = s.getSession(svc, req, resp)
-	if err != nil {
-		return nil, err
+	var req *message.ConnectMessage
+
+	if req, err = getConnectMessage(conn); err != nil {
+		if cerr, ok := err.(message.ConnAckCode); ok {
+			//glog.Errorf("request   message: %s\nresponse message: %s\nerror           : %v", mreq, resp, err)
+			resp.SetReturnCode(cerr)
+		}
+	} else {
+		if req.UsernameFlag() {
+			for i := range s.authMgrs {
+				if err = s.authMgrs[i].Password(string(req.Username()), string(req.Password())); err == nil {
+					resp.SetReturnCode(message.ConnectionAccepted)
+					break
+				} else {
+					resp.SetReturnCode(message.ErrBadUsernameOrPassword)
+				}
+			}
+		} else {
+			if s.Anonymous {
+				resp.SetReturnCode(message.ConnectionAccepted)
+			} else {
+				resp.SetReturnCode(message.ErrNotAuthorized)
+			}
+		}
+
+		if resp.ReturnCode() == message.ConnectionAccepted {
+			if req.KeepAlive() == 0 {
+				req.SetKeepAlive(minKeepAlive)
+			}
+
+			svc.keepAlive = int(req.KeepAlive())
+			svc.id = atomic.AddUint64(&gSvcID, 1)
+
+			if err = s.getSession(svc, req, resp); err != nil {
+				resp.SetReturnCode(message.ErrServerUnavailable)
+				resp.SetSessionPresent(false)
+				glog.Errorf("server/handleConnection: session error: %s", err.Error())
+			}
+		}
+
+		if resp.ReturnCode() != message.ConnectionAccepted {
+			resp.SetSessionPresent(false)
+		}
 	}
 
-	resp.SetReturnCode(message.ConnectionAccepted)
+	tmpErr := err
 
 	if err = writeMessage(c, resp); err != nil {
 		return nil, err
 	}
 
-	svc.inStat.increment(int64(req.Len()))
-	svc.outStat.increment(int64(resp.Len()))
+	err = tmpErr
 
-	if err := svc.start(); err != nil {
-		svc.stop()
-		return nil, err
+	if resp.ReturnCode() == message.ConnectionAccepted {
+		svc.inStat.increment(int64(req.Len()))
+		svc.outStat.increment(int64(resp.Len()))
+
+		if err := svc.start(); err != nil {
+			svc.stop()
+			return nil, err
+		}
+
+		//this.mu.Lock()
+		//this.svcs = append(this.svcs, svc)
+		//this.mu.Unlock()
+
+		glog.Infof("(%s) server/handleConnection: Connection established.", svc.cid())
+		return svc, nil
 	}
 
-	//this.mu.Lock()
-	//this.svcs = append(this.svcs, svc)
-	//this.mu.Unlock()
-
-	glog.Infof("(%s) server/handleConnection: Connection established.", svc.cid())
-
-	return svc, nil
+	return nil, err
 }
 
 func (s *Server) checkConfiguration() error {
@@ -509,11 +525,15 @@ func (s *Server) getSession(svc *service, req *message.ConnectMessage, resp *mes
 	// server must create a new session.
 	//
 	// If CleanSession is set to 1, the client and server must discard any previous
-	// session and start a new one. This session lasts as long as the network c
-	// onnection. State data associated with this session must not be reused in any
+	// session and start a new one. This session lasts as long as the network
+	// connection. State data associated with this session must not be reused in any
 	// subsequent session.
 
 	var err error
+
+	if s.ClientIDFromUser {
+		req.SetClientId(req.Username())
+	}
 
 	// Check to see if the client supplied an ID, if not, generate one and set
 	// clean session.

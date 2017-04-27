@@ -331,7 +331,7 @@ func ValidTopic(topic []byte) bool {
 }
 
 // ValidQos checks the QoS value to see if it's valid. Valid QoS are QosAtMostOnce,
-// QosAtLeastonce, and QosExactlyOnce.
+// QosAtLeastOnce, and QosExactlyOnce.
 func ValidQos(qos byte) bool {
 	return qos == QosAtMostOnce || qos == QosAtLeastOnce || qos == QosExactlyOnce
 }
@@ -342,8 +342,8 @@ func ValidVersion(v byte) bool {
 	return ok
 }
 
-// ValidConnackError checks to see if the error is a Connack Error or not
-func ValidConnackError(err error) bool {
+// ValidConnAckError checks to see if the error is a ConnAck Error or not
+func ValidConnAckError(err error) bool {
 	return err == ErrInvalidProtocolVersion || err == ErrIdentifierRejected ||
 		err == ErrServerUnavailable || err == ErrBadUsernameOrPassword || err == ErrNotAuthorized
 }

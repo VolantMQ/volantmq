@@ -16,7 +16,7 @@ package auth
 
 type mockAuthenticator bool
 
-var _ Authenticator = (*mockAuthenticator)(nil)
+var _ Provider = (*mockAuthenticator)(nil)
 
 var (
 	mockSuccessAuthenticator mockAuthenticator = true
@@ -28,7 +28,23 @@ func init() {
 	Register("mockFailure", mockFailureAuthenticator)
 }
 
-func (m mockAuthenticator) Authenticate(id string, cred interface{}) error {
+func (m mockAuthenticator) Password(user, password string) error {
+	if m {
+		return nil
+	}
+
+	return ErrAuthFailure
+}
+
+func (m mockAuthenticator) AclCheck(clientID, user, topic string, access AccessType) error {
+	if m {
+		return nil
+	}
+
+	return ErrAuthFailure
+}
+
+func (m mockAuthenticator) PskKey(hint, identity string, key []byte, maxKeyLen int) error {
 	if m {
 		return nil
 	}

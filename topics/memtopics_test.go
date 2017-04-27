@@ -96,7 +96,7 @@ func TestSNodeInsert1(t *testing.T) {
 	n := newSNode()
 	topic := []byte("sport/tennis/player1/#")
 
-	err := n.sinsert(topic, 1, "sub1")
+	err := n.sInsert(topic, 1, "sub1")
 
 	require.NoError(t, err)
 	require.Equal(t, 1, len(n.snodes))
@@ -132,7 +132,7 @@ func TestSNodeInsert2(t *testing.T) {
 	n := newSNode()
 	topic := []byte("#")
 
-	err := n.sinsert(topic, 1, "sub1")
+	err := n.sInsert(topic, 1, "sub1")
 
 	require.NoError(t, err)
 	require.Equal(t, 1, len(n.snodes))
@@ -150,7 +150,7 @@ func TestSNodeInsert3(t *testing.T) {
 	n := newSNode()
 	topic := []byte("+/tennis/#")
 
-	err := n.sinsert(topic, 1, "sub1")
+	err := n.sInsert(topic, 1, "sub1")
 
 	require.NoError(t, err)
 	require.Equal(t, 1, len(n.snodes))
@@ -180,7 +180,7 @@ func TestSNodeInsert4(t *testing.T) {
 	n := newSNode()
 	topic := []byte("/finance")
 
-	err := n.sinsert(topic, 1, "sub1")
+	err := n.sInsert(topic, 1, "sub1")
 
 	require.NoError(t, err)
 	require.Equal(t, 1, len(n.snodes))
@@ -204,8 +204,8 @@ func TestSNodeInsertDup(t *testing.T) {
 	n := newSNode()
 	topic := []byte("/finance")
 
-	n.sinsert(topic, 1, "sub1")
-	err := n.sinsert(topic, 1, "sub1")
+	n.sInsert(topic, 1, "sub1")
+	err := n.sInsert(topic, 1, "sub1")
 
 	require.NoError(t, err)
 	require.Equal(t, 1, len(n.snodes))
@@ -229,7 +229,7 @@ func TestSNodeRemove1(t *testing.T) {
 	n := newSNode()
 	topic := []byte("sport/tennis/player1/#")
 
-	n.sinsert(topic, 1, "sub1")
+	n.sInsert(topic, 1, "sub1")
 	err := n.sremove([]byte("sport/tennis/player1/#"), "sub1")
 
 	require.NoError(t, err)
@@ -241,7 +241,7 @@ func TestSNodeRemove2(t *testing.T) {
 	n := newSNode()
 	topic := []byte("sport/tennis/player1/#")
 
-	n.sinsert(topic, 1, "sub1")
+	n.sInsert(topic, 1, "sub1")
 	err := n.sremove([]byte("sport/tennis/player1"), "sub1")
 
 	require.Error(t, err)
@@ -251,8 +251,8 @@ func TestSNodeRemove3(t *testing.T) {
 	n := newSNode()
 	topic := []byte("sport/tennis/player1/#")
 
-	n.sinsert(topic, 1, "sub1")
-	n.sinsert(topic, 1, "sub2")
+	n.sInsert(topic, 1, "sub1")
+	n.sInsert(topic, 1, "sub2")
 	err := n.sremove([]byte("sport/tennis/player1/#"), nil)
 
 	require.NoError(t, err)
@@ -263,7 +263,7 @@ func TestSNodeRemove3(t *testing.T) {
 func TestSNodeMatch1(t *testing.T) {
 	n := newSNode()
 	topic := []byte("sport/tennis/player1/#")
-	n.sinsert(topic, 1, "sub1")
+	n.sInsert(topic, 1, "sub1")
 
 	subs := make([]interface{}, 0, 5)
 	qoss := make([]byte, 0, 5)
@@ -278,7 +278,7 @@ func TestSNodeMatch1(t *testing.T) {
 func TestSNodeMatch2(t *testing.T) {
 	n := newSNode()
 	topic := []byte("sport/tennis/player1/#")
-	n.sinsert(topic, 1, "sub1")
+	n.sInsert(topic, 1, "sub1")
 
 	subs := make([]interface{}, 0, 5)
 	qoss := make([]byte, 0, 5)
@@ -293,7 +293,7 @@ func TestSNodeMatch2(t *testing.T) {
 func TestSNodeMatch3(t *testing.T) {
 	n := newSNode()
 	topic := []byte("sport/tennis/player1/#")
-	n.sinsert(topic, 2, "sub1")
+	n.sInsert(topic, 2, "sub1")
 
 	subs := make([]interface{}, 0, 5)
 	qoss := make([]byte, 0, 5)
@@ -307,7 +307,7 @@ func TestSNodeMatch3(t *testing.T) {
 
 func TestSNodeMatch4(t *testing.T) {
 	n := newSNode()
-	n.sinsert([]byte("sport/tennis/#"), 2, "sub1")
+	n.sInsert([]byte("sport/tennis/#"), 2, "sub1")
 
 	subs := make([]interface{}, 0, 5)
 	qoss := make([]byte, 0, 5)
@@ -321,8 +321,8 @@ func TestSNodeMatch4(t *testing.T) {
 
 func TestSNodeMatch5(t *testing.T) {
 	n := newSNode()
-	n.sinsert([]byte("sport/tennis/+/anzel"), 1, "sub1")
-	n.sinsert([]byte("sport/tennis/player1/anzel"), 1, "sub2")
+	n.sInsert([]byte("sport/tennis/+/anzel"), 1, "sub1")
+	n.sInsert([]byte("sport/tennis/player1/anzel"), 1, "sub2")
 
 	subs := make([]interface{}, 0, 5)
 	qoss := make([]byte, 0, 5)
@@ -335,8 +335,8 @@ func TestSNodeMatch5(t *testing.T) {
 
 func TestSNodeMatch6(t *testing.T) {
 	n := newSNode()
-	n.sinsert([]byte("sport/tennis/#"), 2, "sub1")
-	n.sinsert([]byte("sport/tennis"), 1, "sub2")
+	n.sInsert([]byte("sport/tennis/#"), 2, "sub1")
+	n.sInsert([]byte("sport/tennis"), 1, "sub2")
 
 	subs := make([]interface{}, 0, 5)
 	qoss := make([]byte, 0, 5)
@@ -350,7 +350,7 @@ func TestSNodeMatch6(t *testing.T) {
 
 func TestSNodeMatch7(t *testing.T) {
 	n := newSNode()
-	n.sinsert([]byte("+/+"), 2, "sub1")
+	n.sInsert([]byte("+/+"), 2, "sub1")
 
 	subs := make([]interface{}, 0, 5)
 	qoss := make([]byte, 0, 5)
@@ -363,7 +363,7 @@ func TestSNodeMatch7(t *testing.T) {
 
 func TestSNodeMatch8(t *testing.T) {
 	n := newSNode()
-	n.sinsert([]byte("/+"), 2, "sub1")
+	n.sInsert([]byte("/+"), 2, "sub1")
 
 	subs := make([]interface{}, 0, 5)
 	qoss := make([]byte, 0, 5)
@@ -376,7 +376,7 @@ func TestSNodeMatch8(t *testing.T) {
 
 func TestSNodeMatch9(t *testing.T) {
 	n := newSNode()
-	n.sinsert([]byte("+"), 2, "sub1")
+	n.sInsert([]byte("+"), 2, "sub1")
 
 	subs := make([]interface{}, 0, 5)
 	qoss := make([]byte, 0, 5)
@@ -641,9 +641,9 @@ func TestMemTopicsRetained(t *testing.T) {
 
 func newPublishMessageLarge(topic []byte, qos byte) *message.PublishMessage {
 	msg := message.NewPublishMessage()
-	msg.SetTopic(topic)
-	msg.SetPayload(make([]byte, 1024))
-	msg.SetQoS(qos)
+	msg.SetTopic(topic)                // nolint
+	msg.SetPayload(make([]byte, 1024)) // nolint
+	msg.SetQoS(qos)                    // nolint
 
 	return msg
 }

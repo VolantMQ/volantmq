@@ -97,16 +97,16 @@ func (usm *UnSubscribeMessage) TopicExists(topic []byte) bool {
 
 func (usm *UnSubscribeMessage) Len() int {
 	if !usm.dirty {
-		return len(usm.dbuf)
+		return len(usm.dBuf)
 	}
 
-	ml := usm.msglen()
+	ml := usm.msgLen()
 
 	if err := usm.SetRemainingLength(int32(ml)); err != nil {
 		return 0
 	}
 
-	return usm.header.msglen() + ml
+	return usm.header.msgLen() + ml
 }
 
 // Decode reads from the io.Reader parameter until a full message is decoded, or
@@ -122,10 +122,10 @@ func (usm *UnSubscribeMessage) Decode(src []byte) (int, error) {
 	}
 
 	//this.packetId = binary.BigEndian.Uint16(src[total:])
-	usm.packetId = src[total : total+2]
+	usm.packetID = src[total : total+2]
 	total += 2
 
-	remlen := int(usm.remlen) - (total - hn)
+	remlen := int(usm.remLen) - (total - hn)
 	for remlen > 0 {
 		t, n, err := readLPBytes(src[total:])
 		total += n
@@ -153,15 +153,15 @@ func (usm *UnSubscribeMessage) Decode(src []byte) (int, error) {
 // Any changes to the message after Encode() is called will invalidate the io.Reader.
 func (usm *UnSubscribeMessage) Encode(dst []byte) (int, error) {
 	if !usm.dirty {
-		if len(dst) < len(usm.dbuf) {
-			return 0, fmt.Errorf("unsubscribe/Encode: Insufficient buffer size. Expecting %d, got %d.", len(usm.dbuf), len(dst))
+		if len(dst) < len(usm.dBuf) {
+			return 0, fmt.Errorf("unsubscribe/Encode: Insufficient buffer size. Expecting %d, got %d.", len(usm.dBuf), len(dst))
 		}
 
-		return copy(dst, usm.dbuf), nil
+		return copy(dst, usm.dBuf), nil
 	}
 
-	hl := usm.header.msglen()
-	ml := usm.msglen()
+	hl := usm.header.msgLen()
+	ml := usm.msgLen()
 
 	if len(dst) < hl+ml {
 		return 0, fmt.Errorf("unsubscribe/Encode: Insufficient buffer size. Expecting %d, got %d.", hl+ml, len(dst))
@@ -184,7 +184,7 @@ func (usm *UnSubscribeMessage) Encode(dst []byte) (int, error) {
 		//this.packetId = uint16(atomic.AddUint64(&gPacketId, 1) & 0xffff)
 	}
 
-	n = copy(dst[total:], usm.packetId)
+	n = copy(dst[total:], usm.packetID)
 	//binary.BigEndian.PutUint16(dst[total:], this.packetId)
 	total += n
 
@@ -199,7 +199,7 @@ func (usm *UnSubscribeMessage) Encode(dst []byte) (int, error) {
 	return total, nil
 }
 
-func (usm *UnSubscribeMessage) msglen() int {
+func (usm *UnSubscribeMessage) msgLen() int {
 	// packet ID
 	total := 2
 
