@@ -25,7 +25,7 @@ package topics
 import (
 	"fmt"
 
-	"github.com/surgemq/message"
+	"github.com/troian/surgemq/message"
 )
 
 const (

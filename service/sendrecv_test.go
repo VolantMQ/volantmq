@@ -20,7 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/surgemq/message"
+	"github.com/troian/surgemq/message"
 )
 
 func TestReadMessageSuccess(t *testing.T) {

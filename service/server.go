@@ -27,8 +27,8 @@ import (
 	"time"
 
 	"github.com/surge/glog"
-	"github.com/surgemq/message"
 	"github.com/troian/surgemq/auth"
+	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/sessions"
 	"github.com/troian/surgemq/topics"
 )
@@ -369,11 +369,11 @@ func (s *Server) handleConnection(c io.Closer) (svc *service, err error) {
 
 	conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(s.ConnectTimeout)))
 
-	resp := message.NewConnackMessage()
+	resp := message.NewConnAckMessage()
 
 	req, err := getConnectMessage(conn)
 	if err != nil {
-		if cerr, ok := err.(message.ConnackCode); ok {
+		if cerr, ok := err.(message.ConnAckCode); ok {
 			//glog.Debugf("request   message: %s\nresponse message: %s\nerror           : %v", mreq, resp, err)
 			resp.SetReturnCode(cerr)
 			resp.SetSessionPresent(false)
@@ -502,7 +502,7 @@ func (s *Server) checkConfiguration() error {
 	return err
 }
 
-func (s *Server) getSession(svc *service, req *message.ConnectMessage, resp *message.ConnackMessage) error {
+func (s *Server) getSession(svc *service, req *message.ConnectMessage, resp *message.ConnAckMessage) error {
 	// If CleanSession is set to 0, the server MUST resume communications with the
 	// client based on state from the current session, as identified by the client
 	// identifier. If there is no session associated with the client identifier the

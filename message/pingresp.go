@@ -12,39 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package sessions
+package message
 
-import (
-	"testing"
+// A PINGRESP Packet is sent by the Server to the Client in response to a PINGREQ
+// Packet. It indicates that the Server is alive.
+type PingRespMessage struct {
+	DisconnectMessage
+}
 
-	"github.com/stretchr/testify/require"
-	"github.com/troian/surgemq/message"
-)
+var _ Message = (*PingRespMessage)(nil)
 
-func TestAckQueueOutOfOrder(t *testing.T) {
-	q := newAckqueue(5)
-	require.Equal(t, 8, q.cap())
+// NewPingRespMessage creates a new PINGRESP message.
+func NewPingRespMessage() Message {
+	msg := &PingRespMessage{}
+	msg.SetType(PINGRESP)
 
-	for i := 0; i < 12; i++ {
-		msg := newPublishMessage(uint16(i), 1)
-		q.Wait(msg, nil)
-	}
-
-	require.Equal(t, 12, q.len())
-
-	ack1 := message.NewPubackMessage()
-	ack1.SetPacketId(1)
-	q.Ack(ack1)
-
-	acked := q.Acked()
-
-	require.Equal(t, 0, len(acked))
-
-	ack0 := message.NewPubackMessage()
-	ack0.SetPacketId(0)
-	q.Ack(ack0)
-
-	acked = q.Acked()
-
-	require.Equal(t, 2, len(acked))
+	return msg
 }

@@ -69,7 +69,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/surge/netx"
-	"github.com/surgemq/message"
+	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/service"
 )
 

@@ -20,7 +20,7 @@ import (
 	"io"
 	"net"
 
-	"github.com/surgemq/message"
+	"github.com/troian/surgemq/message"
 )
 
 func getConnectMessage(conn io.Closer) (*message.ConnectMessage, error) {
@@ -37,14 +37,14 @@ func getConnectMessage(conn io.Closer) (*message.ConnectMessage, error) {
 	return msg, err
 }
 
-func getConnackMessage(conn io.Closer) (*message.ConnackMessage, error) {
+func getConnackMessage(conn io.Closer) (*message.ConnAckMessage, error) {
 	buf, err := getMessageBuffer(conn)
 	if err != nil {
 		//glog.Debugf("Receive error: %v", err)
 		return nil, err
 	}
 
-	msg := message.NewConnackMessage()
+	msg := message.NewConnAckMessage()
 
 	_, err = msg.Decode(buf)
 	//glog.Debugf("Received: %s", msg)

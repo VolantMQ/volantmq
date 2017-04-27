@@ -22,7 +22,7 @@ import (
 
 	"errors"
 	"github.com/surge/glog"
-	"github.com/surgemq/message"
+	"github.com/troian/surgemq/message"
 )
 
 type netReader interface {

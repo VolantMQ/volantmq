@@ -21,7 +21,7 @@ import (
 	"reflect"
 
 	"github.com/surge/glog"
-	"github.com/surgemq/message"
+	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/sessions"
 )
 
@@ -110,22 +110,22 @@ func (s *service) processIncoming(msg message.Message) error {
 		// If QoS == 2, we need to put it in the ack queue, send back PUBREC
 		err = s.processPublish(msg)
 
-	case *message.PubackMessage:
+	case *message.PubAckMessage:
 		// For PUBACK message, it means QoS 1, we should send to ack queue
 		s.sess.Pub1ack.Ack(msg)
 		s.processAcked(s.sess.Pub1ack)
 
-	case *message.PubrecMessage:
+	case *message.PubRecMessage:
 		// For PUBREC message, it means QoS 2, we should send to ack queue, and send back PUBREL
 		if err = s.sess.Pub2out.Ack(msg); err != nil {
 			break
 		}
 
-		resp := message.NewPubrelMessage()
+		resp := message.NewPubRelMessage()
 		resp.SetPacketId(msg.PacketId())
 		_, err = s.writeMessage(resp)
 
-	case *message.PubrelMessage:
+	case *message.PubRelMessage:
 		// For PUBREL message, it means QoS 2, we should send to ack queue, and send back PUBCOMP
 		if err = s.sess.Pub2in.Ack(msg); err != nil {
 			break
@@ -133,11 +133,11 @@ func (s *service) processIncoming(msg message.Message) error {
 
 		s.processAcked(s.sess.Pub2in)
 
-		resp := message.NewPubcompMessage()
+		resp := message.NewPubCompMessage()
 		resp.SetPacketId(msg.PacketId())
 		_, err = s.writeMessage(resp)
 
-	case *message.PubcompMessage:
+	case *message.PubCompMessage:
 		// For PUBCOMP message, it means QoS 2, we should send to ack queue
 		if err = s.sess.Pub2out.Ack(msg); err != nil {
 			break
@@ -149,26 +149,26 @@ func (s *service) processIncoming(msg message.Message) error {
 		// For SUBSCRIBE message, we should add subscriber, then send back SUBACK
 		return s.processSubscribe(msg)
 
-	case *message.SubackMessage:
+	case *message.SubAckMessage:
 		// For SUBACK message, we should send to ack queue
 		s.sess.Suback.Ack(msg)
 		s.processAcked(s.sess.Suback)
 
-	case *message.UnsubscribeMessage:
+	case *message.UnSubscribeMessage:
 		// For UNSUBSCRIBE message, we should remove subscriber, then send back UNSUBACK
 		return s.processUnsubscribe(msg)
 
-	case *message.UnsubackMessage:
+	case *message.UnSubAckMessage:
 		// For UNSUBACK message, we should send to ack queue
 		s.sess.Unsuback.Ack(msg)
 		s.processAcked(s.sess.Unsuback)
 
-	case *message.PingreqMessage:
+	case *message.PingReqMessage:
 		// For PINGREQ message, we should send back PINGRESP
-		resp := message.NewPingrespMessage()
+		resp := message.NewPingRespMessage()
 		_, err = s.writeMessage(resp)
 
-	case *message.PingrespMessage:
+	case *message.PingRespMessage:
 		s.sess.Pingack.Ack(msg)
 		s.processAcked(s.sess.Pingack)
 
@@ -273,14 +273,14 @@ func (s *service) processPublish(msg *message.PublishMessage) error {
 	case message.QosExactlyOnce:
 		s.sess.Pub2in.Wait(msg, nil)
 
-		resp := message.NewPubrecMessage()
+		resp := message.NewPubRecMessage()
 		resp.SetPacketId(msg.PacketId())
 
 		_, err := s.writeMessage(resp)
 		return err
 
 	case message.QosAtLeastOnce:
-		resp := message.NewPubackMessage()
+		resp := message.NewPubAckMessage()
 		resp.SetPacketId(msg.PacketId())
 
 		if _, err := s.writeMessage(resp); err != nil {
@@ -298,7 +298,7 @@ func (s *service) processPublish(msg *message.PublishMessage) error {
 
 // For SUBSCRIBE message, we should add subscriber, then send back SUBACK
 func (s *service) processSubscribe(msg *message.SubscribeMessage) error {
-	resp := message.NewSubackMessage()
+	resp := message.NewSubAckMessage()
 	resp.SetPacketId(msg.PacketId())
 
 	// Subscribe to the different topics
@@ -343,7 +343,7 @@ func (s *service) processSubscribe(msg *message.SubscribeMessage) error {
 }
 
 // For UNSUBSCRIBE message, we should remove the subscriber, and send back UNSUBACK
-func (s *service) processUnsubscribe(msg *message.UnsubscribeMessage) error {
+func (s *service) processUnsubscribe(msg *message.UnSubscribeMessage) error {
 	topics := msg.Topics()
 
 	for _, t := range topics {
@@ -351,7 +351,7 @@ func (s *service) processUnsubscribe(msg *message.UnsubscribeMessage) error {
 		s.sess.RemoveTopic(string(t))
 	}
 
-	resp := message.NewUnsubackMessage()
+	resp := message.NewUnSubAckMessage()
 	resp.SetPacketId(msg.PacketId())
 
 	_, err := s.writeMessage(resp)

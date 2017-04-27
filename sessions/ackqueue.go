@@ -20,7 +20,7 @@ import (
 	"math"
 	"sync"
 
-	"github.com/surgemq/message"
+	"github.com/troian/surgemq/message"
 )
 
 var (
@@ -120,10 +120,10 @@ func (a *Ackqueue) Wait(msg message.Message, onComplete interface{}) error {
 	case *message.SubscribeMessage:
 		a.insert(msg.PacketId(), msg, onComplete)
 
-	case *message.UnsubscribeMessage:
+	case *message.UnSubscribeMessage:
 		a.insert(msg.PacketId(), msg, onComplete)
 
-	case *message.PingreqMessage:
+	case *message.PingReqMessage:
 		a.ping = AckMsg{
 			Mtype:      message.PINGREQ,
 			State:      message.RESERVED,

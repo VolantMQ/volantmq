@@ -22,7 +22,7 @@ import (
 
 	"errors"
 	"github.com/surge/glog"
-	"github.com/surgemq/message"
+	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/sessions"
 	"github.com/troian/surgemq/topics"
 )
@@ -312,7 +312,7 @@ func (s *service) subscribe(msg *message.SubscribeMessage, onComplete OnComplete
 			return nil
 		}
 
-		suback, ok := ack.(*message.SubackMessage)
+		suback, ok := ack.(*message.SubAckMessage)
 		if !ok {
 			if onComplete != nil {
 				return onComplete(msg, ack, errors.New("Invalid SubackMessage received"))
@@ -363,7 +363,7 @@ func (s *service) subscribe(msg *message.SubscribeMessage, onComplete OnComplete
 	return s.sess.Suback.Wait(msg, onc)
 }
 
-func (s *service) unSubscribe(msg *message.UnsubscribeMessage, onComplete OnCompleteFunc) error {
+func (s *service) unSubscribe(msg *message.UnSubscribeMessage, onComplete OnCompleteFunc) error {
 	_, err := s.writeMessage(msg)
 	if err != nil {
 		return fmt.Errorf("(%s) Error sending %s message: %v", s.cid(), msg.Name(), err)
@@ -379,7 +379,7 @@ func (s *service) unSubscribe(msg *message.UnsubscribeMessage, onComplete OnComp
 			return err
 		}
 
-		unsub, ok := msg.(*message.UnsubscribeMessage)
+		unsub, ok := msg.(*message.UnSubscribeMessage)
 		if !ok {
 			if onComplete != nil {
 				return onComplete(msg, ack, fmt.Errorf("Invalid UnsubscribeMessage received"))
@@ -387,7 +387,7 @@ func (s *service) unSubscribe(msg *message.UnsubscribeMessage, onComplete OnComp
 			return nil
 		}
 
-		unsuback, ok := ack.(*message.UnsubackMessage)
+		unsuback, ok := ack.(*message.UnSubAckMessage)
 		if !ok {
 			if onComplete != nil {
 				return onComplete(msg, ack, fmt.Errorf("Invalid UnsubackMessage received"))
@@ -426,7 +426,7 @@ func (s *service) unSubscribe(msg *message.UnsubscribeMessage, onComplete OnComp
 }
 
 func (s *service) ping(onComplete OnCompleteFunc) error {
-	msg := message.NewPingreqMessage()
+	msg := message.NewPingReqMessage()
 
 	_, err := s.writeMessage(msg)
 	if err != nil {

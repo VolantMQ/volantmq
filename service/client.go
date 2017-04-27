@@ -21,7 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/surgemq/message"
+	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/sessions"
 	"github.com/troian/surgemq/topics"
 )
@@ -163,7 +163,7 @@ func (c *Client) Subscribe(msg *message.SubscribeMessage, onComplete OnCompleteF
 // completion, which is when the client receives a UNSUBACK message from the server,
 // the supplied onComplete function is called. The client will no longer handle
 // messages from the server for those unsubscribed topics.
-func (c *Client) UnSubscribe(msg *message.UnsubscribeMessage, onComplete OnCompleteFunc) error {
+func (c *Client) UnSubscribe(msg *message.UnSubscribeMessage, onComplete OnCompleteFunc) error {
 	return c.svc.unSubscribe(msg, onComplete)
 }
 
@@ -181,7 +181,7 @@ func (c *Client) Disconnect() {
 	c.svc.stop()
 }
 
-func (c *Client) getSession(svc *service, req *message.ConnectMessage, resp *message.ConnackMessage) error {
+func (c *Client) getSession(svc *service, req *message.ConnectMessage, resp *message.ConnAckMessage) error {
 	//id := string(req.ClientId())
 	svc.sess = &sessions.Session{}
 	return svc.sess.Init(req)
