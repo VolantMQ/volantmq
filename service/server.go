@@ -21,7 +21,6 @@ import (
 	"io"
 	"net"
 	"net/url"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -92,7 +91,7 @@ type Server struct {
 
 	// authMgr is the authentication manager that we are going to use for authenticating
 	// incoming connections
-	authMgrs map[int]*auth.Manager
+	authMgr *auth.Manager
 
 	// sessMgr is the sessions manager for keeping track of the sessions
 	sessMgr *sessions.Manager
@@ -145,8 +144,7 @@ func cloneTLSConfig(cfg *tls.Config) *tls.Config {
 // NewServer new server
 func NewServer() *Server {
 	s := Server{
-		quit:     make(chan struct{}),
-		authMgrs: make(map[int]*auth.Manager),
+		quit: make(chan struct{}),
 	}
 
 	return &s
@@ -190,7 +188,7 @@ func (s *Server) serve(l net.Listener) error {
 	//return nil
 }
 
-// ListenAndServe listents to connections on the URI requested, and handles any
+// ListenAndServe listens to connections on the URI requested, and handles any
 // incoming MQTT client sessions. It should not return until Close() is called
 // or if there's some critical error that stops the server from running. The URI
 // supplied should be of the form "protocol://host:port" that can be parsed by
@@ -398,13 +396,10 @@ func (s *Server) handleConnection(c io.Closer) (*service, error) {
 		}
 	} else {
 		if req.UsernameFlag() {
-			for i := range s.authMgrs {
-				if err = s.authMgrs[i].Password(string(req.Username()), string(req.Password())); err == nil {
-					resp.SetReturnCode(message.ConnectionAccepted)
-					break
-				} else {
-					resp.SetReturnCode(message.ErrBadUsernameOrPassword)
-				}
+			if s.authMgr.Password(string(req.Username()), string(req.Password())); err == nil {
+				resp.SetReturnCode(message.ConnectionAccepted)
+			} else {
+				resp.SetReturnCode(message.ErrBadUsernameOrPassword)
 			}
 		} else {
 			if s.Anonymous {
@@ -486,15 +481,9 @@ func (s *Server) checkConfiguration() error {
 			s.Authenticators = "mockSuccess"
 		}
 
-		authenticators := strings.Split(s.Authenticators, ";")
-		for i, a := range authenticators {
-			mngr, err := auth.NewManager(a)
-			if err != nil {
-				glog.Errorf("Couldn't register authenticator [%s]. %v", a, err)
-				return
-			}
-
-			s.authMgrs[i] = mngr
+		s.authMgr, err = auth.NewManager(s.Authenticators)
+		if err != nil {
+			return
 		}
 
 		if s.SessionsProvider == "" {

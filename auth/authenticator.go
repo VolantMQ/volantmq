@@ -17,6 +17,7 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Auth errors
@@ -41,7 +42,7 @@ type Provider interface {
 	PskKey(hint, identity string, key []byte, maxKeyLen int) error
 }
 
-// Register authenticator
+// Register auth provider
 func Register(name string, provider Provider) error {
 	if name == "" && provider == nil {
 		return errors.New("Invalid args")
@@ -63,30 +64,57 @@ func UnRegister(name string) {
 
 // Manager auth
 type Manager struct {
-	p Provider
+	p map[int]Provider
 }
 
 // NewManager new auth manager
-func NewManager(providerName string) (*Manager, error) {
-	p, ok := providers[providerName]
-	if !ok {
-		return nil, fmt.Errorf("session: unknown provider %q", providerName)
+func NewManager(p string) (*Manager, error) {
+	m := Manager{
+		p: make(map[int]Provider),
 	}
 
-	return &Manager{p: p}, nil
+	list := strings.Split(p, ";")
+	for i, pa := range list {
+		pvd, ok := providers[pa]
+		if !ok {
+			return nil, fmt.Errorf("session: unknown provider %q", pa)
+		}
+
+		m.p[i] = pvd
+	}
+
+	return &m, nil
 }
 
 // Password authentication
 func (m *Manager) Password(user, password string) error {
-	return m.p.Password(user, password)
+	for _, p := range m.p {
+		if err := p.Password(user, password); err == nil {
+			return nil
+		}
+	}
+
+	return ErrAuthFailure
 }
 
 // AclCheck
 func (m *Manager) AclCheck(clientID, user, topic string, access AccessType) error {
-	return m.p.AclCheck(clientID, user, topic, access)
+	for _, p := range m.p {
+		if err := p.AclCheck(clientID, user, topic, access); err == nil {
+			return nil
+		}
+	}
+
+	return ErrAuthFailure
 }
 
 // PskKey
 func (m *Manager) PskKey(hint, identity string, key []byte, maxKeyLen int) error {
-	return m.p.PskKey(hint, identity, key, maxKeyLen)
+	for _, p := range m.p {
+		if err := p.PskKey(hint, identity, key, maxKeyLen); err == nil {
+			return nil
+		}
+	}
+
+	return ErrAuthFailure
 }
