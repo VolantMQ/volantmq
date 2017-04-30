@@ -36,6 +36,8 @@ There's some very large implementation of MQTT such as [Facebook Messenger](http
 * Supports QOS 0, 1 and 2 messages
 * Supports will messages
 * Supports retained messages (add/remove)
+* SSL
+
 * Pretty much everything in the spec except for the list below
 
 **Limitations**
