@@ -29,6 +29,7 @@ import (
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/sessions"
 	"github.com/troian/surgemq/topics"
+	"github.com/troian/surgemq/topics/mem"
 )
 
 var (
@@ -73,7 +74,7 @@ func startServiceN(t testing.TB, u *url.URL, wg *sync.WaitGroup, ready1, ready2 
 	defer wg.Done()
 
 	topics.UnRegister("mem")
-	tp := topics.NewMemProvider()
+	tp := mem.NewMemProvider()
 	topics.Register("mem", tp)
 
 	sessions.UnRegister("mem")
