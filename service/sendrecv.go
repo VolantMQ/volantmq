@@ -127,7 +127,7 @@ func (s *service) sender() {
 
 // peekMessageSize() reads, but not commits, enough bytes to determine the size of
 // the next message and returns the type and size.
-func (s *service) peekMessageSize() (message.MessageType, int, error) {
+func (s *service) peekMessageSize() (message.Type, int, error) {
 	var (
 		b   []byte
 		err error
@@ -172,14 +172,14 @@ func (s *service) peekMessageSize() (message.MessageType, int, error) {
 	// Total message length is remlen + 1 (msg type) + m (remlen bytes)
 	total := int(remlen) + 1 + m
 
-	mtype := message.MessageType(b[0] >> 4)
+	mtype := message.Type(b[0] >> 4)
 
 	return mtype, total, err
 }
 
 // peekMessage() reads a message from the buffer, but the bytes are NOT committed.
 // This means the buffer still thinks the bytes are not read yet.
-func (s *service) peekMessage(mtype message.MessageType, total int) (message.Message, int, error) {
+func (s *service) peekMessage(mtype message.Type, total int) (message.Message, int, error) {
 	var (
 		b    []byte
 		err  error
@@ -216,7 +216,7 @@ func (s *service) peekMessage(mtype message.MessageType, total int) (message.Mes
 
 // readMessage() reads and copies a message from the buffer. The buffer bytes are
 // committed as a result of the read.
-func (s *service) readMessage(mType message.MessageType, total int) (message.Message, int, error) {
+func (s *service) readMessage(mType message.Type, total int) (message.Message, int, error) {
 	var (
 		b   []byte
 		err error

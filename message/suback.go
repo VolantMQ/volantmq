@@ -16,7 +16,7 @@ package message
 
 import "fmt"
 
-// A SUBACK Packet is sent by the Server to the Client to confirm receipt and processing
+// SubAckMessage A SUBACK Packet is sent by the Server to the Client to confirm receipt and processing
 // of a SUBSCRIBE Packet.
 //
 // A SUBACK Packet contains a list of return codes, that specify the maximum QoS level
@@ -32,14 +32,14 @@ var _ Message = (*SubAckMessage)(nil)
 // NewSubAckMessage creates a new SUBACK message.
 func NewSubAckMessage() *SubAckMessage {
 	msg := &SubAckMessage{}
-	msg.SetType(SUBACK)
+	msg.SetType(SUBACK) // nolint: errcheck
 
 	return msg
 }
 
 // String returns a string representation of the message.
 func (sam SubAckMessage) String() string {
-	return fmt.Sprintf("%s, Packet ID=%d, Return Codes=%v", sam.header, sam.PacketId(), sam.returnCodes)
+	return fmt.Sprintf("%s, Packet ID=%d, Return Codes=%v", sam.header, sam.PacketID(), sam.returnCodes)
 }
 
 // ReturnCodes returns the list of QoS returns from the subscriptions sent in the SUBSCRIBE message.
@@ -52,7 +52,7 @@ func (sam *SubAckMessage) ReturnCodes() []byte {
 func (sam *SubAckMessage) AddReturnCodes(ret []byte) error {
 	for _, c := range ret {
 		if c != QosAtMostOnce && c != QosAtLeastOnce && c != QosExactlyOnce && c != QosFailure {
-			return fmt.Errorf("suback/AddReturnCode: Invalid return code %d. Must be 0, 1, 2, 0x80.", c)
+			return fmt.Errorf("suback/AddReturnCode: Invalid return code %d. Must be 0, 1, 2, 0x80", c)
 		}
 
 		sam.returnCodes = append(sam.returnCodes, c)
@@ -68,6 +68,7 @@ func (sam *SubAckMessage) AddReturnCode(ret byte) error {
 	return sam.AddReturnCodes([]byte{ret})
 }
 
+// Len of message
 func (sam *SubAckMessage) Len() int {
 	if !sam.dirty {
 		return len(sam.dBuf)
@@ -82,6 +83,7 @@ func (sam *SubAckMessage) Len() int {
 	return sam.header.msgLen() + ml
 }
 
+// Decode message
 func (sam *SubAckMessage) Decode(src []byte) (int, error) {
 	total := 0
 
@@ -110,10 +112,11 @@ func (sam *SubAckMessage) Decode(src []byte) (int, error) {
 	return total, nil
 }
 
+// Encode message
 func (sam *SubAckMessage) Encode(dst []byte) (int, error) {
 	if !sam.dirty {
 		if len(dst) < len(sam.dBuf) {
-			return 0, fmt.Errorf("suback/Encode: Insufficient buffer size. Expecting %d, got %d.", len(sam.dBuf), len(dst))
+			return 0, fmt.Errorf("suback/Encode: Insufficient buffer size. Expecting %d, got %d", len(sam.dBuf), len(dst))
 		}
 
 		return copy(dst, sam.dBuf), nil
@@ -129,7 +132,7 @@ func (sam *SubAckMessage) Encode(dst []byte) (int, error) {
 	ml := sam.msgLen()
 
 	if len(dst) < hl+ml {
-		return 0, fmt.Errorf("suback/Encode: Insufficient buffer size. Expecting %d, got %d.", hl+ml, len(dst))
+		return 0, fmt.Errorf("suback/Encode: Insufficient buffer size. Expecting %d, got %d", hl+ml, len(dst))
 	}
 
 	if err := sam.SetRemainingLength(int32(ml)); err != nil {

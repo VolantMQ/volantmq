@@ -72,11 +72,12 @@ func TestServiceWillDelivery(t *testing.T) {
 	defer topics.UnRegister(c3.svc.sess.ID())
 
 	sub := message.NewSubscribeMessage()
-	sub.AddTopic([]byte("will"), 1)
+	sub.AddTopic([]byte("will"), 1) // nolint: errcheck
 
 	subdone := int64(0)
 	willdone := int64(0)
 
+	// nolint: errcheck
 	c2.Subscribe(sub,
 		func(msg, ack message.Message, err error) error {
 			subs := atomic.AddInt64(&subdone, 1)
@@ -98,6 +99,7 @@ func TestServiceWillDelivery(t *testing.T) {
 			return nil
 		})
 
+	// nolint: errcheck
 	c3.Subscribe(sub,
 		func(msg, ack message.Message, err error) error {
 			subs := atomic.AddInt64(&subdone, 1)
@@ -138,6 +140,8 @@ func TestServiceSubUnsub(t *testing.T) {
 		done := make(chan struct{})
 
 		sub := newSubscribeMessage(1)
+
+		// nolint: errcheck
 		c.Subscribe(sub,
 			func(msg, ack message.Message, err error) error {
 				unsub := newUnsubscribeMessage()
@@ -163,8 +167,8 @@ func TestServiceSubRetain(t *testing.T) {
 	runClientServerTests(t, func(c *Client) {
 		rmsg := message.NewPublishMessage()
 		rmsg.SetRetain(true)
-		rmsg.SetQoS(0)
-		rmsg.SetTopic([]byte("abc"))
+		rmsg.SetQoS(0)               // nolint: errcheck
+		rmsg.SetTopic([]byte("abc")) // nolint: errcheck
 		rmsg.SetPayload([]byte("this is a test"))
 
 		tmgr, _ := topics.NewManager("mem")
@@ -174,6 +178,8 @@ func TestServiceSubRetain(t *testing.T) {
 		done := make(chan struct{})
 
 		sub := newSubscribeMessage(1)
+
+		// nolint: errcheck
 		c.Subscribe(sub,
 			func(msg, ack message.Message, err error) error {
 				unsub := newUnsubscribeMessage()
@@ -207,6 +213,8 @@ func TestServiceSub0Pub0(t *testing.T) {
 		count := 0
 
 		sub := newSubscribeMessage(0)
+
+		// nolint: errcheck
 		svc.Subscribe(sub,
 			func(msg, ack message.Message, err error) error {
 				close(done)
@@ -234,7 +242,7 @@ func TestServiceSub0Pub0(t *testing.T) {
 		msg := newPublishMessage(0, 0)
 
 		for i := uint16(0); i < 10; i++ {
-			svc.Publish(msg, nil)
+			svc.Publish(msg, nil) // nolint: errcheck
 		}
 
 		select {
@@ -258,6 +266,8 @@ func TestServiceSub1Pub0(t *testing.T) {
 		count := 0
 
 		sub := newSubscribeMessage(1)
+
+		// nolint: errcheck
 		svc.Subscribe(sub,
 			func(msg, ack message.Message, err error) error {
 				close(done)
@@ -285,7 +295,7 @@ func TestServiceSub1Pub0(t *testing.T) {
 		msg := newPublishMessage(0, 0)
 
 		for i := uint16(0); i < 10; i++ {
-			svc.Publish(msg, nil)
+			svc.Publish(msg, nil) // nolint: errcheck
 		}
 
 		select {
@@ -309,6 +319,8 @@ func TestServiceSub0Pub1(t *testing.T) {
 		ackcnt := 0
 
 		sub := newSubscribeMessage(0)
+
+		// nolint: errcheck
 		svc.Subscribe(sub,
 			func(msg, ack message.Message, err error) error {
 				close(done)
@@ -328,6 +340,7 @@ func TestServiceSub0Pub1(t *testing.T) {
 		for i := uint16(1); i <= 10; i++ {
 			msg := newPublishMessage(i, 1)
 
+			// nolint: errcheck
 			svc.Publish(msg,
 				func(msg, ack message.Message, err error) error {
 					ackcnt++
@@ -337,12 +350,12 @@ func TestServiceSub0Pub1(t *testing.T) {
 					pub, ok := msg.(*message.PublishMessage)
 					require.True(t, ok)
 
-					puback, ok := ack.(*message.PubackMessage)
+					puback, ok := ack.(*message.PubAckMessage)
 					require.True(t, ok)
 
-					require.Equal(t, pub.PacketId(), puback.PacketId())
+					require.Equal(t, pub.PacketID(), puback.PacketID())
 
-					if pub.PacketId() == 10 {
+					if pub.PacketID() == 10 {
 						close(done2)
 					}
 
@@ -377,6 +390,8 @@ func TestServiceSub1Pub1(t *testing.T) {
 		ackcnt := 0
 
 		sub := newSubscribeMessage(1)
+
+		// nolint: errcheck
 		svc.Subscribe(sub,
 			func(msg, ack message.Message, err error) error {
 				close(done)
@@ -403,6 +418,7 @@ func TestServiceSub1Pub1(t *testing.T) {
 		for i := uint16(1); i <= 10; i++ {
 			msg := newPublishMessage(i, 1)
 
+			// nolint: errcheck
 			svc.Publish(msg,
 				func(msg, ack message.Message, err error) error {
 					ackcnt++
@@ -412,12 +428,12 @@ func TestServiceSub1Pub1(t *testing.T) {
 					pub, ok := msg.(*message.PublishMessage)
 					require.True(t, ok)
 
-					puback, ok := ack.(*message.PubackMessage)
+					puback, ok := ack.(*message.PubAckMessage)
 					require.True(t, ok)
 
-					require.Equal(t, pub.PacketId(), puback.PacketId())
+					require.Equal(t, pub.PacketID(), puback.PacketID())
 
-					if pub.PacketId() == 10 {
+					if pub.PacketID() == 10 {
 						close(done3)
 					}
 
@@ -455,6 +471,8 @@ func TestServiceSub2Pub1(t *testing.T) {
 		ackcnt := 0
 
 		sub := newSubscribeMessage(2)
+
+		// nolint: errcheck
 		svc.Subscribe(sub,
 			func(msg, ack message.Message, err error) error {
 				close(done)
@@ -481,6 +499,7 @@ func TestServiceSub2Pub1(t *testing.T) {
 		for i := uint16(1); i <= 10; i++ {
 			msg := newPublishMessage(i, 1)
 
+			// nolint: errcheck
 			svc.Publish(msg,
 				func(msg, ack message.Message, err error) error {
 					ackcnt++
@@ -490,12 +509,12 @@ func TestServiceSub2Pub1(t *testing.T) {
 					pub, ok := msg.(*message.PublishMessage)
 					require.True(t, ok)
 
-					puback, ok := ack.(*message.PubackMessage)
+					puback, ok := ack.(*message.PubAckMessage)
 					require.True(t, ok)
 
-					require.Equal(t, pub.PacketId(), puback.PacketId())
+					require.Equal(t, pub.PacketID(), puback.PacketID())
 
-					if pub.PacketId() == 10 {
+					if pub.PacketID() == 10 {
 						close(done3)
 					}
 
@@ -531,6 +550,8 @@ func TestServiceSub1Pub2(t *testing.T) {
 		ackcnt := 0
 
 		sub := newSubscribeMessage(1)
+
+		// nolint: errcheck
 		svc.Subscribe(sub,
 			func(msg, ack message.Message, err error) error {
 				close(done)
@@ -550,6 +571,7 @@ func TestServiceSub1Pub2(t *testing.T) {
 		for i := uint16(1); i <= 10; i++ {
 			msg := newPublishMessage(i, 2)
 
+			// nolint: errcheck
 			svc.Publish(msg,
 				func(msg, ack message.Message, err error) error {
 					ackcnt++
@@ -559,12 +581,12 @@ func TestServiceSub1Pub2(t *testing.T) {
 					pub, ok := msg.(*message.PublishMessage)
 					require.True(t, ok)
 
-					pubcomp, ok := ack.(*message.PubcompMessage)
+					pubcomp, ok := ack.(*message.PubCompMessage)
 					require.True(t, ok)
 
-					require.Equal(t, pub.PacketId(), pubcomp.PacketId())
+					require.Equal(t, pub.PacketID(), pubcomp.PacketID())
 
-					if pub.PacketId() == 10 {
+					if pub.PacketID() == 10 {
 						close(done2)
 					}
 
@@ -599,6 +621,8 @@ func TestServiceSub2Pub2(t *testing.T) {
 		ackcnt := 0
 
 		sub := newSubscribeMessage(2)
+
+		// nolint: errcheck
 		svc.Subscribe(sub,
 			func(msg, ack message.Message, err error) error {
 				close(done)
@@ -625,6 +649,7 @@ func TestServiceSub2Pub2(t *testing.T) {
 		for i := uint16(1); i <= 10; i++ {
 			msg := newPublishMessage(i, 2)
 
+			// nolint: errcheck
 			svc.Publish(msg,
 				func(msg, ack message.Message, err error) error {
 					ackcnt++
@@ -634,12 +659,12 @@ func TestServiceSub2Pub2(t *testing.T) {
 					pub, ok := msg.(*message.PublishMessage)
 					require.True(t, ok)
 
-					pubcomp, ok := ack.(*message.PubcompMessage)
+					pubcomp, ok := ack.(*message.PubCompMessage)
 					require.True(t, ok)
 
-					require.Equal(t, pub.PacketId(), pubcomp.PacketId())
+					require.Equal(t, pub.PacketID(), pubcomp.PacketID())
 
-					if pub.PacketId() == 10 {
+					if pub.PacketID() == 10 {
 						close(done3)
 					}
 

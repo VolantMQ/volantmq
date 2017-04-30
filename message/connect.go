@@ -21,15 +21,15 @@ import (
 	"regexp"
 )
 
-var clientIdRegexp *regexp.Regexp
+var clientIDRegexp *regexp.Regexp
 
 func init() {
 	// Added space for Paho compliance test
 	// Added underscore (_) for MQTT C client test
-	clientIdRegexp = regexp.MustCompile("^[0-9a-zA-Z _]*$")
+	clientIDRegexp = regexp.MustCompile("^[0-9a-zA-Z _]*$")
 }
 
-// After a Network Connection is established by a Client to a Server, the first Packet
+// ConnectMessage After a Network Connection is established by a Client to a Server, the first Packet
 // sent from the Client to the Server MUST be a CONNECT Packet [MQTT-3.1.0-1].
 //
 // A Client can only send the CONNECT Packet once over a Network Connection. The Server
@@ -50,7 +50,7 @@ type ConnectMessage struct {
 	version      byte
 	keepAlive    uint16
 	protoName    []byte
-	clientId     []byte
+	clientID     []byte
 	willTopic    []byte
 	willMessage  []byte
 	username     []byte
@@ -62,7 +62,7 @@ var _ Message = (*ConnectMessage)(nil)
 // NewConnectMessage creates a new CONNECT message.
 func NewConnectMessage() *ConnectMessage {
 	msg := &ConnectMessage{}
-	msg.SetType(CONNECT)
+	msg.SetType(CONNECT) // nolint: errcheck
 
 	return msg
 }
@@ -74,7 +74,7 @@ func (cm ConnectMessage) String() string {
 		cm.connectFlags,
 		cm.Version(),
 		cm.KeepAlive(),
-		cm.ClientId(),
+		cm.ClientID(),
 		cm.WillTopic(),
 		cm.WillMessage(),
 		cm.Username(),
@@ -229,21 +229,21 @@ func (cm *ConnectMessage) SetKeepAlive(v uint16) {
 	cm.dirty = true
 }
 
-// ClientId returns an ID that identifies the Client to the Server. Each Client
+// ClientID returns an ID that identifies the Client to the Server. Each Client
 // connecting to the Server has a unique ClientId. The ClientId MUST be used by
 // Clients and by Servers to identify state that they hold relating to this MQTT
 // Session between the Client and the Server
-func (cm *ConnectMessage) ClientId() []byte {
-	return cm.clientId
+func (cm *ConnectMessage) ClientID() []byte {
+	return cm.clientID
 }
 
-// SetClientId sets an ID that identifies the Client to the Server.
-func (cm *ConnectMessage) SetClientId(v []byte) error {
-	if len(v) > 0 && !cm.validClientId(v) {
+// SetClientID sets an ID that identifies the Client to the Server.
+func (cm *ConnectMessage) SetClientID(v []byte) error {
+	if len(v) > 0 && !cm.validClientID(v) {
 		return ErrIdentifierRejected
 	}
 
-	cm.clientId = v
+	cm.clientID = v
 	cm.dirty = true
 
 	return nil
@@ -326,6 +326,7 @@ func (cm *ConnectMessage) SetPassword(v []byte) {
 	cm.dirty = true
 }
 
+// Len of message
 func (cm *ConnectMessage) Len() int {
 	if !cm.dirty {
 		return len(cm.dBuf)
@@ -340,12 +341,12 @@ func (cm *ConnectMessage) Len() int {
 	return cm.header.msgLen() + ml
 }
 
-// For the CONNECT message, the error returned could be a ConnackReturnCode, so
+// Decode For the CONNECT message, the error returned could be a ConnAckReturnCode, so
 // be sure to check that. Otherwise it's a generic error. If a generic error is
 // returned, this Message should be considered invalid.
 //
-// Caller should call ValidConnackError(err) to see if the returned error is
-// a Connack error. If so, caller should send the Client back the corresponding
+// Caller should call ValidConnAckError(err) to see if the returned error is
+// a ConnAck error. If so, caller should send the Client back the corresponding
 // CONNACK message.
 func (cm *ConnectMessage) Decode(src []byte) (int, error) {
 	total := 0
@@ -366,10 +367,11 @@ func (cm *ConnectMessage) Decode(src []byte) (int, error) {
 	return total, nil
 }
 
+// Encode message
 func (cm *ConnectMessage) Encode(dst []byte) (int, error) {
 	if !cm.dirty {
 		if len(dst) < len(cm.dBuf) {
-			return 0, fmt.Errorf("connect/Encode: Insufficient buffer size. Expecting %d, got %d.", len(cm.dBuf), len(dst))
+			return 0, fmt.Errorf("connect/Encode: Insufficient buffer size. Expecting %d, got %d", len(cm.dBuf), len(dst))
 		}
 
 		return copy(dst, cm.dBuf), nil
@@ -388,7 +390,7 @@ func (cm *ConnectMessage) Encode(dst []byte) (int, error) {
 	ml := cm.msglen()
 
 	if len(dst) < hl+ml {
-		return 0, fmt.Errorf("connect/Encode: Insufficient buffer size. Expecting %d, got %d.", hl+ml, len(dst))
+		return 0, fmt.Errorf("connect/Encode: Insufficient buffer size. Expecting %d, got %d", hl+ml, len(dst))
 	}
 
 	if err := cm.SetRemainingLength(int32(ml)); err != nil {
@@ -405,11 +407,8 @@ func (cm *ConnectMessage) Encode(dst []byte) (int, error) {
 
 	n, err = cm.encodeMessage(dst[total:])
 	total += n
-	if err != nil {
-		return total, err
-	}
 
-	return total, nil
+	return total, err
 }
 
 func (cm *ConnectMessage) encodeMessage(dst []byte) (int, error) {
@@ -422,15 +421,15 @@ func (cm *ConnectMessage) encodeMessage(dst []byte) (int, error) {
 	}
 
 	dst[total] = cm.version
-	total += 1
+	total++
 
 	dst[total] = cm.connectFlags
-	total += 1
+	total++
 
 	binary.BigEndian.PutUint16(dst[total:], cm.keepAlive)
 	total += 2
 
-	n, err = writeLPBytes(dst[total:], cm.clientId)
+	n, err = writeLPBytes(dst[total:], cm.clientID)
 	total += n
 	if err != nil {
 		return total, err
@@ -475,7 +474,8 @@ func (cm *ConnectMessage) encodeMessage(dst []byte) (int, error) {
 
 func (cm *ConnectMessage) decodeMessage(src []byte) (int, error) {
 	var err error
-	n, total := 0, 0
+	var n int
+	total := 0
 
 	cm.protoName, n, err = readLPBytes(src[total:])
 	total += n
@@ -512,27 +512,27 @@ func (cm *ConnectMessage) decodeMessage(src []byte) (int, error) {
 	}
 
 	if len(src[total:]) < 2 {
-		return 0, fmt.Errorf("connect/decodeMessage: Insufficient buffer size. Expecting %d, got %d.", 2, len(src[total:]))
+		return 0, fmt.Errorf("connect/decodeMessage: Insufficient buffer size. Expecting %d, got %d", 2, len(src[total:]))
 	}
 
 	cm.keepAlive = binary.BigEndian.Uint16(src[total:])
 	total += 2
 
-	cm.clientId, n, err = readLPBytes(src[total:])
+	cm.clientID, n, err = readLPBytes(src[total:])
 	total += n
 	if err != nil {
 		return total, err
 	}
 
 	// If the Client supplies a zero-byte ClientId, the Client MUST also set CleanSession to 1
-	if len(cm.clientId) == 0 && !cm.CleanSession() {
+	if len(cm.clientID) == 0 && !cm.CleanSession() {
 		return total, ErrIdentifierRejected
 	}
 
 	// The ClientId must contain only characters 0-9, a-z, and A-Z
 	// We also support ClientId longer than 23 encoded bytes
 	// We do not support ClientId outside of the above characters
-	if len(cm.clientId) > 0 && !cm.validClientId(cm.clientId) {
+	if len(cm.clientID) > 0 && !cm.validClientID(cm.clientID) {
 		return total, ErrIdentifierRejected
 	}
 
@@ -589,7 +589,7 @@ func (cm *ConnectMessage) msglen() int {
 	total += 2 + len(verstr) + 1 + 1 + 2
 
 	// Add the clientID length, 2 is the length prefix
-	total += 2 + len(cm.clientId)
+	total += 2 + len(cm.clientID)
 
 	// Add the will topic and will message length, and the length prefixes
 	if cm.WillFlag() {
@@ -613,13 +613,13 @@ func (cm *ConnectMessage) msglen() int {
 	return total
 }
 
-// validClientId checks the client ID, which is a slice of bytes, to see if it's valid.
+// validClientID checks the client ID, which is a slice of bytes, to see if it's valid.
 // Client ID is valid if it meets the requirement from the MQTT spec:
 // 		The Server MUST allow ClientIds which are between 1 and 23 UTF-8 encoded bytes in length,
 //		and that contain only the characters
 //
 //		"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-func (cm *ConnectMessage) validClientId(cid []byte) bool {
+func (cm *ConnectMessage) validClientID(cid []byte) bool {
 	// Fixed https://github.com/surgemq/surgemq/issues/4
 	//if len(cid) > 23 {
 	//	return false
@@ -629,5 +629,5 @@ func (cm *ConnectMessage) validClientId(cid []byte) bool {
 		return true
 	}
 
-	return clientIdRegexp.Match(cid)
+	return clientIDRegexp.Match(cid)
 }

@@ -16,7 +16,7 @@ package message
 
 import "fmt"
 
-// The DISCONNECT Packet is the final Control Packet sent from the Client to the Server.
+// DisconnectMessage The DISCONNECT Packet is the final Control Packet sent from the Client to the Server.
 // It indicates that the Client is disconnecting cleanly.
 type DisconnectMessage struct {
 	header
@@ -27,19 +27,21 @@ var _ Message = (*DisconnectMessage)(nil)
 // NewDisconnectMessage creates a new DISCONNECT message.
 func NewDisconnectMessage() *DisconnectMessage {
 	msg := &DisconnectMessage{}
-	msg.SetType(DISCONNECT)
+	msg.SetType(DISCONNECT) // nolint: errcheck
 
 	return msg
 }
 
+// Decode message
 func (dm *DisconnectMessage) Decode(src []byte) (int, error) {
 	return dm.header.decode(src)
 }
 
+// Encode message
 func (dm *DisconnectMessage) Encode(dst []byte) (int, error) {
 	if !dm.dirty {
 		if len(dst) < len(dm.dBuf) {
-			return 0, fmt.Errorf("disconnect/Encode: Insufficient buffer size. Expecting %d, got %d.", len(dm.dBuf), len(dst))
+			return 0, fmt.Errorf("disconnect/Encode: Insufficient buffer size. Expecting %d, got %d", len(dm.dBuf), len(dst))
 		}
 
 		return copy(dst, dm.dBuf), nil

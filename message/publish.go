@@ -20,7 +20,7 @@ import (
 	"sync/atomic"
 )
 
-// A PUBLISH Control Packet is sent from a Client to a Server or from Server to a Client
+// PublishMessage A PUBLISH Control Packet is sent from a Client to a Server or from Server to a Client
 // to transport an Application Message.
 type PublishMessage struct {
 	header
@@ -34,7 +34,7 @@ var _ Message = (*PublishMessage)(nil)
 // NewPublishMessage creates a new PUBLISH message.
 func NewPublishMessage() *PublishMessage {
 	msg := &PublishMessage{}
-	msg.SetType(PUBLISH)
+	msg.SetType(PUBLISH) // nolint: errcheck
 
 	return msg
 }
@@ -90,7 +90,7 @@ func (pm *PublishMessage) QoS() byte {
 // An error is returned if the value is not one of these.
 func (pm *PublishMessage) SetQoS(v byte) error {
 	if v != 0x0 && v != 0x1 && v != 0x2 {
-		return fmt.Errorf("publish/SetQoS: Invalid QoS %d.", v)
+		return fmt.Errorf("publish/SetQoS: Invalid QoS %d", v)
 	}
 
 	pm.mTypeFlags[0] = (pm.mTypeFlags[0] & 249) | (v << 1) // 249 = 11111001
@@ -128,6 +128,7 @@ func (pm *PublishMessage) SetPayload(v []byte) {
 	pm.dirty = true
 }
 
+// Len of message
 func (pm *PublishMessage) Len() int {
 	if !pm.dirty {
 		return len(pm.dBuf)
@@ -142,6 +143,7 @@ func (pm *PublishMessage) Len() int {
 	return pm.header.msgLen() + ml
 }
 
+// Decode message
 func (pm *PublishMessage) Decode(src []byte) (int, error) {
 	total := 0
 
@@ -151,7 +153,7 @@ func (pm *PublishMessage) Decode(src []byte) (int, error) {
 		return total, err
 	}
 
-	n := 0
+	var n int
 
 	pm.topic, n, err = readLPBytes(src[total:])
 	total += n
@@ -180,21 +182,22 @@ func (pm *PublishMessage) Decode(src []byte) (int, error) {
 	return total, nil
 }
 
+// Encode message
 func (pm *PublishMessage) Encode(dst []byte) (int, error) {
 	if !pm.dirty {
 		if len(dst) < len(pm.dBuf) {
-			return 0, fmt.Errorf("publish/Encode: Insufficient buffer size. Expecting %d, got %d.", len(pm.dBuf), len(dst))
+			return 0, fmt.Errorf("publish/Encode: Insufficient buffer size. Expecting %d, got %d", len(pm.dBuf), len(dst))
 		}
 
 		return copy(dst, pm.dBuf), nil
 	}
 
 	if len(pm.topic) == 0 {
-		return 0, errors.New("publish/Encode: Topic name is empty.")
+		return 0, errors.New("publish/Encode: Topic name is empty")
 	}
 
 	if len(pm.payload) == 0 {
-		return 0, errors.New("publish/Encode: Payload is empty.")
+		return 0, errors.New("publish/Encode: Payload is empty")
 	}
 
 	ml := pm.msgLen()
@@ -206,7 +209,7 @@ func (pm *PublishMessage) Encode(dst []byte) (int, error) {
 	hl := pm.header.msgLen()
 
 	if len(dst) < hl+ml {
-		return 0, fmt.Errorf("publish/Encode: Insufficient buffer size. Expecting %d, got %d.", hl+ml, len(dst))
+		return 0, fmt.Errorf("publish/Encode: Insufficient buffer size. Expecting %d, got %d", hl+ml, len(dst))
 	}
 
 	total := 0
@@ -225,9 +228,9 @@ func (pm *PublishMessage) Encode(dst []byte) (int, error) {
 
 	// The packet identifier field is only present in the PUBLISH packets where the QoS level is 1 or 2
 	if pm.QoS() != 0 {
-		if pm.PacketId() == 0 {
-			pm.SetPacketId(uint16(atomic.AddUint64(&gPacketId, 1) & 0xffff))
-			//this.packetId = uint16(atomic.AddUint64(&gPacketId, 1) & 0xffff)
+		if pm.PacketID() == 0 {
+			pm.SetPacketID(uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff))
+			//this.packetId = uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff)
 		}
 
 		n = copy(dst[total:], pm.packetID)

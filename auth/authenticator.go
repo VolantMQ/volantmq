@@ -28,14 +28,17 @@ var (
 	providers = make(map[string]Provider)
 )
 
+// AccessType acl type
 type AccessType int
 
 const (
-	AuthAccessTypeRead  AccessType = 1
-	AuthAccessTypeWrite            = 2
+	// AuthAccessTypeRead read access
+	AuthAccessTypeRead AccessType = 1
+	// AuthAccessTypeWrite write access
+	AuthAccessTypeWrite = 2
 )
 
-// Authenticator interface
+// Provider interface
 type Provider interface {
 	Password(user, password string) error
 	AclCheck(clientID, user, topic string, access AccessType) error
@@ -97,7 +100,8 @@ func (m *Manager) Password(user, password string) error {
 	return ErrAuthFailure
 }
 
-// AclCheck
+// AclCheck check permissions
+// nolint: golint
 func (m *Manager) AclCheck(clientID, user, topic string, access AccessType) error {
 	for _, p := range m.p {
 		if err := p.AclCheck(clientID, user, topic, access); err == nil {
@@ -108,7 +112,8 @@ func (m *Manager) AclCheck(clientID, user, topic string, access AccessType) erro
 	return ErrAuthFailure
 }
 
-// PskKey
+// PskKey authenticate using psk
+// nolint: golint
 func (m *Manager) PskKey(hint, identity string, key []byte, maxKeyLen int) error {
 	for _, p := range m.p {
 		if err := p.PskKey(hint, identity, key, maxKeyLen); err == nil {

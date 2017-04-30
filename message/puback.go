@@ -16,7 +16,7 @@ package message
 
 import "fmt"
 
-// A PUBACK Packet is the response to a PUBLISH Packet with QoS level 1.
+// PubAckMessage A PUBACK Packet is the response to a PUBLISH Packet with QoS level 1.
 type PubAckMessage struct {
 	header
 }
@@ -26,15 +26,17 @@ var _ Message = (*PubAckMessage)(nil)
 // NewPubAckMessage creates a new PUBACK message.
 func NewPubAckMessage() *PubAckMessage {
 	msg := &PubAckMessage{}
-	msg.SetType(PUBACK)
+	msg.SetType(PUBACK) // nolint: errcheck
 
 	return msg
 }
 
+// String message as string
 func (pam PubAckMessage) String() string {
 	return fmt.Sprintf("%s, Packet ID=%d", pam.header, pam.packetID)
 }
 
+// Len of message
 func (pam *PubAckMessage) Len() int {
 	if !pam.dirty {
 		return len(pam.dBuf)
@@ -49,6 +51,7 @@ func (pam *PubAckMessage) Len() int {
 	return pam.header.msgLen() + ml
 }
 
+// Decode message
 func (pam *PubAckMessage) Decode(src []byte) (int, error) {
 	total := 0
 
@@ -67,10 +70,11 @@ func (pam *PubAckMessage) Decode(src []byte) (int, error) {
 	return total, nil
 }
 
+// Encode message
 func (pam *PubAckMessage) Encode(dst []byte) (int, error) {
 	if !pam.dirty {
 		if len(dst) < len(pam.dBuf) {
-			return 0, fmt.Errorf("puback/Encode: Insufficient buffer size. Expecting %d, got %d.", len(pam.dBuf), len(dst))
+			return 0, fmt.Errorf("puback/Encode: Insufficient buffer size. Expecting %d, got %d", len(pam.dBuf), len(dst))
 		}
 
 		return copy(dst, pam.dBuf), nil
@@ -80,7 +84,7 @@ func (pam *PubAckMessage) Encode(dst []byte) (int, error) {
 	ml := pam.msgLen()
 
 	if len(dst) < hl+ml {
-		return 0, fmt.Errorf("puback/Encode: Insufficient buffer size. Expecting %d, got %d.", hl+ml, len(dst))
+		return 0, fmt.Errorf("puback/Encode: Insufficient buffer size. Expecting %d, got %d", hl+ml, len(dst))
 	}
 
 	if err := pam.SetRemainingLength(int32(ml)); err != nil {

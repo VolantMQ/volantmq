@@ -40,7 +40,9 @@ var (
 	pass        = "surgemq"
 	version     = 4
 
-	subdone, rcvdone, sentdone int64
+	subdone int64
+	rcvdone int64
+	//sentdone int64
 
 	done, done2 chan struct{}
 
@@ -101,27 +103,27 @@ func connectToServer(t testing.TB, uri string, cid int) *service.Client {
 
 func newSubscribeMessage(topic string, qos byte) *message.SubscribeMessage {
 	msg := message.NewSubscribeMessage()
-	msg.SetPacketId(1)
-	msg.AddTopic([]byte(topic), qos)
+	msg.SetPacketID(1)
+	msg.AddTopic([]byte(topic), qos) // nolint: errcheck
 
 	return msg
 }
 
 func newPublishMessageLarge(qos byte) *message.PublishMessage {
 	msg := message.NewPublishMessage()
-	msg.SetTopic([]byte("test"))
+	msg.SetTopic([]byte("test")) // nolint: errcheck
 	msg.SetPayload(make([]byte, 1024))
-	msg.SetQoS(qos)
+	msg.SetQoS(qos) // nolint: errcheck
 
 	return msg
 }
 
 func newConnectMessage(cid int) *message.ConnectMessage {
 	msg := message.NewConnectMessage()
-	msg.SetWillQos(1)
-	msg.SetVersion(byte(version))
+	msg.SetWillQos(1)             // nolint: errcheck
+	msg.SetVersion(byte(version)) // nolint: errcheck
 	msg.SetCleanSession(true)
-	msg.SetClientId([]byte(fmt.Sprintf("surgemq%d", cid)))
+	msg.SetClientID([]byte(fmt.Sprintf("surgemq%d", cid))) // nolint: errcheck
 	msg.SetKeepAlive(10)
 	msg.SetWillTopic([]byte("will"))
 	msg.SetWillMessage([]byte("send me home"))

@@ -65,7 +65,7 @@ func TestReadMessageSuccess(t *testing.T) {
 
 	require.Equal(t, 10, int(msg.KeepAlive()), "Incorrect KeepAlive value.")
 
-	require.Equal(t, "surgemq", string(msg.ClientId()), "Incorrect client ID value.")
+	require.Equal(t, "surgemq", string(msg.ClientID()), "Incorrect client ID value.")
 
 	require.Equal(t, "will", string(msg.WillTopic()), "Incorrect will topic value.")
 
@@ -177,7 +177,7 @@ func TestWriteMessage(t *testing.T) {
 	}
 
 	msg := newConnectMessage()
-	msg.SetClientId([]byte("surgemq"))
+	msg.SetClientID([]byte("surgemq")) // nolint: errcheck
 	var err error
 
 	svc := &service{}

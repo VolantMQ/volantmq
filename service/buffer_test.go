@@ -148,7 +148,7 @@ func testWriteTo(t *testing.T, buf *buffer) {
 	go func(n int64) {
 		fillBuffer(t, buf, n)
 		time.Sleep(time.Millisecond * 100)
-		buf.Close()
+		buf.Close() // nolint: errcheck
 	}(n)
 
 	m, err := buf.WriteTo(bytes.NewBuffer(make([]byte, n)))
@@ -207,7 +207,7 @@ func benchmarkRead(b *testing.B, buf *buffer) {
 
 	go func(n int64) {
 		p := make([]byte, n)
-		buf.ReadFrom(bytes.NewBuffer(p))
+		buf.ReadFrom(bytes.NewBuffer(p)) // nolint: errcheck
 	}(n)
 
 	p := make([]byte, n)

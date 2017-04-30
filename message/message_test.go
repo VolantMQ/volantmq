@@ -21,7 +21,7 @@ import (
 )
 
 var (
-	lpstrings []string = []string{
+	lpstrings = []string{
 		"this is a test",
 		"hope it succeeds",
 		"but just in case",
@@ -29,7 +29,7 @@ var (
 		"",
 	}
 
-	lpstringBytes []byte = []byte{
+	lpstringBytes = []byte{
 		0x0, 0xe, 't', 'h', 'i', 's', ' ', 'i', 's', ' ', 'a', ' ', 't', 'e', 's', 't',
 		0x0, 0x10, 'h', 'o', 'p', 'e', ' ', 'i', 't', ' ', 's', 'u', 'c', 'c', 'e', 'e', 'd', 's',
 		0x0, 0x10, 'b', 'u', 't', ' ', 'j', 'u', 's', 't', ' ', 'i', 'n', ' ', 'c', 'a', 's', 'e',
@@ -37,7 +37,7 @@ var (
 		0x0, 0x0,
 	}
 
-	msgBytes []byte = []byte{
+	msgBytes = []byte{
 		byte(CONNECT << 4),
 		60,
 		0, // Length MSB (0)
@@ -139,7 +139,7 @@ func TestFixedHeaderFlags(t *testing.T) {
 		flags byte
 	}
 
-	details := map[MessageType]detail{
+	details := map[Type]detail{
 		RESERVED:    detail{"RESERVED", 0},
 		CONNECT:     detail{"CONNECT", 0},
 		CONNACK:     detail{"CONNACK", 0},

@@ -95,15 +95,15 @@ func (s *Session) Init(msg *message.ConnectMessage) error {
 
 	if s.CMsg.WillFlag() {
 		s.Will = message.NewPublishMessage()
-		s.Will.SetQoS(s.CMsg.WillQos())
-		s.Will.SetTopic(s.CMsg.WillTopic())
+		s.Will.SetQoS(s.CMsg.WillQos())     // nolint: errcheck
+		s.Will.SetTopic(s.CMsg.WillTopic()) // nolint: errcheck
 		s.Will.SetPayload(s.CMsg.WillMessage())
 		s.Will.SetRetain(s.CMsg.WillRetain())
 	}
 
 	s.topics = make(map[string]byte, 1)
 
-	s.id = string(msg.ClientId())
+	s.id = string(msg.ClientID())
 
 	s.Pub1ack = newAckQueue(defaultQueueSize)
 	s.Pub2in = newAckQueue(defaultQueueSize)
@@ -207,5 +207,5 @@ func (s *Session) Topics() ([]string, []byte, error) {
 
 // ID session id
 func (s *Session) ID() string {
-	return string(s.CMsg.ClientId())
+	return string(s.CMsg.ClientID())
 }

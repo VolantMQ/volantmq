@@ -15,14 +15,13 @@
 package message
 
 import (
-	"fmt"
 	"errors"
+	"fmt"
 )
 
-// The CONNACK Packet is the packet sent by the Server in response to a CONNECT Packet
+// ConnAckMessage The CONNACK Packet is the packet sent by the Server in response to a CONNECT Packet
 // received from a Client. The first packet sent from the Server to the Client MUST
 // be a CONNACK Packet [MQTT-3.2.0-1].
-//
 // If the Client does not receive a CONNACK Packet from the Server within a reasonable
 // amount of time, the Client SHOULD close the Network Connection. A "reasonable" amount
 // of time depends on the type of application and the communications infrastructure.
@@ -38,7 +37,7 @@ var _ Message = (*ConnAckMessage)(nil)
 // NewConnAckMessage creates a new CONNACK message
 func NewConnAckMessage() *ConnAckMessage {
 	msg := &ConnAckMessage{}
-	msg.SetType(CONNACK)
+	msg.SetType(CONNACK) // nolint: errcheck
 
 	return msg
 }
@@ -70,11 +69,13 @@ func (cm *ConnAckMessage) ReturnCode() ConnAckCode {
 	return cm.returnCode
 }
 
+// SetReturnCode of conn
 func (cm *ConnAckMessage) SetReturnCode(ret ConnAckCode) {
 	cm.returnCode = ret
 	cm.dirty = true
 }
 
+// Len of message
 func (cm *ConnAckMessage) Len() int {
 	if !cm.dirty {
 		return len(cm.dBuf)
@@ -89,6 +90,7 @@ func (cm *ConnAckMessage) Len() int {
 	return cm.header.msgLen() + ml
 }
 
+// Decode message
 func (cm *ConnAckMessage) Decode(src []byte) (int, error) {
 	total := 0
 
@@ -122,10 +124,11 @@ func (cm *ConnAckMessage) Decode(src []byte) (int, error) {
 	return total, nil
 }
 
+// Encode message
 func (cm *ConnAckMessage) Encode(dst []byte) (int, error) {
 	if !cm.dirty {
 		if len(dst) < len(cm.dBuf) {
-			return 0, fmt.Errorf("connack/Encode: Insufficient buffer size. Expecting %d, got %d.", len(cm.dBuf), len(dst))
+			return 0, fmt.Errorf("connack/Encode: Insufficient buffer size. Expecting %d, got %d", len(cm.dBuf), len(dst))
 		}
 
 		return copy(dst, cm.dBuf), nil
@@ -136,7 +139,7 @@ func (cm *ConnAckMessage) Encode(dst []byte) (int, error) {
 	ml := cm.msgLen()
 
 	if len(dst) < hl+ml {
-		return 0, fmt.Errorf("connack/Encode: Insufficient buffer size. Expecting %d, got %d.", hl+ml, len(dst))
+		return 0, fmt.Errorf("connack/Encode: Insufficient buffer size. Expecting %d, got %d", hl+ml, len(dst))
 	}
 
 	if err := cm.SetRemainingLength(int32(ml)); err != nil {

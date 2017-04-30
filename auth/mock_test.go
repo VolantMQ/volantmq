@@ -21,21 +21,21 @@ import (
 )
 
 func TestMockSuccessAuthenticator(t *testing.T) {
-	require.NoError(t, mockSuccessAuthenticator.Authenticate("", ""))
+	require.NoError(t, mockSuccessAuthenticator.Password("", ""))
 
-	require.NoError(t, providers["mockSuccess"].Authenticate("", ""))
+	require.NoError(t, providers["mockSuccess"].Password("", ""))
 
 	mgr, err := NewManager("mockSuccess")
 	require.NoError(t, err)
-	require.NoError(t, mgr.Authenticate("", ""))
+	require.NoError(t, mgr.Password("", ""))
 }
 
 func TestMockFailureAuthenticator(t *testing.T) {
-	require.Error(t, mockFailureAuthenticator.Authenticate("", ""))
+	require.Error(t, mockFailureAuthenticator.Password("", ""))
 
-	require.Error(t, providers["mockFailure"].Authenticate("", ""))
+	require.Error(t, providers["mockFailure"].Password("", ""))
 
 	mgr, err := NewManager("mockFailure")
 	require.NoError(t, err)
-	require.Error(t, mgr.Authenticate("", ""))
+	require.Error(t, mgr.Password("", ""))
 }

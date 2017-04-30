@@ -82,13 +82,13 @@ func startServiceN(t testing.TB, u *url.URL, wg *sync.WaitGroup, ready1, ready2 
 
 	ln, err := net.Listen(u.Scheme, u.Host)
 	require.NoError(t, err)
-	defer ln.Close()
+	defer ln.Close() // nolint: errcheck
 
 	close(ready1)
 
-	svr := &Server{
+	svr, _ := NewServer(Config{
 		Authenticators: authenticator,
-	}
+	})
 
 	for i := 0; i < cnt; i++ {
 		conn, err := ln.Accept()
@@ -132,42 +132,42 @@ func connectToServer(t testing.TB, uri string) *Client {
 	return c
 }
 
-func newPubrelMessage(pktid uint16) *message.PubrelMessage {
-	msg := message.NewPubrelMessage()
-	msg.SetPacketId(pktid)
+func newPubrelMessage(pktid uint16) *message.PubRelMessage {
+	msg := message.NewPubRelMessage()
+	msg.SetPacketID(pktid)
 
 	return msg
 }
 
 func newPublishMessage(pktid uint16, qos byte) *message.PublishMessage {
 	msg := message.NewPublishMessage()
-	msg.SetPacketId(pktid)
-	msg.SetTopic([]byte("abc"))
+	msg.SetPacketID(pktid)
+	msg.SetTopic([]byte("abc")) // nolint: errcheck
 	msg.SetPayload([]byte("abc"))
-	msg.SetQoS(qos)
+	msg.SetQoS(qos) // nolint: errcheck
 
 	return msg
 }
 
 func newPublishMessageLarge(pktid uint16, qos byte) *message.PublishMessage {
 	msg := message.NewPublishMessage()
-	msg.SetPacketId(pktid)
-	msg.SetTopic([]byte("abc"))
+	msg.SetPacketID(pktid)
+	msg.SetTopic([]byte("abc")) // nolint: errcheck
 	msg.SetPayload(make([]byte, 1024))
-	msg.SetQoS(qos)
+	msg.SetQoS(qos) // nolint: errcheck
 
 	return msg
 }
 
 func newSubscribeMessage(qos byte) *message.SubscribeMessage {
 	msg := message.NewSubscribeMessage()
-	msg.AddTopic([]byte("abc"), qos)
+	msg.AddTopic([]byte("abc"), qos) // nolint: errcheck
 
 	return msg
 }
 
-func newUnsubscribeMessage() *message.UnsubscribeMessage {
-	msg := message.NewUnsubscribeMessage()
+func newUnsubscribeMessage() *message.UnSubscribeMessage {
+	msg := message.NewUnSubscribeMessage()
 	msg.AddTopic([]byte("abc"))
 
 	return msg
@@ -175,10 +175,10 @@ func newUnsubscribeMessage() *message.UnsubscribeMessage {
 
 func newConnectMessage() *message.ConnectMessage {
 	msg := message.NewConnectMessage()
-	msg.SetWillQos(1)
-	msg.SetVersion(4)
+	msg.SetWillQos(1) // nolint: errcheck
+	msg.SetVersion(4) // nolint: errcheck
 	msg.SetCleanSession(true)
-	msg.SetClientId([]byte(fmt.Sprintf("surgemq%d", atomic.AddUint64(&gTestClientID, 1))))
+	msg.SetClientID([]byte(fmt.Sprintf("surgemq%d", atomic.AddUint64(&gTestClientID, 1)))) // nolint: errcheck
 	msg.SetKeepAlive(10)
 	msg.SetWillTopic([]byte("will"))
 	msg.SetWillMessage([]byte("send me home"))

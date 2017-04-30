@@ -14,6 +14,7 @@
 
 package message
 
+// PubRecMessage PUBREC
 type PubRecMessage struct {
 	PubAckMessage
 }
@@ -25,7 +26,7 @@ var _ Message = (*PubRecMessage)(nil)
 // NewPubRecMessage creates a new PUBREC message.
 func NewPubRecMessage() *PubRecMessage {
 	msg := &PubRecMessage{}
-	msg.SetType(PUBREC)
+	msg.SetType(PUBREC) // nolint: errcheck
 
 	return msg
 }

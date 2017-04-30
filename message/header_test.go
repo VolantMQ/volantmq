@@ -23,7 +23,7 @@ import (
 func TestMessageHeaderFields(t *testing.T) {
 	header := &header{}
 
-	header.SetRemainingLength(33)
+	header.SetRemainingLength(33) // nolint: errcheck
 
 	require.Equal(t, int32(33), header.RemainingLength())
 
@@ -76,7 +76,7 @@ func TestMessageHeaderDecode3(t *testing.T) {
 func TestMessageHeaderDecode4(t *testing.T) {
 	buf := []byte{0x62, 0xff, 0xff, 0xff, 0x7f}
 	header := &header{
-		mtypeflags: []byte{6<<4 | 2},
+		mTypeFlags: []byte{6<<4 | 2},
 		//mtype:      6,
 		//flags:      2,
 	}
@@ -91,8 +91,8 @@ func TestMessageHeaderDecode4(t *testing.T) {
 func TestMessageHeaderDecode5(t *testing.T) {
 	buf := []byte{0x62, 0xff, 0x7f}
 	header := &header{
-		mtypeflags: []byte{6<<4 | 2},
-		//mtype:      6,
+		mTypeFlags: []byte{6<<4 | 2},
+		//mType:      6,
 		//flags:      2,
 	}
 
@@ -157,8 +157,8 @@ func TestMessageHeaderEncode3(t *testing.T) {
 
 func TestMessageHeaderEncode4(t *testing.T) {
 	header := &header{
-		mtypeflags: []byte{byte(RESERVED2) << 4},
-		//mtype:      6,
+		mTypeFlags: []byte{byte(RESERVED2) << 4},
+		//mType:      6,
 		//flags:      2,
 	}
 

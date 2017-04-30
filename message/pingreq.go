@@ -14,7 +14,7 @@
 
 package message
 
-// The PINGREQ Packet is sent from a Client to the Server. It can be used to:
+// PingReqMessage The PINGREQ Packet is sent from a Client to the Server. It can be used to:
 // 1. Indicate to the Server that the Client is alive in the absence of any other
 //    Control Packets being sent from the Client to the Server.
 // 2. Request that the Server responds to confirm that it is alive.
@@ -28,7 +28,7 @@ var _ Message = (*PingReqMessage)(nil)
 // NewPingReqMessage creates a new PINGREQ message.
 func NewPingReqMessage() *PingReqMessage {
 	msg := &PingReqMessage{}
-	msg.SetType(PINGREQ)
+	msg.SetType(PINGREQ) // nolint: errcheck
 
 	return msg
 }

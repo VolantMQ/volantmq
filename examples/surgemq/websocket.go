@@ -25,7 +25,7 @@ func addWebSocketHandler(urlPattern string, uri string) error {
 	}
 
 	h := func(ws *websocket.Conn) {
-		webSocketTCPProxy(ws, u.Scheme, u.Host)
+		webSocketTCPProxy(ws, u.Scheme, u.Host) // nolint: errcheck, gas
 	}
 	http.Handle(urlPattern, websocket.Handler(h))
 	return nil
@@ -41,7 +41,7 @@ func listenAndServeWebSocketSecure(addr string, cert string, key string) error {
 	return http.ListenAndServeTLS(addr, cert, key, nil)
 }
 
-/* copy from websocket to writer, this copies the binary frames as is */
+/* copy from webSocket to writer, this copies the binary frames as is */
 func ioCopyWs(src *websocket.Conn, dst io.Writer) (int, error) {
 	var buffer []byte
 	count := 0
@@ -85,16 +85,16 @@ func webSocketTCPProxy(ws *websocket.Conn, nettype string, host string) error {
 	if err != nil {
 		return err
 	}
-	defer client.Close()
-	defer ws.Close()
+	defer client.Close() // nolint: errcheck
+	defer ws.Close()     // nolint: errcheck
 	chDone := make(chan bool)
 
 	go func() {
-		ioWsCopy(client, ws)
+		ioWsCopy(client, ws) // nolint: errcheck, gas
 		chDone <- true
 	}()
 	go func() {
-		ioCopyWs(ws, client)
+		ioCopyWs(ws, client) // nolint: errcheck, gas
 		chDone <- true
 	}()
 	<-chDone

@@ -20,7 +20,7 @@ import (
 )
 
 var (
-	gPacketId uint64 = 0
+	gPacketID uint64
 )
 
 // Fixed header
@@ -32,6 +32,9 @@ type header struct {
 	// flags  byte
 	remLen int32
 
+	// Whether the message has changed since last decode
+	dirty bool
+
 	// mTypeFlags is the first byte of the buffer, 4 bits for mType, 4 bits for flags
 	mTypeFlags []byte
 
@@ -40,9 +43,6 @@ type header struct {
 
 	// Points to the decoding buffer
 	dBuf []byte
-
-	// Whether the message has changed since last decode
-	dirty bool
 }
 
 // String returns a string representation of the message.
@@ -67,19 +67,19 @@ func (h *header) Desc() string {
 
 // Type returns the MessageType of the Message. The retured value should be one
 // of the constants defined for MessageType.
-func (h *header) Type() MessageType {
+func (h *header) Type() Type {
 	//return this.mtype
 	if len(h.mTypeFlags) != 1 {
 		h.mTypeFlags = make([]byte, 1)
 		h.dirty = true
 	}
 
-	return MessageType(h.mTypeFlags[0] >> 4)
+	return Type(h.mTypeFlags[0] >> 4)
 }
 
 // SetType sets the message type of this message. It also correctly sets the
 // default flags for the message type. It returns an error if the type is invalid.
-func (h *header) SetType(mtype MessageType) error {
+func (h *header) SetType(mtype Type) error {
 	if !mtype.Valid() {
 		return fmt.Errorf("header/SetType: Invalid control packet type %d", mtype)
 	}
@@ -127,8 +127,8 @@ func (h *header) Len() int {
 	return h.msgLen()
 }
 
-// PacketId returns the ID of the packet.
-func (h *header) PacketId() uint16 {
+// PacketID returns the ID of the packet.
+func (h *header) PacketID() uint16 {
 	if len(h.packetID) == 2 {
 		return binary.BigEndian.Uint16(h.packetID)
 	}
@@ -136,8 +136,8 @@ func (h *header) PacketId() uint16 {
 	return 0
 }
 
-// SetPacketId sets the ID of the packet.
-func (h *header) SetPacketId(v uint16) {
+// SetPacketID sets the ID of the packet.
+func (h *header) SetPacketID(v uint16) {
 	// If setting to 0, nothing to do, move on
 	if v == 0 {
 		return
@@ -161,7 +161,7 @@ func (h *header) encode(dst []byte) (int, error) {
 	ml := h.msgLen()
 
 	if len(dst) < ml {
-		return 0, fmt.Errorf("header/Encode: Insufficient buffer size. Expecting %d, got %d.", ml, len(dst))
+		return 0, fmt.Errorf("header/Encode: Insufficient buffer size. Expecting %d, got %d", ml, len(dst))
 	}
 
 	total := 0
@@ -175,7 +175,7 @@ func (h *header) encode(dst []byte) (int, error) {
 	}
 
 	dst[total] = h.mTypeFlags[0]
-	total += 1
+	total++
 
 	n := binary.PutUvarint(dst[total:], uint64(h.remLen))
 	total += n
@@ -197,11 +197,11 @@ func (h *header) decode(src []byte) (int, error) {
 	h.mTypeFlags = src[total : total+1]
 	//mType := MessageType(src[total] >> 4)
 	if !h.Type().Valid() {
-		return total, fmt.Errorf("header/Decode: Invalid message type %d.", mType)
+		return total, fmt.Errorf("header/Decode: Invalid message type %d", mType)
 	}
 
 	if mType != h.Type() {
-		return total, fmt.Errorf("header/Decode: Invalid message type %d. Expecting %d.", h.Type(), mType)
+		return total, fmt.Errorf("header/Decode: Invalid message type %d. Expecting %d", h.Type(), mType)
 	}
 
 	//this.flags = src[total] & 0x0f
@@ -210,7 +210,7 @@ func (h *header) decode(src []byte) (int, error) {
 	}
 
 	if h.Type() == PUBLISH && !ValidQos((h.Flags()>>1)&0x3) {
-		return total, fmt.Errorf("header/Decode: Invalid QoS (%d) for PUBLISH message.", (h.Flags()>>1)&0x3)
+		return total, fmt.Errorf("header/Decode: Invalid QoS (%d) for PUBLISH message", (h.Flags()>>1)&0x3)
 	}
 
 	total++
@@ -219,9 +219,13 @@ func (h *header) decode(src []byte) (int, error) {
 	total += m
 	h.remLen = int32(remLen)
 
-	if h.remLen > maxRemainingLength || remLen < 0 {
+	if h.remLen > maxRemainingLength {
 		return total, fmt.Errorf("header/Decode: Remaining length (%d) out of bound (max %d, min 0)", h.remLen, maxRemainingLength)
 	}
+
+	//if h.remLen > maxRemainingLength || remLen < 0 {
+	//	return total, fmt.Errorf("header/Decode: Remaining length (%d) out of bound (max %d, min 0)", h.remLen, maxRemainingLength)
+	//}
 
 	if int(h.remLen) > len(src[total:]) {
 		return total, fmt.Errorf("header/Decode: Remaining length (%d) is greater than remaining buffer (%d)", h.remLen, len(src[total:]))
@@ -235,7 +239,7 @@ func (h *header) msgLen() int {
 	total := 1
 
 	if h.remLen <= 127 {
-		total += 1
+		total++
 	} else if h.remLen <= 16383 {
 		total += 2
 	} else if h.remLen <= 2097151 {

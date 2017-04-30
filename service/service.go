@@ -54,7 +54,7 @@ type service struct {
 	id uint64
 
 	// used during permissions check
-	clientID string
+	//clientID string
 
 	// Is this a client or server. It's set by either Connect (client) or
 	// HandleConnection (server).
@@ -163,7 +163,7 @@ func (s *service) start() error {
 		}
 
 		for i, t := range topics {
-			s.topicsMgr.Subscribe([]byte(t), qoss[i], &s.onPub)
+			s.topicsMgr.Subscribe([]byte(t), qoss[i], &s.onPub) // nolint: errcheck
 		}
 	}
 
@@ -213,11 +213,11 @@ func (s *service) stop() {
 	// Close the network connection
 	if s.conn != nil {
 		glog.Debugf("(%s) closing this.conn", s.cid())
-		s.conn.Close()
+		s.conn.Close() // nolint: errcheck
 	}
 
-	s.in.Close()
-	s.out.Close()
+	s.in.Close()  // nolint: errcheck
+	s.out.Close() // nolint: errcheck
 
 	// Wait for all the goroutines to stop.
 	s.wgStopped.Wait()
@@ -242,7 +242,7 @@ func (s *service) stop() {
 	// Publish will message if WillFlag is set. Server side only.
 	if !s.client && s.sess.CMsg.WillFlag() {
 		glog.Infof("(%s) service/stop: connection unexpectedly closed. Sending Will.", s.cid())
-		s.onPublish(s.sess.Will)
+		s.onPublish(s.sess.Will) // nolint: errcheck
 	}
 
 	// Remove the client topics manager
@@ -320,10 +320,10 @@ func (s *service) subscribe(msg *message.SubscribeMessage, onComplete OnComplete
 			return nil
 		}
 
-		if sub.PacketId() != subAck.PacketId() {
+		if sub.PacketID() != subAck.PacketID() {
 			if onComplete != nil {
 				fmtMsg := "Sub and Suback packet ID not the same. %d != %d"
-				return onComplete(msg, ack, fmt.Errorf(fmtMsg, sub.PacketId(), subAck.PacketId()))
+				return onComplete(msg, ack, fmt.Errorf(fmtMsg, sub.PacketID(), subAck.PacketID()))
 			}
 			return nil
 		}
@@ -347,7 +347,7 @@ func (s *service) subscribe(msg *message.SubscribeMessage, onComplete OnComplete
 			if c == message.QosFailure {
 				err2 = fmt.Errorf("Failed to subscribe to '%s'\n%v", string(t), err2)
 			} else {
-				s.sess.AddTopic(string(t), c)
+				s.sess.AddTopic(string(t), c) // nolint: errcheck
 				_, err := s.topicsMgr.Subscribe(t, c, &onPublish)
 				if err != nil {
 					err2 = fmt.Errorf("Failed to subscribe to '%s' (%v)\n%v", string(t), err, err2)
@@ -396,9 +396,9 @@ func (s *service) unSubscribe(msg *message.UnSubscribeMessage, onComplete OnComp
 			return nil
 		}
 
-		if unSub.PacketId() != unSubAck.PacketId() {
+		if unSub.PacketID() != unSubAck.PacketID() {
 			if onComplete != nil {
-				return onComplete(msg, ack, fmt.Errorf("Unsub and Unsuback packet ID not the same. %d != %d.", unSub.PacketId(), unSubAck.PacketId()))
+				return onComplete(msg, ack, fmt.Errorf("Unsub and Unsuback packet ID not the same. %d != %d", unSub.PacketID(), unSubAck.PacketID()))
 			}
 			return nil
 		}
@@ -413,7 +413,7 @@ func (s *service) unSubscribe(msg *message.UnSubscribeMessage, onComplete OnComp
 				err2 = fmt.Errorf("%v\n%v", err2, err)
 			}
 
-			s.sess.RemoveTopic(string(tb))
+			s.sess.RemoveTopic(string(tb)) // nolint: errcheck
 		}
 
 		if onComplete != nil {

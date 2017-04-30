@@ -111,7 +111,7 @@ func (s *service) processIncoming(msg message.Message) error {
 		err = s.processPublish(msg)
 	case *message.PubAckMessage:
 		// For PUBACK message, it means QoS 1, we should send to ack queue
-		s.sess.Pub1ack.Ack(msg)
+		s.sess.Pub1ack.Ack(msg) // nolint: errcheck
 		s.processAcked(s.sess.Pub1ack)
 
 	case *message.PubRecMessage:
@@ -121,7 +121,7 @@ func (s *service) processIncoming(msg message.Message) error {
 		}
 
 		resp := message.NewPubRelMessage()
-		resp.SetPacketId(msg.PacketId())
+		resp.SetPacketID(msg.PacketID())
 		_, err = s.writeMessage(resp)
 
 	case *message.PubRelMessage:
@@ -133,7 +133,7 @@ func (s *service) processIncoming(msg message.Message) error {
 		s.processAcked(s.sess.Pub2in)
 
 		resp := message.NewPubCompMessage()
-		resp.SetPacketId(msg.PacketId())
+		resp.SetPacketID(msg.PacketID())
 		_, err = s.writeMessage(resp)
 
 	case *message.PubCompMessage:
@@ -150,7 +150,7 @@ func (s *service) processIncoming(msg message.Message) error {
 
 	case *message.SubAckMessage:
 		// For SUBACK message, we should send to ack queue
-		s.sess.SubAck.Ack(msg)
+		s.sess.SubAck.Ack(msg) // nolint: errcheck
 		s.processAcked(s.sess.SubAck)
 
 	case *message.UnSubscribeMessage:
@@ -159,7 +159,7 @@ func (s *service) processIncoming(msg message.Message) error {
 
 	case *message.UnSubAckMessage:
 		// For UNSUBACK message, we should send to ack queue
-		s.sess.UnSubAck.Ack(msg)
+		s.sess.UnSubAck.Ack(msg) // nolint: errcheck
 		s.processAcked(s.sess.UnSubAck)
 
 	case *message.PingReqMessage:
@@ -168,7 +168,7 @@ func (s *service) processIncoming(msg message.Message) error {
 		_, err = s.writeMessage(resp)
 
 	case *message.PingRespMessage:
-		s.sess.PingAck.Ack(msg)
+		s.sess.PingAck.Ack(msg) // nolint: errcheck
 		s.processAcked(s.sess.PingAck)
 
 	case *message.DisconnectMessage:
@@ -272,17 +272,17 @@ func (s *service) processPublish(msg *message.PublishMessage) error {
 
 	switch msg.QoS() {
 	case message.QosExactlyOnce:
-		s.sess.Pub2in.Wait(msg, nil)
+		s.sess.Pub2in.Wait(msg, nil) // nolint: errcheck
 
 		resp := message.NewPubRecMessage()
-		resp.SetPacketId(msg.PacketId())
+		resp.SetPacketID(msg.PacketID())
 
 		_, err := s.writeMessage(resp)
 		return err
 
 	case message.QosAtLeastOnce:
 		resp := message.NewPubAckMessage()
-		resp.SetPacketId(msg.PacketId())
+		resp.SetPacketID(msg.PacketID())
 
 		if _, err := s.writeMessage(resp); err != nil {
 			return err
@@ -300,7 +300,7 @@ func (s *service) processPublish(msg *message.PublishMessage) error {
 // For SUBSCRIBE message, we should add subscriber, then send back SUBACK
 func (s *service) processSubscribe(msg *message.SubscribeMessage) error {
 	resp := message.NewSubAckMessage()
-	resp.SetPacketId(msg.PacketId())
+	resp.SetPacketID(msg.PacketID())
 
 	// Subscribe to the different topics
 	var retCodes []byte
@@ -315,13 +315,13 @@ func (s *service) processSubscribe(msg *message.SubscribeMessage) error {
 		if err != nil {
 			return err
 		}
-		s.sess.AddTopic(string(t), qos[i])
+		s.sess.AddTopic(string(t), qos[i]) // nolint: errcheck
 
 		retCodes = append(retCodes, rqos)
 
 		// yeah I am not checking errors here. If there's an error we don't want the
 		// subscription to stop, just let it go.
-		s.topicsMgr.Retained(t, &s.rmSgs)
+		s.topicsMgr.Retained(t, &s.rmSgs) // nolint: errcheck
 		glog.Debugf("(%s) topic = %s, retained count = %d", s.cid(), string(t), len(s.rmSgs))
 	}
 
@@ -348,12 +348,12 @@ func (s *service) processUnSubscribe(msg *message.UnSubscribeMessage) error {
 	topics := msg.Topics()
 
 	for _, t := range topics {
-		s.topicsMgr.UnSubscribe(t, &s.onPub)
-		s.sess.RemoveTopic(string(t))
+		s.topicsMgr.UnSubscribe(t, &s.onPub) // nolint: errcheck
+		s.sess.RemoveTopic(string(t))        // nolint: errcheck
 	}
 
 	resp := message.NewUnSubAckMessage()
-	resp.SetPacketId(msg.PacketId())
+	resp.SetPacketID(msg.PacketID())
 
 	_, err := s.writeMessage(resp)
 	return err

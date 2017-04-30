@@ -19,22 +19,22 @@ package message
 type ConnAckCode byte
 
 const (
-	// Connection accepted
+	// ConnectionAccepted Connection accepted
 	ConnectionAccepted ConnAckCode = iota
 
-	// The Server does not support the level of the MQTT protocol requested by the Client
+	// ErrInvalidProtocolVersion The Server does not support the level of the MQTT protocol requested by the Client
 	ErrInvalidProtocolVersion
 
-	// The Client identifier is correct UTF-8 but not allowed by the server
+	// ErrIdentifierRejected The Client identifier is correct UTF-8 but not allowed by the server
 	ErrIdentifierRejected
 
-	// The Network Connection has been made but the MQTT service is unavailable
+	// ErrServerUnavailable The Network Connection has been made but the MQTT service is unavailable
 	ErrServerUnavailable
 
-	// The data in the user name or password is malformed
+	// ErrBadUsernameOrPassword The data in the user name or password is malformed
 	ErrBadUsernameOrPassword
 
-	// The Client is not authorized to connect
+	// ErrNotAuthorized The Client is not authorized to connect
 	ErrNotAuthorized
 )
 

@@ -70,6 +70,8 @@ func startFanSubscribers(t testing.TB, cid int, wg *sync.WaitGroup) {
 		since := time.Since(now).Nanoseconds()
 
 		sub := newSubscribeMessage("test", 0)
+
+		// nolint: errcheck
 		svc.Subscribe(sub,
 			func(msg, ack message.Message, err error) error {
 				subs := atomic.AddInt64(&subdone, 1)
@@ -139,8 +141,8 @@ func startFanPublisher(t testing.TB, cid int, wg *sync.WaitGroup) {
 
 		payload := make([]byte, size)
 		msg := message.NewPublishMessage()
-		msg.SetTopic(topic)
-		msg.SetQoS(qos)
+		msg.SetTopic(topic) // nolint: errcheck
+		msg.SetQoS(qos)     // nolint: errcheck
 
 		for i := 0; i < cnt; i++ {
 			binary.BigEndian.PutUint32(payload, uint32(cid*cnt+i))

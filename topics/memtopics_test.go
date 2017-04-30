@@ -96,34 +96,34 @@ func TestSNodeInsert1(t *testing.T) {
 	n := newSNode()
 	topic := []byte("sport/tennis/player1/#")
 
-	err := n.sInsert(topic, 1, "sub1")
+	err := n.insert(topic, 1, "sub1")
 
 	require.NoError(t, err)
-	require.Equal(t, 1, len(n.snodes))
+	require.Equal(t, 1, len(n.nodes))
 	require.Equal(t, 0, len(n.subs))
 
-	n2, ok := n.snodes["sport"]
+	n2, ok := n.nodes["sport"]
 
 	require.True(t, ok)
-	require.Equal(t, 1, len(n2.snodes))
+	require.Equal(t, 1, len(n2.nodes))
 	require.Equal(t, 0, len(n2.subs))
 
-	n3, ok := n2.snodes["tennis"]
+	n3, ok := n2.nodes["tennis"]
 
 	require.True(t, ok)
-	require.Equal(t, 1, len(n3.snodes))
+	require.Equal(t, 1, len(n3.nodes))
 	require.Equal(t, 0, len(n3.subs))
 
-	n4, ok := n3.snodes["player1"]
+	n4, ok := n3.nodes["player1"]
 
 	require.True(t, ok)
-	require.Equal(t, 1, len(n4.snodes))
+	require.Equal(t, 1, len(n4.nodes))
 	require.Equal(t, 0, len(n4.subs))
 
-	n5, ok := n4.snodes["#"]
+	n5, ok := n4.nodes["#"]
 
 	require.True(t, ok)
-	require.Equal(t, 0, len(n5.snodes))
+	require.Equal(t, 0, len(n5.nodes))
 	require.Equal(t, 1, len(n5.subs))
 	require.Equal(t, "sub1", n5.subs[0].(string))
 }
@@ -132,16 +132,16 @@ func TestSNodeInsert2(t *testing.T) {
 	n := newSNode()
 	topic := []byte("#")
 
-	err := n.sInsert(topic, 1, "sub1")
+	err := n.insert(topic, 1, "sub1")
 
 	require.NoError(t, err)
-	require.Equal(t, 1, len(n.snodes))
+	require.Equal(t, 1, len(n.nodes))
 	require.Equal(t, 0, len(n.subs))
 
-	n2, ok := n.snodes["#"]
+	n2, ok := n.nodes["#"]
 
 	require.True(t, ok)
-	require.Equal(t, 0, len(n2.snodes))
+	require.Equal(t, 0, len(n2.nodes))
 	require.Equal(t, 1, len(n2.subs))
 	require.Equal(t, "sub1", n2.subs[0].(string))
 }
@@ -150,28 +150,28 @@ func TestSNodeInsert3(t *testing.T) {
 	n := newSNode()
 	topic := []byte("+/tennis/#")
 
-	err := n.sInsert(topic, 1, "sub1")
+	err := n.insert(topic, 1, "sub1")
 
 	require.NoError(t, err)
-	require.Equal(t, 1, len(n.snodes))
+	require.Equal(t, 1, len(n.nodes))
 	require.Equal(t, 0, len(n.subs))
 
-	n2, ok := n.snodes["+"]
+	n2, ok := n.nodes["+"]
 
 	require.True(t, ok)
-	require.Equal(t, 1, len(n2.snodes))
+	require.Equal(t, 1, len(n2.nodes))
 	require.Equal(t, 0, len(n2.subs))
 
-	n3, ok := n2.snodes["tennis"]
+	n3, ok := n2.nodes["tennis"]
 
 	require.True(t, ok)
-	require.Equal(t, 1, len(n3.snodes))
+	require.Equal(t, 1, len(n3.nodes))
 	require.Equal(t, 0, len(n3.subs))
 
-	n4, ok := n3.snodes["#"]
+	n4, ok := n3.nodes["#"]
 
 	require.True(t, ok)
-	require.Equal(t, 0, len(n4.snodes))
+	require.Equal(t, 0, len(n4.nodes))
 	require.Equal(t, 1, len(n4.subs))
 	require.Equal(t, "sub1", n4.subs[0].(string))
 }
@@ -180,22 +180,22 @@ func TestSNodeInsert4(t *testing.T) {
 	n := newSNode()
 	topic := []byte("/finance")
 
-	err := n.sInsert(topic, 1, "sub1")
+	err := n.insert(topic, 1, "sub1")
 
 	require.NoError(t, err)
-	require.Equal(t, 1, len(n.snodes))
+	require.Equal(t, 1, len(n.nodes))
 	require.Equal(t, 0, len(n.subs))
 
-	n2, ok := n.snodes["+"]
+	n2, ok := n.nodes["+"]
 
 	require.True(t, ok)
-	require.Equal(t, 1, len(n2.snodes))
+	require.Equal(t, 1, len(n2.nodes))
 	require.Equal(t, 0, len(n2.subs))
 
-	n3, ok := n2.snodes["finance"]
+	n3, ok := n2.nodes["finance"]
 
 	require.True(t, ok)
-	require.Equal(t, 0, len(n3.snodes))
+	require.Equal(t, 0, len(n3.nodes))
 	require.Equal(t, 1, len(n3.subs))
 	require.Equal(t, "sub1", n3.subs[0].(string))
 }
@@ -204,23 +204,23 @@ func TestSNodeInsertDup(t *testing.T) {
 	n := newSNode()
 	topic := []byte("/finance")
 
-	n.sInsert(topic, 1, "sub1")
-	err := n.sInsert(topic, 1, "sub1")
+	n.insert(topic, 1, "sub1") // nolint: errcheck
+	err := n.insert(topic, 1, "sub1")
 
 	require.NoError(t, err)
-	require.Equal(t, 1, len(n.snodes))
+	require.Equal(t, 1, len(n.nodes))
 	require.Equal(t, 0, len(n.subs))
 
-	n2, ok := n.snodes["+"]
+	n2, ok := n.nodes["+"]
 
 	require.True(t, ok)
-	require.Equal(t, 1, len(n2.snodes))
+	require.Equal(t, 1, len(n2.nodes))
 	require.Equal(t, 0, len(n2.subs))
 
-	n3, ok := n2.snodes["finance"]
+	n3, ok := n2.nodes["finance"]
 
 	require.True(t, ok)
-	require.Equal(t, 0, len(n3.snodes))
+	require.Equal(t, 0, len(n3.nodes))
 	require.Equal(t, 1, len(n3.subs))
 	require.Equal(t, "sub1", n3.subs[0].(string))
 }
@@ -229,11 +229,11 @@ func TestSNodeRemove1(t *testing.T) {
 	n := newSNode()
 	topic := []byte("sport/tennis/player1/#")
 
-	n.sInsert(topic, 1, "sub1")
-	err := n.sremove([]byte("sport/tennis/player1/#"), "sub1")
+	n.insert(topic, 1, "sub1") // nolint: errcheck
+	err := n.remove([]byte("sport/tennis/player1/#"), "sub1")
 
 	require.NoError(t, err)
-	require.Equal(t, 0, len(n.snodes))
+	require.Equal(t, 0, len(n.nodes))
 	require.Equal(t, 0, len(n.subs))
 }
 
@@ -241,8 +241,8 @@ func TestSNodeRemove2(t *testing.T) {
 	n := newSNode()
 	topic := []byte("sport/tennis/player1/#")
 
-	n.sInsert(topic, 1, "sub1")
-	err := n.sremove([]byte("sport/tennis/player1"), "sub1")
+	n.insert(topic, 1, "sub1") // nolint: errcheck
+	err := n.remove([]byte("sport/tennis/player1"), "sub1")
 
 	require.Error(t, err)
 }
@@ -251,24 +251,24 @@ func TestSNodeRemove3(t *testing.T) {
 	n := newSNode()
 	topic := []byte("sport/tennis/player1/#")
 
-	n.sInsert(topic, 1, "sub1")
-	n.sInsert(topic, 1, "sub2")
-	err := n.sremove([]byte("sport/tennis/player1/#"), nil)
+	n.insert(topic, 1, "sub1") // nolint: errcheck
+	n.insert(topic, 1, "sub2") // nolint: errcheck
+	err := n.remove([]byte("sport/tennis/player1/#"), nil)
 
 	require.NoError(t, err)
-	require.Equal(t, 0, len(n.snodes))
+	require.Equal(t, 0, len(n.nodes))
 	require.Equal(t, 0, len(n.subs))
 }
 
 func TestSNodeMatch1(t *testing.T) {
 	n := newSNode()
 	topic := []byte("sport/tennis/player1/#")
-	n.sInsert(topic, 1, "sub1")
+	n.insert(topic, 1, "sub1") // nolint: errcheck
 
 	subs := make([]interface{}, 0, 5)
 	qoss := make([]byte, 0, 5)
 
-	err := n.smatch([]byte("sport/tennis/player1/anzel"), 1, &subs, &qoss)
+	err := n.match([]byte("sport/tennis/player1/anzel"), 1, &subs, &qoss)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, len(subs))
@@ -278,12 +278,12 @@ func TestSNodeMatch1(t *testing.T) {
 func TestSNodeMatch2(t *testing.T) {
 	n := newSNode()
 	topic := []byte("sport/tennis/player1/#")
-	n.sInsert(topic, 1, "sub1")
+	n.insert(topic, 1, "sub1") // nolint: errcheck
 
 	subs := make([]interface{}, 0, 5)
 	qoss := make([]byte, 0, 5)
 
-	err := n.smatch([]byte("sport/tennis/player1/anzel"), 1, &subs, &qoss)
+	err := n.match([]byte("sport/tennis/player1/anzel"), 1, &subs, &qoss)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, len(subs))
@@ -293,12 +293,12 @@ func TestSNodeMatch2(t *testing.T) {
 func TestSNodeMatch3(t *testing.T) {
 	n := newSNode()
 	topic := []byte("sport/tennis/player1/#")
-	n.sInsert(topic, 2, "sub1")
+	n.insert(topic, 2, "sub1") // nolint: errcheck
 
 	subs := make([]interface{}, 0, 5)
 	qoss := make([]byte, 0, 5)
 
-	err := n.smatch([]byte("sport/tennis/player1/anzel"), 2, &subs, &qoss)
+	err := n.match([]byte("sport/tennis/player1/anzel"), 2, &subs, &qoss)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, len(subs))
@@ -307,12 +307,12 @@ func TestSNodeMatch3(t *testing.T) {
 
 func TestSNodeMatch4(t *testing.T) {
 	n := newSNode()
-	n.sInsert([]byte("sport/tennis/#"), 2, "sub1")
+	n.insert([]byte("sport/tennis/#"), 2, "sub1") // nolint: errcheck
 
 	subs := make([]interface{}, 0, 5)
 	qoss := make([]byte, 0, 5)
 
-	err := n.smatch([]byte("sport/tennis/player1/anzel"), 2, &subs, &qoss)
+	err := n.match([]byte("sport/tennis/player1/anzel"), 2, &subs, &qoss)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, len(subs))
@@ -321,13 +321,13 @@ func TestSNodeMatch4(t *testing.T) {
 
 func TestSNodeMatch5(t *testing.T) {
 	n := newSNode()
-	n.sInsert([]byte("sport/tennis/+/anzel"), 1, "sub1")
-	n.sInsert([]byte("sport/tennis/player1/anzel"), 1, "sub2")
+	n.insert([]byte("sport/tennis/+/anzel"), 1, "sub1")       // nolint: errcheck
+	n.insert([]byte("sport/tennis/player1/anzel"), 1, "sub2") // nolint: errcheck
 
 	subs := make([]interface{}, 0, 5)
 	qoss := make([]byte, 0, 5)
 
-	err := n.smatch([]byte("sport/tennis/player1/anzel"), 1, &subs, &qoss)
+	err := n.match([]byte("sport/tennis/player1/anzel"), 1, &subs, &qoss)
 
 	require.NoError(t, err)
 	require.Equal(t, 2, len(subs))
@@ -335,13 +335,13 @@ func TestSNodeMatch5(t *testing.T) {
 
 func TestSNodeMatch6(t *testing.T) {
 	n := newSNode()
-	n.sInsert([]byte("sport/tennis/#"), 2, "sub1")
-	n.sInsert([]byte("sport/tennis"), 1, "sub2")
+	n.insert([]byte("sport/tennis/#"), 2, "sub1") // nolint: errcheck
+	n.insert([]byte("sport/tennis"), 1, "sub2")   // nolint: errcheck
 
 	subs := make([]interface{}, 0, 5)
 	qoss := make([]byte, 0, 5)
 
-	err := n.smatch([]byte("sport/tennis/player1/anzel"), 2, &subs, &qoss)
+	err := n.match([]byte("sport/tennis/player1/anzel"), 2, &subs, &qoss)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, len(subs))
@@ -350,12 +350,12 @@ func TestSNodeMatch6(t *testing.T) {
 
 func TestSNodeMatch7(t *testing.T) {
 	n := newSNode()
-	n.sInsert([]byte("+/+"), 2, "sub1")
+	n.insert([]byte("+/+"), 2, "sub1") // nolint: errcheck
 
 	subs := make([]interface{}, 0, 5)
 	qoss := make([]byte, 0, 5)
 
-	err := n.smatch([]byte("/finance"), 1, &subs, &qoss)
+	err := n.match([]byte("/finance"), 1, &subs, &qoss)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, len(subs))
@@ -363,12 +363,12 @@ func TestSNodeMatch7(t *testing.T) {
 
 func TestSNodeMatch8(t *testing.T) {
 	n := newSNode()
-	n.sInsert([]byte("/+"), 2, "sub1")
+	n.insert([]byte("/+"), 2, "sub1") // nolint: errcheck
 
 	subs := make([]interface{}, 0, 5)
 	qoss := make([]byte, 0, 5)
 
-	err := n.smatch([]byte("/finance"), 1, &subs, &qoss)
+	err := n.match([]byte("/finance"), 1, &subs, &qoss)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, len(subs))
@@ -376,12 +376,12 @@ func TestSNodeMatch8(t *testing.T) {
 
 func TestSNodeMatch9(t *testing.T) {
 	n := newSNode()
-	n.sInsert([]byte("+"), 2, "sub1")
+	n.insert([]byte("+"), 2, "sub1") // nolint: errcheck
 
 	subs := make([]interface{}, 0, 5)
 	qoss := make([]byte, 0, 5)
 
-	err := n.smatch([]byte("/finance"), 1, &subs, &qoss)
+	err := n.match([]byte("/finance"), 1, &subs, &qoss)
 
 	require.NoError(t, err)
 	require.Equal(t, 0, len(subs))
@@ -394,34 +394,34 @@ func TestRNodeInsertRemove(t *testing.T) {
 
 	msg := newPublishMessageLarge([]byte("sport/tennis/player1/ricardo"), 1)
 
-	err := n.rinsert(msg.Topic(), msg)
+	err := n.insert(msg.Topic(), msg)
 
 	require.NoError(t, err)
-	require.Equal(t, 1, len(n.rnodes))
+	require.Equal(t, 1, len(n.nodes))
 	require.Nil(t, n.msg)
 
-	n2, ok := n.rnodes["sport"]
+	n2, ok := n.nodes["sport"]
 
 	require.True(t, ok)
-	require.Equal(t, 1, len(n2.rnodes))
+	require.Equal(t, 1, len(n2.nodes))
 	require.Nil(t, n2.msg)
 
-	n3, ok := n2.rnodes["tennis"]
+	n3, ok := n2.nodes["tennis"]
 
 	require.True(t, ok)
-	require.Equal(t, 1, len(n3.rnodes))
+	require.Equal(t, 1, len(n3.nodes))
 	require.Nil(t, n3.msg)
 
-	n4, ok := n3.rnodes["player1"]
+	n4, ok := n3.nodes["player1"]
 
 	require.True(t, ok)
-	require.Equal(t, 1, len(n4.rnodes))
+	require.Equal(t, 1, len(n4.nodes))
 	require.Nil(t, n4.msg)
 
-	n5, ok := n4.rnodes["ricardo"]
+	n5, ok := n4.nodes["ricardo"]
 
 	require.True(t, ok)
-	require.Equal(t, 0, len(n5.rnodes))
+	require.Equal(t, 0, len(n5.nodes))
 	require.NotNil(t, n5.msg)
 	require.Equal(t, msg.QoS(), n5.msg.QoS())
 	require.Equal(t, msg.Topic(), n5.msg.Topic())
@@ -431,46 +431,46 @@ func TestRNodeInsertRemove(t *testing.T) {
 
 	msg2 := newPublishMessageLarge([]byte("sport/tennis/player1/andre"), 1)
 
-	err = n.rinsert(msg2.Topic(), msg2)
+	err = n.insert(msg2.Topic(), msg2)
 
 	require.NoError(t, err)
-	require.Equal(t, 2, len(n4.rnodes))
+	require.Equal(t, 2, len(n4.nodes))
 
-	n6, ok := n4.rnodes["andre"]
+	n6, ok := n4.nodes["andre"]
 
 	require.True(t, ok)
-	require.Equal(t, 0, len(n6.rnodes))
+	require.Equal(t, 0, len(n6.nodes))
 	require.NotNil(t, n6.msg)
 	require.Equal(t, msg2.QoS(), n6.msg.QoS())
 	require.Equal(t, msg2.Topic(), n6.msg.Topic())
 
 	// --- Remove
 
-	err = n.rremove([]byte("sport/tennis/player1/andre"))
+	err = n.remove([]byte("sport/tennis/player1/andre"))
 	require.NoError(t, err)
-	require.Equal(t, 1, len(n4.rnodes))
+	require.Equal(t, 1, len(n4.nodes))
 }
 
 func TestRNodeMatch(t *testing.T) {
 	n := newRNode()
 
 	msg1 := newPublishMessageLarge([]byte("sport/tennis/ricardo/stats"), 1)
-	err := n.rinsert(msg1.Topic(), msg1)
+	err := n.insert(msg1.Topic(), msg1)
 	require.NoError(t, err)
 
 	msg2 := newPublishMessageLarge([]byte("sport/tennis/andre/stats"), 1)
-	err = n.rinsert(msg2.Topic(), msg2)
+	err = n.insert(msg2.Topic(), msg2)
 	require.NoError(t, err)
 
 	msg3 := newPublishMessageLarge([]byte("sport/tennis/andre/bio"), 1)
-	err = n.rinsert(msg3.Topic(), msg3)
+	err = n.insert(msg3.Topic(), msg3)
 	require.NoError(t, err)
 
 	var msglist []*message.PublishMessage
 
 	// ---
 
-	err = n.rmatch(msg1.Topic(), &msglist)
+	err = n.match(msg1.Topic(), &msglist)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, len(msglist))
@@ -478,7 +478,7 @@ func TestRNodeMatch(t *testing.T) {
 	// ---
 
 	msglist = msglist[0:0]
-	err = n.rmatch(msg2.Topic(), &msglist)
+	err = n.match(msg2.Topic(), &msglist)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, len(msglist))
@@ -486,7 +486,7 @@ func TestRNodeMatch(t *testing.T) {
 	// ---
 
 	msglist = msglist[0:0]
-	err = n.rmatch(msg3.Topic(), &msglist)
+	err = n.match(msg3.Topic(), &msglist)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, len(msglist))
@@ -494,7 +494,7 @@ func TestRNodeMatch(t *testing.T) {
 	// ---
 
 	msglist = msglist[0:0]
-	err = n.rmatch([]byte("sport/tennis/andre/+"), &msglist)
+	err = n.match([]byte("sport/tennis/andre/+"), &msglist)
 
 	require.NoError(t, err)
 	require.Equal(t, 2, len(msglist))
@@ -502,7 +502,7 @@ func TestRNodeMatch(t *testing.T) {
 	// ---
 
 	msglist = msglist[0:0]
-	err = n.rmatch([]byte("sport/tennis/andre/#"), &msglist)
+	err = n.match([]byte("sport/tennis/andre/#"), &msglist)
 
 	require.NoError(t, err)
 	require.Equal(t, 2, len(msglist))
@@ -510,7 +510,7 @@ func TestRNodeMatch(t *testing.T) {
 	// ---
 
 	msglist = msglist[0:0]
-	err = n.rmatch([]byte("sport/tennis/+/stats"), &msglist)
+	err = n.match([]byte("sport/tennis/+/stats"), &msglist)
 
 	require.NoError(t, err)
 	require.Equal(t, 2, len(msglist))
@@ -518,7 +518,7 @@ func TestRNodeMatch(t *testing.T) {
 	// ---
 
 	msglist = msglist[0:0]
-	err = n.rmatch([]byte("sport/tennis/#"), &msglist)
+	err = n.match([]byte("sport/tennis/#"), &msglist)
 
 	require.NoError(t, err)
 	require.Equal(t, 3, len(msglist))
@@ -641,9 +641,9 @@ func TestMemTopicsRetained(t *testing.T) {
 
 func newPublishMessageLarge(topic []byte, qos byte) *message.PublishMessage {
 	msg := message.NewPublishMessage()
-	msg.SetTopic(topic)                // nolint
-	msg.SetPayload(make([]byte, 1024)) // nolint
-	msg.SetQoS(qos)                    // nolint
+	msg.SetTopic(topic)                // nolint: errcheck
+	msg.SetPayload(make([]byte, 1024)) // nolint: errcheck
+	msg.SetQoS(qos)                    // nolint: errcheck
 
 	return msg
 }

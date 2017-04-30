@@ -21,7 +21,7 @@ import (
 	"sync/atomic"
 )
 
-// The SUBSCRIBE Packet is sent from the Client to the Server to create one or more
+// SubscribeMessage The SUBSCRIBE Packet is sent from the Client to the Server to create one or more
 // Subscriptions. Each Subscription registers a Client’s interest in one or more
 // Topics. The Server sends PUBLISH Packets to the Client in order to forward
 // Application Messages that were published to Topics that match these Subscriptions.
@@ -39,13 +39,13 @@ var _ Message = (*SubscribeMessage)(nil)
 // NewSubscribeMessage creates a new SUBSCRIBE message.
 func NewSubscribeMessage() *SubscribeMessage {
 	msg := &SubscribeMessage{}
-	msg.SetType(SUBSCRIBE)
+	msg.SetType(SUBSCRIBE) // nolint: errcheck
 
 	return msg
 }
 
 func (sm SubscribeMessage) String() string {
-	msgStr := fmt.Sprintf("%s, Packet ID=%d", sm.header, sm.PacketId())
+	msgStr := fmt.Sprintf("%s, Packet ID=%d", sm.header, sm.PacketID())
 
 	for i, t := range sm.topics {
 		msgStr = fmt.Sprintf("%s, Topic[%d]=%q/%d", msgStr, i, string(t), sm.qos[i])
@@ -139,6 +139,7 @@ func (sm *SubscribeMessage) Qos() []byte {
 	return sm.qos
 }
 
+// Len of message
 func (sm *SubscribeMessage) Len() int {
 	if !sm.dirty {
 		return len(sm.dBuf)
@@ -153,6 +154,7 @@ func (sm *SubscribeMessage) Len() int {
 	return sm.header.msgLen() + ml
 }
 
+// Decode message
 func (sm *SubscribeMessage) Decode(src []byte) (int, error) {
 	total := 0
 
@@ -191,10 +193,11 @@ func (sm *SubscribeMessage) Decode(src []byte) (int, error) {
 	return total, nil
 }
 
+// Encode message
 func (sm *SubscribeMessage) Encode(dst []byte) (int, error) {
 	if !sm.dirty {
 		if len(dst) < len(sm.dBuf) {
-			return 0, fmt.Errorf("subscribe/Encode: Insufficient buffer size. Expecting %d, got %d.", len(sm.dBuf), len(dst))
+			return 0, fmt.Errorf("subscribe/Encode: Insufficient buffer size. Expecting %d, got %d", len(sm.dBuf), len(dst))
 		}
 
 		return copy(dst, sm.dBuf), nil
@@ -204,7 +207,7 @@ func (sm *SubscribeMessage) Encode(dst []byte) (int, error) {
 	ml := sm.msgLen()
 
 	if len(dst) < hl+ml {
-		return 0, fmt.Errorf("subscribe/Encode: Insufficient buffer size. Expecting %d, got %d.", hl+ml, len(dst))
+		return 0, fmt.Errorf("subscribe/Encode: Insufficient buffer size. Expecting %d, got %d", hl+ml, len(dst))
 	}
 
 	if err := sm.SetRemainingLength(int32(ml)); err != nil {
@@ -219,9 +222,9 @@ func (sm *SubscribeMessage) Encode(dst []byte) (int, error) {
 		return total, err
 	}
 
-	if sm.PacketId() == 0 {
-		sm.SetPacketId(uint16(atomic.AddUint64(&gPacketId, 1) & 0xffff))
-		//this.packetID = uint16(atomic.AddUint64(&gPacketId, 1) & 0xffff)
+	if sm.PacketID() == 0 {
+		sm.SetPacketID(uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff))
+		//this.packetID = uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff)
 	}
 
 	n = copy(dst[total:], sm.packetID)

@@ -33,10 +33,10 @@ var (
 // AckMsg message
 type AckMsg struct {
 	// Message type of the message waiting for ack
-	MType message.MessageType
+	MType message.Type
 
 	// Current state of the ack-waiting message
-	State message.MessageType
+	State message.Type
 
 	// Packet ID of the message. Every message that require ack'ing must have a valid
 	// packet ID. Messages that have message I
@@ -115,13 +115,13 @@ func (a *AckQueue) Wait(msg message.Message, onComplete interface{}) error {
 			return errWaitMessage
 		}
 
-		a.insert(msg.PacketId(), msg, onComplete)
+		a.insert(msg.PacketID(), msg, onComplete) // nolint: errcheck
 
 	case *message.SubscribeMessage:
-		a.insert(msg.PacketId(), msg, onComplete)
+		a.insert(msg.PacketID(), msg, onComplete) // nolint: errcheck
 
 	case *message.UnSubscribeMessage:
-		a.insert(msg.PacketId(), msg, onComplete)
+		a.insert(msg.PacketID(), msg, onComplete) // nolint: errcheck
 
 	case *message.PingReqMessage:
 		a.ping = AckMsg{
@@ -145,7 +145,7 @@ func (a *AckQueue) Ack(msg message.Message) error {
 	switch msg.Type() {
 	case message.PUBACK, message.PUBREC, message.PUBREL, message.PUBCOMP, message.SUBACK, message.UNSUBACK:
 		// Check to see if the message w/ the same packet ID is in the queue
-		i, ok := a.eMap[msg.PacketId()]
+		i, ok := a.eMap[msg.PacketID()]
 		if ok {
 			// If message w/ the packet ID exists, update the message state and copy
 			// the ack message
@@ -160,7 +160,7 @@ func (a *AckQueue) Ack(msg message.Message) error {
 			}
 			//glog.Debugf("Acked: %v", msg)
 			//} else {
-			//glog.Debugf("Cannot ack %s message with packet ID %d", msg.Type(), msg.PacketId())
+			//glog.Debugf("Cannot ack %s message with packet ID %d", msg.Type(), msg.PacketID())
 		}
 
 	case message.PINGRESP:
@@ -175,7 +175,7 @@ func (a *AckQueue) Ack(msg message.Message) error {
 	return nil
 }
 
-// Acked returns the list of messages that have completed the ack cycle.
+// GetAckMsg returns the list of messages that have completed the ack cycle.
 func (a *AckQueue) GetAckMsg() []AckMsg {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -192,7 +192,7 @@ FORNOTEMPTY:
 		switch a.ring[a.head].State {
 		case message.PUBACK, message.PUBREL, message.PUBCOMP, message.SUBACK, message.UNSUBACK:
 			a.ackDone = append(a.ackDone, a.ring[a.head])
-			a.removeHead()
+			a.removeHead() // nolint: errcheck
 
 		default:
 			break FORNOTEMPTY
@@ -215,7 +215,7 @@ func (a *AckQueue) insert(pktid uint16, msg message.Message, onComplete interfac
 		am := AckMsg{
 			MType:      msg.Type(),
 			State:      message.RESERVED,
-			PktID:      msg.PacketId(),
+			PktID:      msg.PacketID(),
 			MsgBuf:     make([]byte, ml),
 			OnComplete: onComplete,
 		}

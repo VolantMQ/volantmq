@@ -23,10 +23,10 @@ import (
 func TestSubAckMessageFields(t *testing.T) {
 	msg := NewSubAckMessage()
 
-	msg.SetPacketId(100)
-	require.Equal(t, 100, int(msg.PacketId()), "Error setting packet ID.")
+	msg.SetPacketID(100)
+	require.Equal(t, 100, int(msg.PacketID()), "Error setting packet ID.")
 
-	msg.AddReturnCode(1)
+	msg.AddReturnCode(1) // nolint: errcheck
 	require.Equal(t, 1, len(msg.ReturnCodes()), "Error adding return code.")
 
 	err := msg.AddReturnCode(0x90)
@@ -86,11 +86,11 @@ func TestSubAckMessageEncode(t *testing.T) {
 	}
 
 	msg := NewSubAckMessage()
-	msg.SetPacketId(7)
-	msg.AddReturnCode(0)
-	msg.AddReturnCode(1)
-	msg.AddReturnCode(2)
-	msg.AddReturnCode(0x80)
+	msg.SetPacketID(7)
+	msg.AddReturnCode(0)    // nolint: errcheck
+	msg.AddReturnCode(1)    // nolint: errcheck
+	msg.AddReturnCode(2)    // nolint: errcheck
+	msg.AddReturnCode(0x80) // nolint: errcheck
 
 	dst := make([]byte, 10)
 	n, err := msg.Encode(dst)

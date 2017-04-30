@@ -21,7 +21,7 @@ import (
 	"sync/atomic"
 )
 
-// An UNSUBSCRIBE Packet is sent by the Client to the Server, to unsubscribe from topics.
+// UnSubscribeMessage An UNSUBSCRIBE Packet is sent by the Client to the Server, to unsubscribe from topics.
 type UnSubscribeMessage struct {
 	header
 
@@ -33,7 +33,7 @@ var _ Message = (*UnSubscribeMessage)(nil)
 // NewUnSubscribeMessage creates a new UNSUBSCRIBE message.
 func NewUnSubscribeMessage() *UnSubscribeMessage {
 	msg := &UnSubscribeMessage{}
-	msg.SetType(UNSUBSCRIBE)
+	msg.SetType(UNSUBSCRIBE) // nolint: errcheck
 
 	return msg
 }
@@ -95,6 +95,7 @@ func (usm *UnSubscribeMessage) TopicExists(topic []byte) bool {
 	return false
 }
 
+// Len of message
 func (usm *UnSubscribeMessage) Len() int {
 	if !usm.dirty {
 		return len(usm.dBuf)
@@ -154,7 +155,7 @@ func (usm *UnSubscribeMessage) Decode(src []byte) (int, error) {
 func (usm *UnSubscribeMessage) Encode(dst []byte) (int, error) {
 	if !usm.dirty {
 		if len(dst) < len(usm.dBuf) {
-			return 0, fmt.Errorf("unsubscribe/Encode: Insufficient buffer size. Expecting %d, got %d.", len(usm.dBuf), len(dst))
+			return 0, fmt.Errorf("unsubscribe/Encode: Insufficient buffer size. Expecting %d, got %d", len(usm.dBuf), len(dst))
 		}
 
 		return copy(dst, usm.dBuf), nil
@@ -164,7 +165,7 @@ func (usm *UnSubscribeMessage) Encode(dst []byte) (int, error) {
 	ml := usm.msgLen()
 
 	if len(dst) < hl+ml {
-		return 0, fmt.Errorf("unsubscribe/Encode: Insufficient buffer size. Expecting %d, got %d.", hl+ml, len(dst))
+		return 0, fmt.Errorf("unsubscribe/Encode: Insufficient buffer size. Expecting %d, got %d", hl+ml, len(dst))
 	}
 
 	if err := usm.SetRemainingLength(int32(ml)); err != nil {
@@ -179,9 +180,9 @@ func (usm *UnSubscribeMessage) Encode(dst []byte) (int, error) {
 		return total, err
 	}
 
-	if usm.PacketId() == 0 {
-		usm.SetPacketId(uint16(atomic.AddUint64(&gPacketId, 1) & 0xffff))
-		//this.packetId = uint16(atomic.AddUint64(&gPacketId, 1) & 0xffff)
+	if usm.PacketID() == 0 {
+		usm.SetPacketID(uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff))
+		//this.packetId = uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff)
 	}
 
 	n = copy(dst[total:], usm.packetID)

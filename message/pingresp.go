@@ -14,7 +14,7 @@
 
 package message
 
-// A PINGRESP Packet is sent by the Server to the Client in response to a PINGREQ
+// PingRespMessage A PINGRESP Packet is sent by the Server to the Client in response to a PINGREQ
 // Packet. It indicates that the Server is alive.
 type PingRespMessage struct {
 	DisconnectMessage
@@ -25,7 +25,7 @@ var _ Message = (*PingRespMessage)(nil)
 // NewPingRespMessage creates a new PINGRESP message.
 func NewPingRespMessage() Message {
 	msg := &PingRespMessage{}
-	msg.SetType(PINGRESP)
+	msg.SetType(PINGRESP) // nolint: errcheck
 
 	return msg
 }

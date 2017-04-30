@@ -23,6 +23,7 @@ import (
 
 	"github.com/surge/glog"
 	"github.com/troian/surgemq/service"
+	"syscall"
 )
 
 var (
@@ -57,16 +58,17 @@ func init() {
 }
 
 func main() {
-	svr := &service.Server{
+	var f *os.File
+
+	svr, _ := service.NewServer(service.Config{
 		KeepAlive:        keepAlive,
 		ConnectTimeout:   connectTimeout,
 		AckTimeout:       ackTimeout,
 		TimeoutRetries:   timeoutRetries,
 		SessionsProvider: sessionsProvider,
 		TopicsProvider:   topicsProvider,
-	}
+	})
 
-	var f *os.File
 	var err error
 
 	if cpuprofile != "" {
@@ -75,11 +77,11 @@ func main() {
 			log.Fatal(err)
 		}
 
-		pprof.StartCPUProfile(f)
+		pprof.StartCPUProfile(f) // nolint: errcheck
 	}
 
 	sigchan := make(chan os.Signal, 1)
-	signal.Notify(sigchan, os.Interrupt, os.Kill)
+	signal.Notify(sigchan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-sigchan
 		glog.Errorf("Existing due to trapped signal; %v", sig)
@@ -87,10 +89,10 @@ func main() {
 		if f != nil {
 			glog.Errorf("Stopping profile")
 			pprof.StopCPUProfile()
-			f.Close()
+			f.Close() // nolint: errcheck
 		}
 
-		svr.Close()
+		svr.Close() // nolint: errcheck
 
 		os.Exit(0)
 	}()
@@ -99,14 +101,14 @@ func main() {
 
 	if len(wsAddr) > 0 || len(wssAddr) > 0 {
 		addr := "tcp://127.0.0.1:1883"
-		addWebSocketHandler("/mqtt", addr)
+		addWebSocketHandler("/mqtt", addr) // nolint: errcheck
 		/* start a plain websocket listener */
 		if len(wsAddr) > 0 {
-			go listenAndServeWebSocket(wsAddr)
+			go listenAndServeWebSocket(wsAddr) // nolint: errcheck
 		}
 		/* start a secure websocket listener */
 		if len(wssAddr) > 0 && len(wssCertPath) > 0 && len(wssKeyPath) > 0 {
-			go listenAndServeWebSocketSecure(wssAddr, wssCertPath, wssKeyPath)
+			go listenAndServeWebSocketSecure(wssAddr, wssCertPath, wssKeyPath) // nolint: errcheck
 		}
 	}
 

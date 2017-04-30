@@ -78,7 +78,7 @@ func (c *Client) Connect(uri string, msg *message.ConnectMessage) (err error) {
 
 	defer func() {
 		if err != nil {
-			conn.Close()
+			conn.Close() // nolint: errcheck
 		}
 	}()
 
@@ -90,7 +90,7 @@ func (c *Client) Connect(uri string, msg *message.ConnectMessage) (err error) {
 		return err
 	}
 
-	conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(c.ConnectTimeout)))
+	conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(c.ConnectTimeout))) // nolint: errcheck
 
 	resp, err := getConnAckMessage(conn)
 	if err != nil {

@@ -14,7 +14,7 @@
 
 package message
 
-// The PUBCOMP Packet is the response to a PUBREL Packet. It is the fourth and
+// PubCompMessage The PUBCOMP Packet is the response to a PUBREL Packet. It is the fourth and
 // final packet of the QoS 2 protocol exchange.
 type PubCompMessage struct {
 	PubAckMessage
@@ -25,7 +25,7 @@ var _ Message = (*PubCompMessage)(nil)
 // NewPubCompMessage creates a new PUBCOMP message.
 func NewPubCompMessage() *PubCompMessage {
 	msg := &PubCompMessage{}
-	msg.SetType(PUBCOMP)
+	msg.SetType(PUBCOMP) // nolint: errcheck
 
 	return msg
 }

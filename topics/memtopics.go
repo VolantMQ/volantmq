@@ -365,7 +365,7 @@ func (rn *rNode) remove(topic []byte) error {
 
 	level := string(ntl)
 
-	// Find the rnode that matches the topic level
+	// Find the rNode that matches the topic level
 	n, ok := rn.nodes[level]
 	if !ok {
 		return errors.New("memtopics/rremove: No topic found")

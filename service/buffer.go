@@ -40,12 +40,12 @@ type sequence struct {
 	gate int64
 
 	// These are fillers to pad the cache line, which is generally 64 bytes
-	p2 int64
-	p3 int64
-	p4 int64
-	p5 int64
-	p6 int64
-	p7 int64
+	//p2 int64
+	//p3 int64
+	//p4 int64
+	//p5 int64
+	//p6 int64
+	//p7 int64
 }
 
 func newSequence() *sequence {
@@ -91,11 +91,11 @@ func newBuffer(size int64) (*buffer, error) {
 	}
 
 	if !powerOfTwo64(size) {
-		return nil, fmt.Errorf("Size must be power of two. Try %d.", roundUpPowerOfTwo64(size))
+		return nil, fmt.Errorf("Size must be power of two. Try %d", roundUpPowerOfTwo64(size))
 	}
 
 	if size < 2*defaultReadBlockSize {
-		return nil, fmt.Errorf("Size must at least be %d. Try %d.", 2*defaultReadBlockSize, 2*defaultReadBlockSize)
+		return nil, fmt.Errorf("Size must at least be %d. Try %d", 2*defaultReadBlockSize, 2*defaultReadBlockSize)
 	}
 
 	return &buffer{
@@ -137,7 +137,7 @@ func (b *buffer) Len() int {
 }
 
 func (b *buffer) ReadFrom(r io.Reader) (int64, error) {
-	defer b.Close()
+	defer b.Close() // nolint: errcheck
 
 	total := int64(0)
 
@@ -173,7 +173,7 @@ func (b *buffer) ReadFrom(r io.Reader) (int64, error) {
 }
 
 func (b *buffer) WriteTo(w io.Writer) (int64, error) {
-	defer b.Close()
+	defer b.Close() // nolint: errcheck
 
 	total := int64(0)
 
@@ -296,7 +296,7 @@ func (b *buffer) Write(p []byte) (int, error) {
 
 	// If we are here that means we now have enough space to write the full p.
 	// Let's copy from p into this.buf, starting at position ppos&this.mask.
-	total := ringCopy(b.buf, p, int64(start)&b.mask)
+	total := ringCopy(b.buf, p, start&b.mask)
 
 	b.pSeq.set(start + int64(len(p)))
 	b.cCond.L.Lock()

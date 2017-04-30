@@ -24,8 +24,8 @@ var (
 )
 
 func init() {
-	Register("mockSuccess", mockSuccessAuthenticator)
-	Register("mockFailure", mockFailureAuthenticator)
+	Register("mockSuccess", mockSuccessAuthenticator) // nolint: errcheck
+	Register("mockFailure", mockFailureAuthenticator) // nolint: errcheck
 }
 
 func (m mockAuthenticator) Password(user, password string) error {
@@ -36,6 +36,7 @@ func (m mockAuthenticator) Password(user, password string) error {
 	return ErrAuthFailure
 }
 
+// nolint: golint
 func (m mockAuthenticator) AclCheck(clientID, user, topic string, access AccessType) error {
 	if m {
 		return nil

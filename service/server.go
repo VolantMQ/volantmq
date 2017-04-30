@@ -51,11 +51,10 @@ const (
 	DefaultTopicsProvider   = "mem"         // DefaultTopicsProvider default topics provider
 )
 
-// Server is a library implementation of the MQTT server that, as best it can, complies
-// with the MQTT 3.1 and 3.1.1 specs.
-type Server struct {
+// Config server configuration
+type Config struct {
 	// The number of seconds to keep the connection live if there's no data.
-	// If not set then default to 5 mins.
+	// If not set then default to 5 minutes.
 	KeepAlive int
 
 	// The number of seconds to wait for the CONNECT message before disconnecting.
@@ -74,20 +73,26 @@ type Server struct {
 	// in the CONNECT message. If not set then default to "mockSuccess".
 	Authenticators string
 
-	// Anonymous either allow anonymous access or not
-	Anonymous bool
-
 	// SessionsProvider is the session store that keeps all the Session objects.
 	// This is the store to check if CleanSession is set to 0 in the CONNECT message.
 	// If not set then default to "mem".
 	SessionsProvider string
 
-	// ClientIDFromUser
-	ClientIDFromUser bool
-
 	// TopicsProvider is the topic store that keeps all the subscription topics.
 	// If not set then default to "mem".
 	TopicsProvider string
+
+	// Anonymous either allow anonymous access or not
+	Anonymous bool
+
+	// ClientIDFromUser
+	ClientIDFromUser bool
+}
+
+// Server is a library implementation of the MQTT server that, as best it can, complies
+// with the MQTT 3.1 and 3.1.1 specs.
+type Server struct {
+	config Config
 
 	// authMgr is the authentication manager that we are going to use for authenticating
 	// incoming connections
@@ -114,16 +119,13 @@ type Server struct {
 	svcs []*service
 
 	// Mutex for updating svcs
-	mu sync.Mutex
+	//mu sync.Mutex
 
 	// A indicator on whether none secure server is running
 	running int32
 
 	// A indicator on whether secure server is running
 	runningTLS int32
-
-	// A indicator on whether this server has already checked configuration
-	configOnce sync.Once
 
 	subs []interface{}
 	qoss []byte
@@ -142,16 +144,61 @@ func cloneTLSConfig(cfg *tls.Config) *tls.Config {
 }
 
 // NewServer new server
-func NewServer() *Server {
+func NewServer(config Config) (*Server, error) {
 	s := Server{
-		quit: make(chan struct{}),
+		config: config,
+		quit:   make(chan struct{}),
 	}
 
-	return &s
+	if s.config.KeepAlive == 0 {
+		s.config.KeepAlive = DefaultKeepAlive
+	}
+
+	if s.config.ConnectTimeout == 0 {
+		s.config.ConnectTimeout = DefaultConnectTimeout
+	}
+
+	if s.config.AckTimeout == 0 {
+		s.config.AckTimeout = DefaultAckTimeout
+	}
+
+	if s.config.TimeoutRetries == 0 {
+		s.config.TimeoutRetries = DefaultTimeoutRetries
+	}
+
+	if s.config.Authenticators == "" {
+		s.config.Authenticators = "mockSuccess"
+	}
+
+	var err error
+	s.authMgr, err = auth.NewManager(s.config.Authenticators)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.config.SessionsProvider == "" {
+		s.config.SessionsProvider = "mem"
+	}
+
+	s.sessMgr, err = sessions.NewManager(s.config.SessionsProvider)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.config.TopicsProvider == "" {
+		s.config.TopicsProvider = "mem"
+	}
+
+	s.topicsMgr, err = topics.NewManager(s.config.TopicsProvider)
+	if err != nil {
+		return nil, err
+	}
+
+	return &s, nil
 }
 
 func (s *Server) serve(l net.Listener) error {
-	defer l.Close()
+	defer l.Close() // nolint: errcheck
 
 	var tempDelay time.Duration // how long to sleep on accept failure
 
@@ -183,7 +230,7 @@ func (s *Server) serve(l net.Listener) error {
 			return err
 		}
 
-		go s.handleConnection(conn)
+		go s.handleConnection(conn) // nolint: errcheck
 	}
 	//return nil
 }
@@ -219,7 +266,7 @@ func (s *Server) ListenAndServe(uri string) error {
 	return s.serve(s.ln)
 }
 
-// ListenAndServeTLS listents to connections on the URI requested, and handles any
+// ListenAndServeTLS listens to connections on the URI requested, and handles any
 // incoming MQTT client sessions. It should not return until Close() is called
 // or if there's some critical error that stops the server from running. The URI
 // supplied should be of the form "protocol://host:port" that can be parsed by
@@ -269,10 +316,6 @@ func (s *Server) ListenAndServeTLS(uri string, certFile, keyFile string) error {
 // onComplete is called when PUBACK is received. For QOS 2 messages, onComplete is
 // called after the PUBCOMP message is received.
 func (s *Server) Publish(msg *message.PublishMessage, onComplete OnCompleteFunc) error {
-	if err := s.checkConfiguration(); err != nil {
-		return err
-	}
-
 	if msg.Retain() {
 		if err := s.topicsMgr.Retain(msg); err != nil {
 			glog.Errorf("Error retaining message: %v", err)
@@ -311,11 +354,11 @@ func (s *Server) Close() error {
 	// We then close the net.Listener, which will force Accept() to return if it's
 	// blocked waiting for new connections.
 	if s.ln != nil {
-		s.ln.Close()
+		s.ln.Close() // nolint: errcheck
 	}
 
 	if s.lnTLS != nil {
-		s.lnTLS.Close()
+		s.lnTLS.Close() // nolint: errcheck
 	}
 
 	s.waitServers.Wait()
@@ -326,11 +369,11 @@ func (s *Server) Close() error {
 	}
 
 	if s.sessMgr != nil {
-		s.sessMgr.Close()
+		s.sessMgr.Close() // nolint: errcheck
 	}
 
 	if s.topicsMgr != nil {
-		s.topicsMgr.Close()
+		s.topicsMgr.Close() // nolint: errcheck
 	}
 
 	return nil
@@ -346,14 +389,9 @@ func (s *Server) handleConnection(c io.Closer) (*service, error) {
 
 	defer func() {
 		if err != nil {
-			c.Close()
+			c.Close() // nolint: errcheck
 		}
 	}()
-
-	err = s.checkConfiguration()
-	if err != nil {
-		return nil, err
-	}
 
 	conn, ok := c.(net.Conn)
 	if !ok {
@@ -373,15 +411,15 @@ func (s *Server) handleConnection(c io.Closer) (*service, error) {
 	// a CONNACK error. If it's CONNACK error, send the proper CONNACK error back
 	// to client. Exit regardless of error type.
 
-	conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(s.ConnectTimeout)))
+	conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(s.config.ConnectTimeout))) // nolint: errcheck
 
 	resp := message.NewConnAckMessage()
 
 	svc := &service{
 		client:         false,
-		connectTimeout: s.ConnectTimeout,
-		ackTimeout:     s.AckTimeout,
-		timeoutRetries: s.TimeoutRetries,
+		connectTimeout: s.config.ConnectTimeout,
+		ackTimeout:     s.config.AckTimeout,
+		timeoutRetries: s.config.TimeoutRetries,
 		conn:           conn,
 		sessMgr:        s.sessMgr,
 		topicsMgr:      s.topicsMgr,
@@ -396,13 +434,13 @@ func (s *Server) handleConnection(c io.Closer) (*service, error) {
 		}
 	} else {
 		if req.UsernameFlag() {
-			if s.authMgr.Password(string(req.Username()), string(req.Password())); err == nil {
+			if err = s.authMgr.Password(string(req.Username()), string(req.Password())); err == nil {
 				resp.SetReturnCode(message.ConnectionAccepted)
 			} else {
 				resp.SetReturnCode(message.ErrBadUsernameOrPassword)
 			}
 		} else {
-			if s.Anonymous {
+			if s.config.Anonymous {
 				resp.SetReturnCode(message.ConnectionAccepted)
 			} else {
 				resp.SetReturnCode(message.ErrNotAuthorized)
@@ -441,7 +479,7 @@ func (s *Server) handleConnection(c io.Closer) (*service, error) {
 		svc.inStat.increment(int64(req.Len()))
 		svc.outStat.increment(int64(resp.Len()))
 
-		if err := svc.start(); err != nil {
+		if err = svc.start(); err != nil {
 			svc.stop()
 			return nil, err
 		}
@@ -457,56 +495,6 @@ func (s *Server) handleConnection(c io.Closer) (*service, error) {
 	return nil, err
 }
 
-func (s *Server) checkConfiguration() error {
-	var err error
-
-	s.configOnce.Do(func() {
-		if s.KeepAlive == 0 {
-			s.KeepAlive = DefaultKeepAlive
-		}
-
-		if s.ConnectTimeout == 0 {
-			s.ConnectTimeout = DefaultConnectTimeout
-		}
-
-		if s.AckTimeout == 0 {
-			s.AckTimeout = DefaultAckTimeout
-		}
-
-		if s.TimeoutRetries == 0 {
-			s.TimeoutRetries = DefaultTimeoutRetries
-		}
-
-		if s.Authenticators == "" {
-			s.Authenticators = "mockSuccess"
-		}
-
-		s.authMgr, err = auth.NewManager(s.Authenticators)
-		if err != nil {
-			return
-		}
-
-		if s.SessionsProvider == "" {
-			s.SessionsProvider = "mem"
-		}
-
-		s.sessMgr, err = sessions.NewManager(s.SessionsProvider)
-		if err != nil {
-			return
-		}
-
-		if s.TopicsProvider == "" {
-			s.TopicsProvider = "mem"
-		}
-
-		s.topicsMgr, err = topics.NewManager(s.TopicsProvider)
-
-		return
-	})
-
-	return err
-}
-
 func (s *Server) getSession(svc *service, req *message.ConnectMessage, resp *message.ConnAckMessage) error {
 	// If CleanSession is set to 0, the server MUST resume communications with the
 	// client based on state from the current session, as identified by the client
@@ -520,18 +508,18 @@ func (s *Server) getSession(svc *service, req *message.ConnectMessage, resp *mes
 
 	var err error
 
-	if s.ClientIDFromUser {
-		req.SetClientId(req.Username())
+	if s.config.ClientIDFromUser {
+		req.SetClientID(req.Username()) // nolint: errcheck
 	}
 
 	// Check to see if the client supplied an ID, if not, generate one and set
 	// clean session.
-	if len(req.ClientId()) == 0 {
-		req.SetClientId([]byte(fmt.Sprintf("internalclient%d", svc.id)))
+	if len(req.ClientID()) == 0 {
+		req.SetClientID([]byte(fmt.Sprintf("internalclient%d", svc.id))) // nolint: errcheck
 		req.SetCleanSession(true)
 	}
 
-	cid := string(req.ClientId())
+	cid := string(req.ClientID())
 
 	// If CleanSession is NOT set, check the session store for existing session.
 	// If found, return it.
