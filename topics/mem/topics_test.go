@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package topics
+package mem
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/topics"
 )
 
 func TestNextTopicLevelSuccess(t *testing.T) {
@@ -35,15 +36,15 @@ func TestNextTopicLevelSuccess(t *testing.T) {
 	}
 
 	levels := [][][]byte{
-		[][]byte{[]byte("sport"), []byte("tennis"), []byte("player1"), []byte("#")},
-		[][]byte{[]byte("sport"), []byte("tennis"), []byte("player1"), []byte("ranking")},
-		[][]byte{[]byte("sport"), []byte("#")},
-		[][]byte{[]byte("#")},
-		[][]byte{[]byte("sport"), []byte("tennis"), []byte("#")},
-		[][]byte{[]byte("+")},
-		[][]byte{[]byte("+"), []byte("tennis"), []byte("#")},
-		[][]byte{[]byte("sport"), []byte("+"), []byte("player1")},
-		[][]byte{[]byte("+"), []byte("finance")},
+		{[]byte("sport"), []byte("tennis"), []byte("player1"), []byte("#")},
+		{[]byte("sport"), []byte("tennis"), []byte("player1"), []byte("ranking")},
+		{[]byte("sport"), []byte("#")},
+		{[]byte("#")},
+		{[]byte("sport"), []byte("tennis"), []byte("#")},
+		{[]byte("+")},
+		{[]byte("+"), []byte("tennis"), []byte("#")},
+		{[]byte("sport"), []byte("+"), []byte("player1")},
+		{[]byte("+"), []byte("finance")},
 	}
 
 	for i, topic := range topics {
@@ -525,11 +526,11 @@ func TestRNodeMatch(t *testing.T) {
 }
 
 func TestMemTopicsSubscription(t *testing.T) {
-	UnRegister("mem")
+	topics.UnRegister("mem")
 	p := NewMemProvider()
-	Register("mem", p)
+	topics.Register("mem", p)
 
-	mgr, _ := NewManager("mem")
+	mgr, _ := topics.NewManager("mem")
 
 	MaxQosAllowed = 1
 	qos, err := mgr.Subscribe([]byte("sports/tennis/+/stats"), 2, "sub1")
@@ -561,11 +562,11 @@ func TestMemTopicsSubscription(t *testing.T) {
 }
 
 func TestMemTopicsRetained(t *testing.T) {
-	UnRegister("mem")
+	topics.UnRegister("mem")
 	p := NewMemProvider()
-	Register("mem", p)
+	topics.Register("mem", p)
 
-	mgr, err := NewManager("mem")
+	mgr, err := topics.NewManager("mem")
 	require.NoError(t, err)
 	require.NotNil(t, mgr)
 

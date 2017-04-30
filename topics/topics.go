@@ -42,7 +42,7 @@ const (
 	//SYS = "$"
 
 	// Both wildcards
-	//_WC = "#+"
+	//BWC = "#+"
 )
 
 var (

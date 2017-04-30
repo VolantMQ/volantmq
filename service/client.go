@@ -24,6 +24,7 @@ import (
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/sessions"
 	"github.com/troian/surgemq/topics"
+	"github.com/troian/surgemq/topics/mem"
 )
 
 const (
@@ -117,7 +118,7 @@ func (c *Client) Connect(uri string, msg *message.ConnectMessage) (err error) {
 		return err
 	}
 
-	p := topics.NewMemProvider()
+	p := mem.NewMemProvider()
 	topics.Register(c.svc.sess.ID(), p)
 
 	c.svc.topicsMgr, err = topics.NewManager(c.svc.sess.ID())
