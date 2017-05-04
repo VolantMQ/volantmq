@@ -21,7 +21,7 @@ func newSNode() *sNode {
 	}
 }
 
-func (sn *sNode) insert(topic []byte, qos byte, sub interface{}) error {
+func (sn *sNode) insert(topic string, qos byte, sub interface{}) error {
 	// If there's no more topic levels, that means we are at the matching sNode
 	// to insert the subscriber. So let's see if there's such subscriber,
 	// if so, update it. Otherwise insert it.
@@ -51,7 +51,7 @@ func (sn *sNode) insert(topic []byte, qos byte, sub interface{}) error {
 		return err
 	}
 
-	level := string(ntl)
+	level := ntl
 
 	// Add sNode if it doesn't already exist
 	n, ok := sn.nodes[level]
@@ -65,7 +65,7 @@ func (sn *sNode) insert(topic []byte, qos byte, sub interface{}) error {
 
 // This remove implementation ignores the QoS, as long as the subscriber
 // matches then it's removed
-func (sn *sNode) remove(topic []byte, sub interface{}) error {
+func (sn *sNode) remove(topic string, sub interface{}) error {
 	// If the topic is empty, it means we are at the final matching snode. If so,
 	// let's find the matching subscribers and remove them.
 	if len(topic) == 0 {
@@ -98,7 +98,7 @@ func (sn *sNode) remove(topic []byte, sub interface{}) error {
 		return err
 	}
 
-	level := string(ntl)
+	level := ntl
 
 	// Find the sNode that matches the topic level
 	n, ok := sn.nodes[level]
@@ -124,7 +124,7 @@ func (sn *sNode) remove(topic []byte, sub interface{}) error {
 // with no wildcards (publish topic), it returns a list of subscribers that subscribes
 // to the topic. For each of the level names, it's a match
 // - if there are subscribers to '#', then all the subscribers are added to result set
-func (sn *sNode) match(topic []byte, qos byte, subs *[]interface{}, qoss *[]byte) error {
+func (sn *sNode) match(topic string, qos byte, subs *[]interface{}, qoss *[]byte) error {
 	// If the topic is empty, it means we are at the final matching snode. If so,
 	// let's find the subscribers that match the qos and append them to the list.
 	if len(topic) == 0 {
@@ -138,7 +138,7 @@ func (sn *sNode) match(topic []byte, qos byte, subs *[]interface{}, qoss *[]byte
 		return err
 	}
 
-	level := string(ntl)
+	level := ntl
 
 	for k, n := range sn.nodes {
 		// If the key is "#", then these subscribers are added to the result set

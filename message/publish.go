@@ -25,7 +25,7 @@ import (
 type PublishMessage struct {
 	header
 
-	topic   []byte
+	topic   string
 	payload []byte
 }
 
@@ -100,15 +100,15 @@ func (pm *PublishMessage) SetQoS(v byte) error {
 
 // Topic returns the the topic name that identifies the information channel to which
 // payload data is published.
-func (pm *PublishMessage) Topic() []byte {
+func (pm *PublishMessage) Topic() string {
 	return pm.topic
 }
 
 // SetTopic sets the the topic name that identifies the information channel to which
 // payload data is published. An error is returned if ValidTopic() is falbase.
-func (pm *PublishMessage) SetTopic(v []byte) error {
+func (pm *PublishMessage) SetTopic(v string) error {
 	if !ValidTopic(v) {
-		return fmt.Errorf("publish/SetTopic: Invalid topic name (%s). Must not be empty or contain wildcard characters", string(v))
+		return fmt.Errorf("publish/SetTopic: Invalid topic name (%s). Must not be empty or contain wildcard characters", v)
 	}
 
 	pm.topic = v
@@ -154,15 +154,16 @@ func (pm *PublishMessage) Decode(src []byte) (int, error) {
 	}
 
 	var n int
-
-	pm.topic, n, err = readLPBytes(src[total:])
+	var buf []byte
+	buf, n, err = readLPBytes(src[total:])
+	pm.topic = string(buf)
 	total += n
 	if err != nil {
 		return total, err
 	}
 
 	if !ValidTopic(pm.topic) {
-		return total, fmt.Errorf("publish/Decode: Invalid topic name (%s). Must not be empty or contain wildcard characters", string(pm.topic))
+		return total, fmt.Errorf("publish/Decode: Invalid topic name (%s). Must not be empty or contain wildcard characters", pm.topic)
 	}
 
 	// The packet identifier field is only present in the PUBLISH packets where the
@@ -220,7 +221,7 @@ func (pm *PublishMessage) Encode(dst []byte) (int, error) {
 		return total, err
 	}
 
-	n, err = writeLPBytes(dst[total:], pm.topic)
+	n, err = writeLPBytes(dst[total:], []byte(pm.topic))
 	total += n
 	if err != nil {
 		return total, err

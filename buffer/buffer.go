@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package service
+package buffer
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -26,10 +27,18 @@ var (
 	bufCNT int64
 )
 
+var (
+	// ErrBufferInsufficientData buffer has insufficient data
+	ErrBufferInsufficientData error = errors.New("buffer has insufficient data")
+)
+
 const (
-	defaultBufferSize     = 1024 * 256
-	defaultReadBlockSize  = 8192
-	defaultWriteBlockSize = 8192
+	// DefaultBufferSize buffer size created by default
+	DefaultBufferSize = 1024 * 256
+	// DefaultReadBlockSize default read block size
+	DefaultReadBlockSize = 8192
+	// DefaultWriteBlockSize default write block size
+	DefaultWriteBlockSize = 8192
 )
 
 type sequence struct {
@@ -60,7 +69,8 @@ func (b *sequence) set(seq int64) {
 	atomic.StoreInt64(&b.cursor, seq)
 }
 
-type buffer struct {
+// Type of buffer
+type Type struct {
 	id int64
 
 	buf []byte
@@ -81,24 +91,25 @@ type buffer struct {
 	pWait int64
 }
 
-func newBuffer(size int64) (*buffer, error) {
+// New buffer
+func New(size int64) (*Type, error) {
 	if size < 0 {
 		return nil, bufio.ErrNegativeCount
 	}
 
 	if size == 0 {
-		size = defaultBufferSize
+		size = DefaultBufferSize
 	}
 
 	if !powerOfTwo64(size) {
 		return nil, fmt.Errorf("Size must be power of two. Try %d", roundUpPowerOfTwo64(size))
 	}
 
-	if size < 2*defaultReadBlockSize {
-		return nil, fmt.Errorf("Size must at least be %d. Try %d", 2*defaultReadBlockSize, 2*defaultReadBlockSize)
+	if size < 2*DefaultReadBlockSize {
+		return nil, fmt.Errorf("Size must at least be %d. Try %d", 2*DefaultReadBlockSize, 2*DefaultReadBlockSize)
 	}
 
-	return &buffer{
+	return &Type{
 		id:    atomic.AddInt64(&bufCNT, 1),
 		buf:   make([]byte, size),
 		size:  size,
@@ -112,11 +123,13 @@ func newBuffer(size int64) (*buffer, error) {
 	}, nil
 }
 
-func (b *buffer) ID() int64 {
+// ID of buffer
+func (b *Type) ID() int64 {
 	return b.id
 }
 
-func (b *buffer) Close() error {
+// Close buffer
+func (b *Type) Close() error {
 	atomic.StoreInt64(&b.done, 1)
 
 	b.pCond.L.Lock()
@@ -130,13 +143,15 @@ func (b *buffer) Close() error {
 	return nil
 }
 
-func (b *buffer) Len() int {
+// Len of data
+func (b *Type) Len() int {
 	cpos := b.cSeq.get()
 	ppos := b.pSeq.get()
 	return int(ppos - cpos)
 }
 
-func (b *buffer) ReadFrom(r io.Reader) (int64, error) {
+// ReadFrom from reader
+func (b *Type) ReadFrom(r io.Reader) (int64, error) {
 	defer b.Close() // nolint: errcheck
 
 	total := int64(0)
@@ -146,7 +161,7 @@ func (b *buffer) ReadFrom(r io.Reader) (int64, error) {
 			return total, io.EOF
 		}
 
-		start, cnt, err := b.waitForWriteSpace(defaultReadBlockSize)
+		start, cnt, err := b.waitForWriteSpace(DefaultReadBlockSize)
 		if err != nil {
 			return 0, err
 		}
@@ -172,7 +187,8 @@ func (b *buffer) ReadFrom(r io.Reader) (int64, error) {
 	}
 }
 
-func (b *buffer) WriteTo(w io.Writer) (int64, error) {
+// WriteTo to writer
+func (b *Type) WriteTo(w io.Writer) (int64, error) {
 	defer b.Close() // nolint: errcheck
 
 	total := int64(0)
@@ -182,7 +198,7 @@ func (b *buffer) WriteTo(w io.Writer) (int64, error) {
 			return total, io.EOF
 		}
 
-		p, err := b.ReadPeek(defaultWriteBlockSize)
+		p, err := b.ReadPeek(DefaultWriteBlockSize)
 
 		// There's some data, let's process it first
 		if len(p) > 0 {
@@ -207,7 +223,8 @@ func (b *buffer) WriteTo(w io.Writer) (int64, error) {
 	}
 }
 
-func (b *buffer) Read(p []byte) (int, error) {
+// Read data
+func (b *Type) Read(p []byte) (int, error) {
 	if b.isDone() && b.Len() == 0 {
 		//glog.Debugf("isDone and len = %d", this.Len())
 		return 0, io.EOF
@@ -284,7 +301,8 @@ func (b *buffer) Read(p []byte) (int, error) {
 	}
 }
 
-func (b *buffer) Write(p []byte) (int, error) {
+// Write message
+func (b *Type) Write(p []byte) (int, error) {
 	if b.isDone() {
 		return 0, io.EOF
 	}
@@ -306,7 +324,7 @@ func (b *buffer) Write(p []byte) (int, error) {
 	return total, nil
 }
 
-// Description below is copied completely from bufio.Peek()
+// ReadPeek Description below is copied completely from bufio.Peek()
 //   http://golang.org/pkg/bufio/#Reader.Peek
 // Peek returns the next n bytes without advancing the reader. The bytes stop being valid
 // at the next read call. If Peek returns fewer than n bytes, it also returns an error
@@ -314,7 +332,7 @@ func (b *buffer) Write(p []byte) (int, error) {
 // b's buffer size.
 // If there's not enough data to peek, error is ErrBufferInsufficientData.
 // If n < 0, error is bufio.ErrNegativeCount
-func (b *buffer) ReadPeek(n int) ([]byte, error) {
+func (b *Type) ReadPeek(n int) ([]byte, error) {
 	if int64(n) > b.size {
 		return nil, bufio.ErrBufferFull
 	}
@@ -371,10 +389,10 @@ func (b *buffer) ReadPeek(n int) ([]byte, error) {
 	return nil, ErrBufferInsufficientData
 }
 
-// Wait waits for for n bytes to be ready. If there's not enough data, then it will
+// ReadWait waits for for n bytes to be ready. If there's not enough data, then it will
 // wait until there's enough. This differs from ReadPeek or Readin that Peek will
 // return whatever is available and won't wait for full count.
-func (b *buffer) ReadWait(n int) ([]byte, error) {
+func (b *Type) ReadWait(n int) ([]byte, error) {
 	if int64(n) > b.size {
 		return nil, bufio.ErrBufferFull
 	}
@@ -419,11 +437,11 @@ func (b *buffer) ReadWait(n int) ([]byte, error) {
 	return b.buf[cindex : cindex+int64(n)], nil
 }
 
-// Commit moves the cursor forward by n bytes. It behaves like Read() except it doesn't
+// ReadCommit Commit moves the cursor forward by n bytes. It behaves like Read() except it doesn't
 // return any data. If there's enough data, then the cursor will be moved forward and
 // n will be returned. If there's not enough data, then the cursor will move forward
 // as much as possible, then return the number of positions (bytes) moved.
-func (b *buffer) ReadCommit(n int) (int, error) {
+func (b *Type) ReadCommit(n int) (int, error) {
 	if int64(n) > b.size {
 		return 0, bufio.ErrBufferFull
 	}
@@ -455,11 +473,11 @@ func (b *buffer) ReadCommit(n int) (int, error) {
 	return 0, ErrBufferInsufficientData
 }
 
-// WaitWrite waits for n bytes to be available in the buffer and then returns
+// WriteWait waits for n bytes to be available in the buffer and then returns
 // 1. the slice pointing to the location in the buffer to be filled
 // 2. a boolean indicating whether the bytes available wraps around the ring
 // 3. any errors encountered. If there's error then other return values are invalid
-func (b *buffer) WriteWait(n int) ([]byte, bool, error) {
+func (b *Type) WriteWait(n int) ([]byte, bool, error) {
 	start, cnt, err := b.waitForWriteSpace(n)
 	if err != nil {
 		return nil, false, err
@@ -473,7 +491,8 @@ func (b *buffer) WriteWait(n int) ([]byte, bool, error) {
 	return b.buf[pstart : pstart+int64(cnt)], false, nil
 }
 
-func (b *buffer) WriteCommit(n int) (int, error) {
+// WriteCommit write with commit
+func (b *Type) WriteCommit(n int) (int, error) {
 	start, cnt, err := b.waitForWriteSpace(n)
 	if err != nil {
 		return 0, err
@@ -489,7 +508,7 @@ func (b *buffer) WriteCommit(n int) (int, error) {
 	return cnt, nil
 }
 
-func (b *buffer) waitForWriteSpace(n int) (int64, int, error) {
+func (b *Type) waitForWriteSpace(n int) (int64, int, error) {
 	if b.isDone() {
 		return 0, 0, io.EOF
 	}
@@ -562,7 +581,7 @@ func (b *buffer) waitForWriteSpace(n int) (int64, int, error) {
 	return ppos, n, nil
 }
 
-func (b *buffer) isDone() bool {
+func (b *Type) isDone() bool {
 	return atomic.LoadInt64(&b.done) == 1
 }
 

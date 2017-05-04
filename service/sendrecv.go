@@ -21,7 +21,8 @@ import (
 	"time"
 
 	"errors"
-	"github.com/surge/glog"
+	"github.com/troian/surgemq"
+	"github.com/troian/surgemq/buffer"
 	"github.com/troian/surgemq/message"
 )
 
@@ -43,26 +44,26 @@ func (r timeoutReader) Read(b []byte) (int, error) {
 }
 
 // receiver() reads data from the network, and writes the data into the incoming buffer
-func (s *service) receiver() {
+func (s *Type) receiver() {
 	defer func() {
 		// Let's recover from panic
 		if r := recover(); r != nil {
-			glog.Errorf("(%s) Recovering from panic: %v", s.cid(), r)
+			appLog.Errorf("(%s) Recovering from panic: %v", s.CID(), r)
 		}
 
 		s.wgStopped.Done()
 
-		glog.Debugf("(%s) Stopping receiver", s.cid())
+		appLog.Debugf("(%s) Stopping receiver", s.CID())
 	}()
 
-	glog.Debugf("(%s) Starting receiver", s.cid())
+	appLog.Debugf("(%s) Starting receiver", s.CID())
 
 	s.wgStarted.Done()
 
-	switch conn := s.conn.(type) {
+	switch conn := s.Conn.(type) {
 	case net.Conn:
-		//glog.Debugf("server/handleConnection: Setting read deadline to %d", time.Second*time.Duration(this.keepAlive))
-		keepAlive := time.Second * time.Duration(s.keepAlive)
+		//appLog.Debugf("server/handleConnection: Setting read deadline to %d", time.Second*time.Duration(this.keepAlive))
+		keepAlive := time.Second * time.Duration(s.KeepAlive)
 		r := timeoutReader{
 			d:    keepAlive + (keepAlive / 2),
 			conn: conn,
@@ -72,62 +73,62 @@ func (s *service) receiver() {
 			_, err := s.in.ReadFrom(r)
 
 			if err != nil {
-				if err != io.EOF {
-					glog.Errorf("(%s) error reading from connection: %v", s.cid(), err)
-				}
+				//if err != io.EOF {
+				//	appLog.Errorf("(%s) error reading from connection: %v", s.CID(), err)
+				//}
 				return
 			}
 		}
 
 	//case *websocket.Conn:
-	//	glog.Errorf("(%s) Websocket: %v", this.cid(), ErrInvalidConnectionType)
+	//	appLog.Errorf("(%s) Websocket: %v", this.cid(), ErrInvalidConnectionType)
 
 	default:
-		glog.Errorf("(%s) %v", s.cid(), ErrInvalidConnectionType)
+		appLog.Errorf("(%s) %v", s.CID(), surgemq.ErrInvalidConnectionType)
 	}
 }
 
 // sender() writes data from the outgoing buffer to the network
-func (s *service) sender() {
+func (s *Type) sender() {
 	defer func() {
 		// Let's recover from panic
 		if r := recover(); r != nil {
-			glog.Errorf("(%s) Recovering from panic: %v", s.cid(), r)
+			appLog.Errorf("(%s) Recovering from panic: %v", s.CID(), r)
 		}
 
 		s.wgStopped.Done()
 
-		glog.Debugf("(%s) Stopping sender", s.cid())
+		appLog.Debugf("(%s) Stopping sender", s.CID())
 	}()
 
-	glog.Debugf("(%s) Starting sender", s.cid())
+	appLog.Debugf("(%s) Starting sender", s.CID())
 
 	s.wgStarted.Done()
 
-	switch conn := s.conn.(type) {
+	switch conn := s.Conn.(type) {
 	case net.Conn:
 		for {
 			_, err := s.out.WriteTo(conn)
 
 			if err != nil {
 				if err != io.EOF {
-					glog.Errorf("(%s) error writing data: %v", s.cid(), err)
+					appLog.Errorf("(%s) error writing data: %v", s.CID(), err)
 				}
 				return
 			}
 		}
 
 	//case *websocket.Conn:
-	//	glog.Errorf("(%s) Websocket not supported", this.cid())
+	//	appLog.Errorf("(%s) Websocket not supported", this.CID())
 
 	default:
-		glog.Errorf("(%s) Invalid connection type", s.cid())
+		appLog.Errorf("(%s) Invalid connection type", s.CID())
 	}
 }
 
 // peekMessageSize() reads, but not commits, enough bytes to determine the size of
 // the next message and returns the type and size.
-func (s *service) peekMessageSize() (message.Type, int, error) {
+func (s *Type) peekMessageSize() (message.Type, int, error) {
 	var (
 		b   []byte
 		err error
@@ -135,7 +136,7 @@ func (s *service) peekMessageSize() (message.Type, int, error) {
 	)
 
 	if s.in == nil {
-		err = ErrBufferNotReady
+		err = surgemq.ErrBufferNotReady
 		return 0, 0, err
 	}
 
@@ -179,7 +180,7 @@ func (s *service) peekMessageSize() (message.Type, int, error) {
 
 // peekMessage() reads a message from the buffer, but the bytes are NOT committed.
 // This means the buffer still thinks the bytes are not read yet.
-func (s *service) peekMessage(mtype message.Type, total int) (message.Message, int, error) {
+func (s *Type) peekMessage(mtype message.Type, total int) (message.Message, int, error) {
 	var (
 		b    []byte
 		err  error
@@ -188,14 +189,14 @@ func (s *service) peekMessage(mtype message.Type, total int) (message.Message, i
 	)
 
 	if s.in == nil {
-		return nil, 0, ErrBufferNotReady
+		return nil, 0, surgemq.ErrBufferNotReady
 	}
 
 	// Peek until we get total bytes
 	for i = 0; ; i++ {
 		// Peek remLen bytes from the input buffer.
 		b, err = s.in.ReadWait(total)
-		if err != nil && err != ErrBufferInsufficientData {
+		if err != nil && err != buffer.ErrBufferInsufficientData {
 			return nil, 0, err
 		}
 
@@ -216,7 +217,7 @@ func (s *service) peekMessage(mtype message.Type, total int) (message.Message, i
 
 // readMessage() reads and copies a message from the buffer. The buffer bytes are
 // committed as a result of the read.
-func (s *service) readMessage(mType message.Type, total int) (message.Message, int, error) {
+func (s *Type) readMessage(mType message.Type, total int) (message.Message, int, error) {
 	var (
 		b   []byte
 		err error
@@ -225,7 +226,7 @@ func (s *service) readMessage(mType message.Type, total int) (message.Message, i
 	)
 
 	if s.in == nil {
-		err = ErrBufferNotReady
+		err = surgemq.ErrBufferNotReady
 		return nil, 0, err
 	}
 
@@ -238,7 +239,7 @@ func (s *service) readMessage(mType message.Type, total int) (message.Message, i
 	for l < total {
 		n, err = s.in.Read(s.inTmp[l:])
 		l += n
-		glog.Debugf("read %d bytes, total %d", n, l)
+		appLog.Debugf("read %d bytes, total %d", n, l)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -256,7 +257,7 @@ func (s *service) readMessage(mType message.Type, total int) (message.Message, i
 }
 
 // writeMessage() writes a message to the outgoing buffer
-func (s *service) writeMessage(msg message.Message) (int, error) {
+func (s *Type) writeMessage(msg message.Message) (int, error) {
 	var (
 		l    int = msg.Len()
 		m, n int
@@ -266,7 +267,7 @@ func (s *service) writeMessage(msg message.Message) (int, error) {
 	)
 
 	if s.out == nil {
-		return 0, ErrBufferNotReady
+		return 0, surgemq.ErrBufferNotReady
 	}
 
 	// This is to serialize writes to the underlying buffer. Multiple goroutines could

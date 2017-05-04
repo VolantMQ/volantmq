@@ -60,7 +60,7 @@ func NewMemProvider() topics.Provider {
 	}
 }
 
-func (mT *provider) Subscribe(topic []byte, qos byte, sub interface{}) (byte, error) {
+func (mT *provider) Subscribe(topic string, qos byte, sub interface{}) (byte, error) {
 	if !message.ValidQos(qos) {
 		return message.QosFailure, fmt.Errorf("Invalid QoS %d", qos)
 	}
@@ -83,7 +83,7 @@ func (mT *provider) Subscribe(topic []byte, qos byte, sub interface{}) (byte, er
 	return qos, nil
 }
 
-func (mT *provider) UnSubscribe(topic []byte, sub interface{}) error {
+func (mT *provider) UnSubscribe(topic string, sub interface{}) error {
 	mT.smu.Lock()
 	defer mT.smu.Unlock()
 
@@ -91,7 +91,7 @@ func (mT *provider) UnSubscribe(topic []byte, sub interface{}) error {
 }
 
 // Returned values will be invalidated by the next Subscribers call
-func (mT *provider) Subscribers(topic []byte, qos byte, subs *[]interface{}, qoss *[]byte) error {
+func (mT *provider) Subscribers(topic string, qos byte, subs *[]interface{}, qoss *[]byte) error {
 	if !message.ValidQos(qos) {
 		return fmt.Errorf("Invalid QoS %d", qos)
 	}
@@ -119,7 +119,7 @@ func (mT *provider) Retain(msg *message.PublishMessage) error {
 	return mT.rRoot.insert(msg.Topic(), msg)
 }
 
-func (mT *provider) Retained(topic []byte, msgs *[]*message.PublishMessage) error {
+func (mT *provider) Retained(topic string, msgs *[]*message.PublishMessage) error {
 	mT.rmu.RLock()
 	defer mT.rmu.RUnlock()
 
@@ -141,46 +141,46 @@ const (
 )
 
 // Returns topic level, remaining topic levels and any errors
-func nextTopicLevel(topic []byte) ([]byte, []byte, error) {
+func nextTopicLevel(topic string) (string, string, error) {
 	s := stateCHR
 
 	for i, c := range topic {
 		switch c {
 		case '/':
 			if s == stateMWC {
-				return nil, nil, errors.New("memtopics/nextTopicLevel: Multi-level wildcard found in topic and it's not at the last level")
+				return "", "", errors.New("memtopics/nextTopicLevel: Multi-level wildcard found in topic and it's not at the last level")
 			}
 
 			if i == 0 {
-				return []byte(topics.SWC), topic[i+1:], nil
+				return topics.SWC, topic[i+1:], nil
 			}
 
 			return topic[:i], topic[i+1:], nil
 
 		case '#':
 			if i != 0 {
-				return nil, nil, errors.New("memtopics/nextTopicLevel: Wildcard character '#' must occupy entire topic level")
+				return "", "", errors.New("memtopics/nextTopicLevel: Wildcard character '#' must occupy entire topic level")
 			}
 
 			s = stateMWC
 
 		case '+':
 			if i != 0 {
-				return nil, nil, errors.New("memtopics/nextTopicLevel: Wildcard character '+' must occupy entire topic level")
+				return "", "", errors.New("memtopics/nextTopicLevel: Wildcard character '+' must occupy entire topic level")
 			}
 
 			s = stateSWC
 
 		case '$':
 			if i == 0 {
-				return nil, nil, errors.New("memtopics/nextTopicLevel: Cannot publish to $ topics")
+				return "", "", errors.New("memtopics/nextTopicLevel: Cannot publish to $ topics")
 			}
 
 			s = stateSYS
 
 		default:
 			if s == stateMWC || s == stateSWC {
-				return nil, nil, errors.New("memtopics/nextTopicLevel: Wildcard characters '#' and '+' must occupy entire topic level")
+				return "", "", errors.New("memtopics/nextTopicLevel: Wildcard characters '#' and '+' must occupy entire topic level")
 			}
 
 			s = stateCHR
@@ -190,7 +190,7 @@ func nextTopicLevel(topic []byte) ([]byte, []byte, error) {
 	// If we got here that means we didn't hit the separator along the way, so the
 	// topic is either empty, or does not contain a separator. Either way, we return
 	// the full topic
-	return topic, nil, nil
+	return topic, "", nil
 }
 
 // The QoS of the payload messages sent in response to a subscription must be the

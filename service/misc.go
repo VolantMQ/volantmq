@@ -20,13 +20,15 @@ import (
 	"net"
 
 	"errors"
+	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/message"
 )
 
-func getConnectMessage(conn io.Closer) (*message.ConnectMessage, error) {
-	buf, err := getMessageBuffer(conn)
+// GetConnectMessage get CONNECT message
+func GetConnectMessage(conn io.Closer) (*message.ConnectMessage, error) {
+	buf, err := GetMessageBuffer(conn)
 	if err != nil {
-		//glog.Debugf("Receive error: %v", err)
+		appLog.Debugf("Receive error: %v", err)
 		return nil, err
 	}
 
@@ -37,40 +39,43 @@ func getConnectMessage(conn io.Closer) (*message.ConnectMessage, error) {
 	return msg, err
 }
 
-func getConnAckMessage(conn io.Closer) (*message.ConnAckMessage, error) {
-	buf, err := getMessageBuffer(conn)
+// GetConnAckMessage get CONACK message
+func GetConnAckMessage(conn io.Closer) (*message.ConnAckMessage, error) {
+	buf, err := GetMessageBuffer(conn)
 	if err != nil {
-		//glog.Debugf("Receive error: %v", err)
+		appLog.Debugf("Receive error: %v", err)
 		return nil, err
 	}
 
 	msg := message.NewConnAckMessage()
 
 	_, err = msg.Decode(buf)
-	//glog.Debugf("Received: %s", msg)
+	appLog.Debugf("Received: %s", msg)
 	return msg, err
 }
 
-func writeMessage(conn io.Closer, msg message.Message) error {
+// WriteMessage into connection
+func WriteMessage(conn io.Closer, msg message.Message) error {
 	buf := make([]byte, msg.Len())
 	_, err := msg.Encode(buf)
 	if err != nil {
-		//glog.Debugf("Write error: %v", err)
+		appLog.Debugf("Write error: %v", err)
 		return err
 	}
-	//glog.Debugf("Writing: %s", msg)
+	appLog.Debugf("Writing: %s", msg)
 
-	return writeMessageBuffer(conn, buf)
+	return WriteMessageBuffer(conn, buf)
 }
 
-func getMessageBuffer(c io.Closer) ([]byte, error) {
+// GetMessageBuffer from connection
+func GetMessageBuffer(c io.Closer) ([]byte, error) {
 	if c == nil {
-		return nil, ErrInvalidConnectionType
+		return nil, surgemq.ErrInvalidConnectionType
 	}
 
 	conn, ok := c.(net.Conn)
 	if !ok {
-		return nil, ErrInvalidConnectionType
+		return nil, surgemq.ErrInvalidConnectionType
 	}
 
 	var (
@@ -93,7 +98,7 @@ func getMessageBuffer(c io.Closer) ([]byte, error) {
 
 		n, err := conn.Read(b[0:])
 		if err != nil {
-			//glog.Debugf("Read error: %v", err)
+			appLog.Debugf("Read error: %v", err)
 			return nil, err
 		}
 
@@ -127,14 +132,15 @@ func getMessageBuffer(c io.Closer) ([]byte, error) {
 	return buf, nil
 }
 
-func writeMessageBuffer(c io.Closer, b []byte) error {
+// WriteMessageBuffer into connection
+func WriteMessageBuffer(c io.Closer, b []byte) error {
 	if c == nil {
-		return ErrInvalidConnectionType
+		return surgemq.ErrInvalidConnectionType
 	}
 
 	conn, ok := c.(net.Conn)
 	if !ok {
-		return ErrInvalidConnectionType
+		return surgemq.ErrInvalidConnectionType
 	}
 
 	_, err := conn.Write(b)

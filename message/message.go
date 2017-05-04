@@ -15,9 +15,10 @@
 package message
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/pkg/errors"
+	"strings"
 )
 
 const (
@@ -150,6 +151,17 @@ const (
 
 	// RESERVED2 is a reserved value and should be considered an invalid message type.
 	RESERVED2
+)
+
+var (
+	// ErrInvalidUnSubscribe message is not of UNSUBSCRIBE type
+	ErrInvalidUnSubscribe = errors.New("Invalid UnSubscribe message")
+	// ErrInvalidUnSubAck message is not of UNSUBACK type
+	ErrInvalidUnSubAck = errors.New("Invalid UnSubAckMessage received")
+	// ErrPackedIDNotMatched packets id not matched
+	ErrPackedIDNotMatched = errors.New("Packed's ID does not match")
+	// ErrOnPublishNil publisher is nil
+	ErrOnPublishNil = errors.New("OnPublish function is nil")
 )
 
 func (mt Type) String() string {
@@ -326,8 +338,9 @@ func (mt Type) Valid() bool {
 // ValidTopic checks the topic, which is a slice of bytes, to see if it's valid. Topic is
 // considered valid if it's longer than 0 bytes, and doesn't contain any wildcard characters
 // such as + and #.
-func ValidTopic(topic []byte) bool {
-	return len(topic) > 0 && bytes.IndexByte(topic, '#') == -1 && bytes.IndexByte(topic, '+') == -1
+func ValidTopic(topic string) bool {
+
+	return len(topic) > 0 && !strings.Contains(topic, "#") && !strings.Contains(topic, "+")
 }
 
 // ValidQos checks the QoS value to see if it's valid. Valid QoS are QosAtMostOnce,

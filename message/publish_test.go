@@ -62,11 +62,11 @@ func TestPublishMessageHeaderFields(t *testing.T) {
 func TestPublishMessageFields(t *testing.T) {
 	msg := NewPublishMessage()
 
-	msg.SetTopic([]byte("coolstuff")) // nolint: errcheck
+	msg.SetTopic("coolstuff") // nolint: errcheck
 
 	require.Equal(t, "coolstuff", string(msg.Topic()), "Error setting message topic.")
 
-	err := msg.SetTopic([]byte("coolstuff/#"))
+	err := msg.SetTopic("coolstuff/#")
 
 	require.Error(t, err)
 
@@ -150,8 +150,8 @@ func TestPublishMessageEncode(t *testing.T) {
 	}
 
 	msg := NewPublishMessage()
-	msg.SetTopic([]byte("surgemq")) // nolint: errcheck
-	msg.SetQoS(1)                   // nolint: errcheck
+	msg.SetTopic("surgemq") // nolint: errcheck
+	msg.SetQoS(1)           // nolint: errcheck
 	msg.SetPacketID(7)
 	msg.SetPayload([]byte{'s', 'e', 'n', 'd', ' ', 'm', 'e', ' ', 'h', 'o', 'm', 'e'})
 
@@ -166,7 +166,7 @@ func TestPublishMessageEncode(t *testing.T) {
 // test empty topic name
 func TestPublishMessageEncode2(t *testing.T) {
 	msg := NewPublishMessage()
-	msg.SetTopic([]byte("")) // nolint: errcheck
+	msg.SetTopic("") // nolint: errcheck
 	msg.SetPacketID(7)
 	msg.SetPayload([]byte{'s', 'e', 'n', 'd', ' ', 'm', 'e', ' ', 'h', 'o', 'm', 'e'})
 
@@ -187,8 +187,8 @@ func TestPublishMessageEncode3(t *testing.T) {
 	}
 
 	msg := NewPublishMessage()
-	msg.SetTopic([]byte("surgemq")) // nolint: errcheck
-	msg.SetQoS(0)                   // nolint: errcheck
+	msg.SetTopic("surgemq") // nolint: errcheck
+	msg.SetQoS(0)           // nolint: errcheck
 	msg.SetPayload([]byte{'s', 'e', 'n', 'd', ' ', 'm', 'e', ' ', 'h', 'o', 'm', 'e'})
 
 	dst := make([]byte, 100)
@@ -214,8 +214,8 @@ func TestPublishMessageEncode4(t *testing.T) {
 	msgBytes = append(msgBytes, payload...)
 
 	msg := NewPublishMessage()
-	msg.SetTopic([]byte("surgemq")) // nolint: errcheck
-	msg.SetQoS(0)                   // nolint: errcheck
+	msg.SetTopic("surgemq") // nolint: errcheck
+	msg.SetQoS(0)           // nolint: errcheck
 	msg.SetPayload(payload)
 
 	require.Equal(t, len(msgBytes), msg.Len())

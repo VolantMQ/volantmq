@@ -67,23 +67,21 @@ func UnRegister(name string) {
 
 // Manager auth
 type Manager struct {
-	p map[int]Provider
+	p []Provider
 }
 
 // NewManager new auth manager
 func NewManager(p string) (*Manager, error) {
-	m := Manager{
-		p: make(map[int]Provider),
-	}
+	m := Manager{}
 
 	list := strings.Split(p, ";")
-	for i, pa := range list {
+	for _, pa := range list {
 		pvd, ok := providers[pa]
 		if !ok {
 			return nil, fmt.Errorf("session: unknown provider %q", pa)
 		}
 
-		m.p[i] = pvd
+		m.p = append(m.p, pvd)
 	}
 
 	return &m, nil

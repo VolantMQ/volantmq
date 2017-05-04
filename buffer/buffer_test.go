@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package service
+package buffer
 
 import (
 	"bytes"
@@ -52,7 +52,7 @@ func TestBufferCommitBytes(t *testing.T) {
 }
 
 func TestBufferConsumerProducerRead(t *testing.T) {
-	buf, err := newBuffer(16384)
+	buf, err := New(16384)
 
 	require.NoError(t, err)
 
@@ -60,7 +60,7 @@ func TestBufferConsumerProducerRead(t *testing.T) {
 }
 
 func TestBufferConsumerProducerWriteTo(t *testing.T) {
-	buf, err := newBuffer(16384)
+	buf, err := New(16384)
 
 	require.NoError(t, err)
 
@@ -68,7 +68,7 @@ func TestBufferConsumerProducerWriteTo(t *testing.T) {
 }
 
 func TestBufferConsumerProducerPeekCommit(t *testing.T) {
-	buf, err := newBuffer(16384)
+	buf, err := New(16384)
 
 	require.NoError(t, err)
 
@@ -83,12 +83,12 @@ func TestBufferPeek(t *testing.T) {
 }
 
 func BenchmarkBufferConsumerProducerRead(b *testing.B) {
-	buf, _ := newBuffer(0)
+	buf, _ := New(0)
 	benchmarkRead(b, buf)
 }
 
-func testFillBuffer(t *testing.T, bufsize, ringsize int64) *buffer {
-	buf, err := newBuffer(ringsize)
+func testFillBuffer(t *testing.T, bufsize, ringsize int64) *Type {
+	buf, err := New(ringsize)
 
 	require.NoError(t, err)
 
@@ -99,7 +99,7 @@ func testFillBuffer(t *testing.T, bufsize, ringsize int64) *buffer {
 	return buf
 }
 
-func fillBuffer(t *testing.T, buf *buffer, bufsize int64) {
+func fillBuffer(t *testing.T, buf *Type, bufsize int64) {
 	p := make([]byte, bufsize)
 	for i := range p {
 		p[i] = 'a'
@@ -111,7 +111,7 @@ func fillBuffer(t *testing.T, buf *buffer, bufsize int64) {
 	require.Equal(t, err, io.EOF)
 }
 
-func peekBuffer(t *testing.T, buf *buffer, n int) {
+func peekBuffer(t *testing.T, buf *Type, n int) {
 	pkbuf, err := buf.ReadPeek(n)
 
 	require.NoError(t, err)
@@ -122,7 +122,7 @@ func peekBuffer(t *testing.T, buf *buffer, n int) {
 	}
 }
 
-func testPeekCommit(t *testing.T, buf *buffer) {
+func testPeekCommit(t *testing.T, buf *Type) {
 	n := 20000
 
 	go func(n int64) {
@@ -142,7 +142,7 @@ func testPeekCommit(t *testing.T, buf *buffer) {
 	}
 }
 
-func testWriteTo(t *testing.T, buf *buffer) {
+func testWriteTo(t *testing.T, buf *Type) {
 	n := int64(20000)
 
 	go func(n int64) {
@@ -157,7 +157,7 @@ func testWriteTo(t *testing.T, buf *buffer) {
 	require.Equal(t, int64(20000), m)
 }
 
-func testRead(t *testing.T, buf *buffer) {
+func testRead(t *testing.T, buf *Type) {
 	n := int64(20000)
 
 	go func(n int64) {
@@ -177,7 +177,7 @@ func testRead(t *testing.T, buf *buffer) {
 	}
 }
 
-func testCommit(t *testing.T, buf *buffer) {
+func testCommit(t *testing.T, buf *Type) {
 	n, err := buf.ReadCommit(256)
 
 	require.NoError(t, err)
@@ -188,7 +188,7 @@ func testCommit(t *testing.T, buf *buffer) {
 	require.Equal(t, ErrBufferInsufficientData, err)
 }
 
-func testReadBytes(t *testing.T, buf *buffer) {
+func testReadBytes(t *testing.T, buf *Type) {
 	p := make([]byte, 256)
 	n, err := buf.Read(p)
 
@@ -202,7 +202,7 @@ func testReadBytes(t *testing.T, buf *buffer) {
 	require.Equal(t, 2048-256, n)
 }
 
-func benchmarkRead(b *testing.B, buf *buffer) {
+func benchmarkRead(b *testing.B, buf *Type) {
 	n := int64(b.N)
 
 	go func(n int64) {

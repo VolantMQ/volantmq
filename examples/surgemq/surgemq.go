@@ -22,7 +22,8 @@ import (
 	"runtime/pprof"
 
 	"github.com/surge/glog"
-	"github.com/troian/surgemq/service"
+	"github.com/troian/surgemq"
+	"github.com/troian/surgemq/server"
 	"syscall"
 )
 
@@ -42,13 +43,13 @@ var (
 )
 
 func init() {
-	flag.IntVar(&keepAlive, "keepalive", service.DefaultKeepAlive, "Keepalive (sec)")
-	flag.IntVar(&connectTimeout, "connecttimeout", service.DefaultConnectTimeout, "Connect Timeout (sec)")
-	flag.IntVar(&ackTimeout, "acktimeout", service.DefaultAckTimeout, "Ack Timeout (sec)")
-	flag.IntVar(&timeoutRetries, "retries", service.DefaultTimeoutRetries, "Timeout Retries")
-	flag.StringVar(&authenticator, "auth", service.DefaultAuthenticator, "Authenticator Type")
-	flag.StringVar(&sessionsProvider, "sessions", service.DefaultSessionsProvider, "Session Provider Type")
-	flag.StringVar(&topicsProvider, "topics", service.DefaultTopicsProvider, "Topics Provider Type")
+	flag.IntVar(&keepAlive, "keepalive", surgemq.DefaultAckTimeout, "Keepalive (sec)")
+	flag.IntVar(&connectTimeout, "connecttimeout", surgemq.DefaultConnectTimeout, "Connect Timeout (sec)")
+	flag.IntVar(&ackTimeout, "acktimeout", surgemq.DefaultAckTimeout, "Ack Timeout (sec)")
+	flag.IntVar(&timeoutRetries, "retries", surgemq.DefaultTimeoutRetries, "Timeout Retries")
+	flag.StringVar(&authenticator, "auth", surgemq.DefaultAuthenticator, "Authenticator Type")
+	flag.StringVar(&sessionsProvider, "sessions", surgemq.DefaultSessionsProvider, "Session Provider Type")
+	flag.StringVar(&topicsProvider, "topics", surgemq.DefaultTopicsProvider, "Topics Provider Type")
 	flag.StringVar(&cpuprofile, "cpuprofile", "", "CPU Profile Filename")
 	flag.StringVar(&wsAddr, "wsaddr", "", "HTTP websocket address, eg. ':8080'")
 	flag.StringVar(&wssAddr, "wssaddr", "", "HTTPS websocket address, eg. ':8081'")
@@ -60,13 +61,12 @@ func init() {
 func main() {
 	var f *os.File
 
-	svr, _ := service.NewServer(service.Config{
-		KeepAlive:        keepAlive,
-		ConnectTimeout:   connectTimeout,
-		AckTimeout:       ackTimeout,
-		TimeoutRetries:   timeoutRetries,
-		SessionsProvider: sessionsProvider,
-		TopicsProvider:   topicsProvider,
+	svr, _ := server.New(server.Config{
+		KeepAlive:      keepAlive,
+		ConnectTimeout: connectTimeout,
+		AckTimeout:     ackTimeout,
+		TimeoutRetries: timeoutRetries,
+		TopicsProvider: topicsProvider,
 	})
 
 	var err error

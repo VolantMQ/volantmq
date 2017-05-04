@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package service
+package server
 
 import (
 	"crypto/tls"
@@ -25,30 +25,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/surge/glog"
+	"github.com/juju/loggo"
+	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/auth"
 	"github.com/troian/surgemq/message"
-	"github.com/troian/surgemq/sessions"
+	"github.com/troian/surgemq/service"
+	"github.com/troian/surgemq/session"
 	"github.com/troian/surgemq/topics"
-)
-
-// Errors
-var (
-	ErrInvalidConnectionType error = errors.New("service: Invalid connection type")
-	//ErrInvalidSubscriber      error = errors.New("service: Invalid subscriber")
-	ErrBufferNotReady         error = errors.New("service: buffer is not ready")
-	ErrBufferInsufficientData error = errors.New("service: buffer has insufficient data")
-)
-
-// Default configs
-const (
-	DefaultKeepAlive        = 300           // DefaultKeepAlive default keep
-	DefaultConnectTimeout   = 2             // DefaultConnectTimeout connect timeout
-	DefaultAckTimeout       = 20            // DefaultAckTimeout ack timeout
-	DefaultTimeoutRetries   = 3             // DefaultTimeoutRetries retries
-	DefaultSessionsProvider = "mem"         // DefaultSessionsProvider default session provider
-	DefaultAuthenticator    = "mockSuccess" // DefaultAuthenticator default auth provider
-	DefaultTopicsProvider   = "mem"         // DefaultTopicsProvider default topics provider
 )
 
 // Config server configuration
@@ -73,11 +56,6 @@ type Config struct {
 	// in the CONNECT message. If not set then default to "mockSuccess".
 	Authenticators string
 
-	// SessionsProvider is the session store that keeps all the Session objects.
-	// This is the store to check if CleanSession is set to 0 in the CONNECT message.
-	// If not set then default to "mem".
-	SessionsProvider string
-
 	// TopicsProvider is the topic store that keeps all the subscription topics.
 	// If not set then default to "mem".
 	TopicsProvider string
@@ -89,17 +67,38 @@ type Config struct {
 	ClientIDFromUser bool
 }
 
-// Server is a library implementation of the MQTT server that, as best it can, complies
+type servicesManager struct {
+	svcID uint64
+	// Mutex for updating services
+	lock sync.Mutex
+
+	// A list of services created by the server. We keep track of them so we can
+	// gracefully shut them down if they are still alive when the server goes down.
+	list map[uint64]*service.Type
+}
+
+func (sm *servicesManager) IncID() uint64 {
+	return atomic.AddUint64(&sm.svcID, 1)
+}
+
+func (sm *servicesManager) insert(svc *service.Type) {
+	sm.lock.Lock()
+	defer sm.lock.Unlock()
+
+	sm.list[svc.ID] = svc
+}
+
+// Type is a library implementation of the MQTT server that, as best it can, complies
 // with the MQTT 3.1 and 3.1.1 specs.
-type Server struct {
+type Type struct {
 	config Config
 
 	// authMgr is the authentication manager that we are going to use for authenticating
 	// incoming connections
 	authMgr *auth.Manager
 
-	// sessMgr is the sessions manager for keeping track of the sessions
-	sessMgr *sessions.Manager
+	// sessionsMgr is the sessions manager for keeping track of the sessions
+	sessionsMgr *session.Manager
 
 	// topicsMgr is the topics manager for keeping track of subscriptions
 	topicsMgr *topics.Manager
@@ -114,13 +113,6 @@ type Server struct {
 	// optional TLS config, used by ListenAndServeTLS
 	tlsConfig *tls.Config
 
-	// A list of services created by the server. We keep track of them so we can
-	// gracefully shut them down if they are still alive when the server goes down.
-	svcs []*service
-
-	// Mutex for updating svcs
-	//mu sync.Mutex
-
 	// A indicator on whether none secure server is running
 	running int32
 
@@ -130,10 +122,23 @@ type Server struct {
 	subs []interface{}
 	qoss []byte
 
-	waitServers sync.WaitGroup
+	waitServers   sync.WaitGroup
+	wgStopped     sync.WaitGroup
+	wgConnections sync.WaitGroup
+
+	services servicesManager
+
+	servicesExit chan uint64
 }
 
-// clneTLSConfig returns a shallow clone of cfg, or a new zero tls.Config if
+var appLog loggo.Logger
+
+func init() {
+	appLog = loggo.GetLogger("mq.server")
+	appLog.SetLogLevel(loggo.TRACE)
+}
+
+// cloneTLSConfig returns a shallow clone of cfg, or a new zero tls.Config if
 // cfg is nil. This is safe to call even if cfg is in active use by a TLS
 // client or server.
 func cloneTLSConfig(cfg *tls.Config) *tls.Config {
@@ -143,27 +148,27 @@ func cloneTLSConfig(cfg *tls.Config) *tls.Config {
 	return cfg.Clone()
 }
 
-// NewServer new server
-func NewServer(config Config) (*Server, error) {
-	s := Server{
+// New new server
+func New(config Config) (*Type, error) {
+	s := Type{
 		config: config,
 		quit:   make(chan struct{}),
 	}
 
 	if s.config.KeepAlive == 0 {
-		s.config.KeepAlive = DefaultKeepAlive
+		s.config.KeepAlive = surgemq.DefaultAckTimeout
 	}
 
 	if s.config.ConnectTimeout == 0 {
-		s.config.ConnectTimeout = DefaultConnectTimeout
+		s.config.ConnectTimeout = surgemq.DefaultConnectTimeout
 	}
 
 	if s.config.AckTimeout == 0 {
-		s.config.AckTimeout = DefaultAckTimeout
+		s.config.AckTimeout = surgemq.DefaultAckTimeout
 	}
 
 	if s.config.TimeoutRetries == 0 {
-		s.config.TimeoutRetries = DefaultTimeoutRetries
+		s.config.TimeoutRetries = surgemq.DefaultTimeoutRetries
 	}
 
 	if s.config.Authenticators == "" {
@@ -176,11 +181,7 @@ func NewServer(config Config) (*Server, error) {
 		return nil, err
 	}
 
-	if s.config.SessionsProvider == "" {
-		s.config.SessionsProvider = "mem"
-	}
-
-	s.sessMgr, err = sessions.NewManager(s.config.SessionsProvider)
+	s.sessionsMgr, err = session.NewManager()
 	if err != nil {
 		return nil, err
 	}
@@ -194,45 +195,14 @@ func NewServer(config Config) (*Server, error) {
 		return nil, err
 	}
 
+	s.services.list = make(map[uint64]*service.Type)
+
+	s.servicesExit = make(chan uint64, 1024)
+
+	s.wgStopped.Add(1)
+	go s.processDisconnects()
+
 	return &s, nil
-}
-
-func (s *Server) serve(l net.Listener) error {
-	defer l.Close() // nolint: errcheck
-
-	var tempDelay time.Duration // how long to sleep on accept failure
-
-	for {
-		conn, err := l.Accept()
-
-		if err != nil {
-			// http://zhen.org/blog/graceful-shutdown-of-go-net-dot-listeners/
-			select {
-			case <-s.quit:
-				return nil
-			default:
-			}
-
-			// Borrowed from go1.3.3/src/pkg/net/http/server.go:1699
-			if ne, ok := err.(net.Error); ok && ne.Temporary() {
-				if tempDelay == 0 {
-					tempDelay = 5 * time.Millisecond
-				} else {
-					tempDelay *= 2
-				}
-				if max := 1 * time.Second; tempDelay > max {
-					tempDelay = max
-				}
-				glog.Errorf("Accept error: %v; retrying in %v", err, tempDelay)
-				time.Sleep(tempDelay)
-				continue
-			}
-			return err
-		}
-
-		go s.handleConnection(conn) // nolint: errcheck
-	}
-	//return nil
 }
 
 // ListenAndServe listens to connections on the URI requested, and handles any
@@ -240,7 +210,7 @@ func (s *Server) serve(l net.Listener) error {
 // or if there's some critical error that stops the server from running. The URI
 // supplied should be of the form "protocol://host:port" that can be parsed by
 // url.Parse(). For example, an URI could be "tcp://0.0.0.0:1883".
-func (s *Server) ListenAndServe(uri string) error {
+func (s *Type) ListenAndServe(uri string) error {
 	defer atomic.CompareAndSwapInt32(&s.running, 1, 0)
 
 	if !atomic.CompareAndSwapInt32(&s.running, 0, 1) {
@@ -253,7 +223,6 @@ func (s *Server) ListenAndServe(uri string) error {
 	}
 
 	s.waitServers.Add(1)
-
 	defer s.waitServers.Done()
 
 	s.ln, err = net.Listen(u.Scheme, u.Host)
@@ -261,7 +230,7 @@ func (s *Server) ListenAndServe(uri string) error {
 		return err
 	}
 
-	glog.Infof("server/ListenAndServe: server is ready...")
+	appLog.Infof("server/ListenAndServe: server is ready...")
 
 	return s.serve(s.ln)
 }
@@ -271,7 +240,7 @@ func (s *Server) ListenAndServe(uri string) error {
 // or if there's some critical error that stops the server from running. The URI
 // supplied should be of the form "protocol://host:port" that can be parsed by
 // url.Parse(). For example, an URI could be "tcp://0.0.0.0:8883".
-func (s *Server) ListenAndServeTLS(uri string, certFile, keyFile string) error {
+func (s *Type) ListenAndServeTLS(uri string, certFile, keyFile string) error {
 	defer atomic.CompareAndSwapInt32(&s.runningTLS, 1, 0)
 
 	if !atomic.CompareAndSwapInt32(&s.runningTLS, 0, 1) {
@@ -305,7 +274,7 @@ func (s *Server) ListenAndServeTLS(uri string, certFile, keyFile string) error {
 
 	s.lnTLS = tls.NewListener(ln, config)
 
-	glog.Infof("server/ListenAndServeTLS: server is ready...")
+	appLog.Infof("server/ListenAndServeTLS: server is ready...")
 
 	return s.serve(s.lnTLS)
 }
@@ -315,10 +284,10 @@ func (s *Server) ListenAndServeTLS(uri string, certFile, keyFile string) error {
 // immediately after the message is sent to the outgoing buffer. For QOS 1 messages,
 // onComplete is called when PUBACK is received. For QOS 2 messages, onComplete is
 // called after the PUBCOMP message is received.
-func (s *Server) Publish(msg *message.PublishMessage, onComplete OnCompleteFunc) error {
+func (s *Type) Publish(msg *message.PublishMessage, onComplete surgemq.OnCompleteFunc) error {
 	if msg.Retain() {
 		if err := s.topicsMgr.Retain(msg); err != nil {
-			glog.Errorf("Error retaining message: %v", err)
+			appLog.Errorf("Error retaining message: %v", err)
 		}
 	}
 
@@ -328,14 +297,13 @@ func (s *Server) Publish(msg *message.PublishMessage, onComplete OnCompleteFunc)
 
 	msg.SetRetain(false)
 
-	//glog.Debugf("(server) Publishing to topic %q and %d subscribers", string(msg.Topic()), len(this.subs))
 	for _, s := range s.subs {
 		if s != nil {
-			if fn, ok := s.(*OnPublishFunc); !ok {
-				glog.Errorf("Invalid onPublish Function")
+			if fn, ok := s.(*surgemq.OnPublishFunc); !ok {
+				appLog.Errorf("Invalid onPublish Function")
 			} else {
 				if err := (*fn)(msg); err != nil {
-					glog.Errorf("Error onPublish Function")
+					appLog.Errorf("Error onPublish Function")
 				}
 			}
 		}
@@ -346,7 +314,7 @@ func (s *Server) Publish(msg *message.PublishMessage, onComplete OnCompleteFunc)
 
 // Close terminates the server by shutting down all the client connections and closing
 // the listener. It will, as best it can, clean up after itself.
-func (s *Server) Close() error {
+func (s *Type) Close() error {
 	// By closing the quit channel, we are telling the server to stop accepting new
 	// connection.
 	close(s.quit)
@@ -354,22 +322,35 @@ func (s *Server) Close() error {
 	// We then close the net.Listener, which will force Accept() to return if it's
 	// blocked waiting for new connections.
 	if s.ln != nil {
-		s.ln.Close() // nolint: errcheck
+		if err := s.ln.Close(); err != nil {
+			appLog.Errorf(err.Error())
+		}
 	}
 
 	if s.lnTLS != nil {
-		s.lnTLS.Close() // nolint: errcheck
+		if err := s.lnTLS.Close(); err != nil {
+			appLog.Errorf(err.Error())
+		}
 	}
 
 	s.waitServers.Wait()
+	s.wgConnections.Wait()
 
-	for _, svc := range s.svcs {
-		glog.Infof("Stopping service %d", svc.id)
-		svc.stop()
+	s.services.lock.Lock()
+	for i, svc := range s.services.list {
+		appLog.Infof("Stopping service %d", svc.ID)
+		svc.Stop()
+		delete(s.services.list, i)
 	}
 
-	if s.sessMgr != nil {
-		s.sessMgr.Close() // nolint: errcheck
+	s.services.lock.Unlock()
+
+	close(s.servicesExit)
+
+	s.wgStopped.Wait()
+
+	if s.sessionsMgr != nil {
+		s.sessionsMgr.Shutdown() // nolint: errcheck
 	}
 
 	if s.topicsMgr != nil {
@@ -379,10 +360,78 @@ func (s *Server) Close() error {
 	return nil
 }
 
-// HandleConnection is for the broker to handle an incoming connection from a client
-func (s *Server) handleConnection(c io.Closer) (*service, error) {
+func (s *Type) processDisconnects() {
+	defer s.wgStopped.Done()
+
+	loop := true
+	for loop {
+		select {
+		case id, ok := <-s.servicesExit:
+			if !ok {
+				loop = false
+				break
+			} else {
+				s.services.lock.Lock()
+				delete(s.services.list, id)
+				s.services.lock.Unlock()
+			}
+		}
+	}
+}
+
+func (s *Type) serve(l net.Listener) error {
+	//defer func() {
+	//	if err := l.Close(); err != nil {
+	//		appLog.Tracef("Close error: %v", err)
+	//	}
+	//}()
+
+	var tempDelay time.Duration // how long to sleep on accept failure
+
+	for {
+		var conn net.Conn
+		var err error
+
+		if conn, err = l.Accept(); err != nil {
+			// http://zhen.org/blog/graceful-shutdown-of-go-net-dot-listeners/
+			select {
+			case <-s.quit:
+				return nil
+			default:
+			}
+
+			// Borrowed from go1.3.3/src/pkg/net/http/server.go:1699
+			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+				if tempDelay == 0 {
+					tempDelay = 5 * time.Millisecond
+				} else {
+					tempDelay *= 2
+				}
+				if max := 1 * time.Second; tempDelay > max {
+					tempDelay = max
+				}
+				appLog.Errorf("Accept error: %v; retrying in %v", err, tempDelay)
+				time.Sleep(tempDelay)
+				continue
+			}
+			return err
+		}
+
+		s.wgConnections.Add(1)
+		go func() {
+			defer s.wgConnections.Done()
+
+			if err := s.handleConnection(conn); err != nil {
+				appLog.Errorf(err.Error())
+			}
+		}()
+	}
+}
+
+// handleConnection is for the broker to handle an incoming connection from a client
+func (s *Type) handleConnection(c io.Closer) error {
 	if c == nil {
-		return nil, ErrInvalidConnectionType
+		return surgemq.ErrInvalidConnectionType
 	}
 
 	var err error
@@ -395,7 +444,7 @@ func (s *Server) handleConnection(c io.Closer) (*service, error) {
 
 	conn, ok := c.(net.Conn)
 	if !ok {
-		return nil, ErrInvalidConnectionType
+		return surgemq.ErrInvalidConnectionType
 	}
 
 	// To establish a connection, we must
@@ -415,22 +464,23 @@ func (s *Server) handleConnection(c io.Closer) (*service, error) {
 
 	resp := message.NewConnAckMessage()
 
-	svc := &service{
-		client:         false,
-		connectTimeout: s.config.ConnectTimeout,
-		ackTimeout:     s.config.AckTimeout,
-		timeoutRetries: s.config.TimeoutRetries,
-		conn:           conn,
-		sessMgr:        s.sessMgr,
-		topicsMgr:      s.topicsMgr,
-	}
+	svc, _ := service.NewService(service.Config{
+		Client:         false,
+		ConnectTimeout: s.config.ConnectTimeout,
+		AckTimeout:     s.config.AckTimeout,
+		TimeoutRetries: s.config.TimeoutRetries,
+		Conn:           conn,
+		SessionMgr:     s.sessionsMgr,
+		TopicsMgr:      s.topicsMgr,
+		ExitSignal:     s.servicesExit,
+	})
 
 	var req *message.ConnectMessage
 
-	if req, err = getConnectMessage(conn); err != nil {
-		if cerr, ok := err.(message.ConnAckCode); ok {
-			//glog.Errorf("request   message: %s\nresponse message: %s\nerror           : %v", mreq, resp, err)
-			resp.SetReturnCode(cerr)
+	if req, err = service.GetConnectMessage(conn); err != nil {
+		if cErr, ok := err.(message.ConnAckCode); ok {
+			//appLog.Errorf("request   message: %s\nresponse message: %s\nerror           : %v", mreq, resp, err)
+			resp.SetReturnCode(cErr)
 		}
 	} else {
 		if req.UsernameFlag() {
@@ -449,16 +499,16 @@ func (s *Server) handleConnection(c io.Closer) (*service, error) {
 
 		if resp.ReturnCode() == message.ConnectionAccepted {
 			if req.KeepAlive() == 0 {
-				req.SetKeepAlive(minKeepAlive)
+				req.SetKeepAlive(surgemq.MinKeepAlive)
 			}
 
-			svc.keepAlive = int(req.KeepAlive())
-			svc.id = atomic.AddUint64(&gSvcID, 1)
+			svc.KeepAlive = int(req.KeepAlive())
+			svc.ID = s.services.IncID()
 
 			if err = s.getSession(svc, req, resp); err != nil {
 				resp.SetReturnCode(message.ErrServerUnavailable)
 				resp.SetSessionPresent(false)
-				glog.Errorf("server/handleConnection: session error: %s", err.Error())
+				appLog.Errorf("server/handleConnection: session error: %s", err.Error())
 			}
 		}
 
@@ -469,33 +519,28 @@ func (s *Server) handleConnection(c io.Closer) (*service, error) {
 
 	tmpErr := err
 
-	if err = writeMessage(c, resp); err != nil {
-		return nil, err
+	if err = service.WriteMessage(c, resp); err != nil {
+		return err
 	}
 
 	err = tmpErr
 
 	if resp.ReturnCode() == message.ConnectionAccepted {
-		svc.inStat.increment(int64(req.Len()))
-		svc.outStat.increment(int64(resp.Len()))
-
-		if err = svc.start(); err != nil {
-			svc.stop()
-			return nil, err
+		if err = svc.Start(int64(req.Len()), int64(resp.Len())); err != nil {
+			svc.Stop()
+			return err
 		}
 
-		//this.mu.Lock()
-		//this.svcs = append(this.svcs, svc)
-		//this.mu.Unlock()
+		s.services.insert(svc)
 
-		glog.Infof("(%s) server/handleConnection: Connection established.", svc.cid())
-		return svc, nil
+		appLog.Debugf("[%s] server/handleConnection: Connection established.", svc.CID())
+		return nil
 	}
 
-	return nil, err
+	return err
 }
 
-func (s *Server) getSession(svc *service, req *message.ConnectMessage, resp *message.ConnAckMessage) error {
+func (s *Type) getSession(svc *service.Type, req *message.ConnectMessage, resp *message.ConnAckMessage) error {
 	// If CleanSession is set to 0, the server MUST resume communications with the
 	// client based on state from the current session, as identified by the client
 	// identifier. If there is no session associated with the client identifier the
@@ -508,42 +553,47 @@ func (s *Server) getSession(svc *service, req *message.ConnectMessage, resp *mes
 
 	var err error
 
+	// Check to see if the client supplied an ID, if not, generate one and set
+	// clean session.
+	if len(req.ClientID()) == 0 {
+		req.SetClientID([]byte(fmt.Sprintf("internalclient%d", svc.ID))) // nolint: errcheck
+		req.SetCleanSession(true)
+	}
+
 	if s.config.ClientIDFromUser {
 		req.SetClientID(req.Username()) // nolint: errcheck
 	}
 
-	// Check to see if the client supplied an ID, if not, generate one and set
-	// clean session.
-	if len(req.ClientID()) == 0 {
-		req.SetClientID([]byte(fmt.Sprintf("internalclient%d", svc.id))) // nolint: errcheck
-		req.SetCleanSession(true)
-	}
+	clientID := string(req.ClientID())
 
-	cid := string(req.ClientID())
-
+	var ses *session.Type
 	// If CleanSession is NOT set, check the session store for existing session.
 	// If found, return it.
 	if !req.CleanSession() {
-		if svc.sess, err = s.sessMgr.Get(cid); err == nil {
+		if ses, err = s.sessionsMgr.Get(clientID); err == nil {
 			resp.SetSessionPresent(true)
 
-			if err := svc.sess.Update(req); err != nil {
+			if err := ses.Update(req); err != nil {
 				return err
 			}
+
+			svc.SetSession(ses)
 		}
 	}
 
 	// If CleanSession, or no existing session found, then create a new one
-	if svc.sess == nil {
-		if svc.sess, err = s.sessMgr.New(cid); err != nil {
+	if ses == nil {
+		if ses, err = s.sessionsMgr.New(clientID); err != nil {
 			return err
 		}
 
 		resp.SetSessionPresent(false)
 
-		if err := svc.sess.Init(req); err != nil {
+		if err := ses.Init(req); err != nil {
 			return err
 		}
+
+		svc.SetSession(ses)
 	}
 
 	return nil

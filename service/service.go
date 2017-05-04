@@ -20,10 +20,10 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"errors"
-	"github.com/surge/glog"
+	"github.com/juju/loggo"
+	"github.com/troian/surgemq/buffer"
 	"github.com/troian/surgemq/message"
-	"github.com/troian/surgemq/sessions"
+	"github.com/troian/surgemq/session"
 	"github.com/troian/surgemq/topics"
 )
 
@@ -44,54 +44,64 @@ func (s *stat) increment(n int64) {
 	atomic.AddInt64(&s.mSgs, 1)
 }
 
-var (
-	gSvcID uint64
-)
+// Config of service
+type Config struct {
+	Client bool
 
-type service struct {
+	// The number of seconds to keep the connection live if there's no data.
+	// If not set then default to 5 mins.
+	KeepAlive int
+
+	// The number of seconds to wait for the CONNACK message before disconnecting.
+	// If not set then default to 2 seconds.
+	ConnectTimeout int
+
+	// The number of seconds to wait for any ACK messages before failing.
+	// If not set then default to 20 seconds.
+	AckTimeout int
+
+	// The number of times to retry sending a packet if ACK is not received.
+	// If no set then default to 3 retries.
+	TimeoutRetries int
+
+	// Session manager for tracking all the clients
+	SessionMgr *session.Manager
+
+	// Topics manager for all the client subscriptions
+	TopicsMgr *topics.Manager
+
+	// Network connection for this service
+	Conn io.Closer
+
+	ExitSignal chan uint64
+}
+
+// Type of service
+type Type struct {
+	Config
+
 	// The ID of this service, it's not related to the Client ID, just a number that's
 	// incremented for every new service.
-	id uint64
+	ID uint64
 
 	// used during permissions check
 	//clientID string
 
-	// Is this a client or server. It's set by either Connect (client) or
-	// HandleConnection (server).
-	client bool
+	//// Session manager for tracking all the clients
+	//sessMgr *sessions.Manager
 
-	// The number of seconds to keep the connection live if there's no data.
-	// If not set then default to 5 mins.
-	keepAlive int
-
-	// The number of seconds to wait for the CONNACK message before disconnecting.
-	// If not set then default to 2 seconds.
-	connectTimeout int
-
-	// The number of seconds to wait for any ACK messages before failing.
-	// If not set then default to 20 seconds.
-	ackTimeout int
-
-	// The number of times to retry sending a packet if ACK is not received.
-	// If no set then default to 3 retries.
-	timeoutRetries int
-
-	// Network connection for this service
-	conn io.Closer
-
-	// Session manager for tracking all the clients
-	sessMgr *sessions.Manager
-
-	// Topics manager for all the client subscriptions
-	topicsMgr *topics.Manager
+	//// Topics manager for all the client subscriptions
+	//topicsMgr *topics.Manager
 
 	// sess is the session object for this MQTT session. It keeps track session variables
 	// such as ClientId, KeepAlive, Username, etc
-	sess *sessions.Session
+	sess *session.Type
 
 	// Wait for the various goroutines to finish starting and stopping
 	wgStarted sync.WaitGroup
 	wgStopped sync.WaitGroup
+
+	disconnectByServer bool
 
 	// writeMessage mutex - serializes writes to the outgoing buffer.
 	wmu sync.Mutex
@@ -104,10 +114,10 @@ type service struct {
 	done chan struct{}
 
 	// Incoming data buffer. Bytes are read from the connection and put in here.
-	in *buffer
+	in *buffer.Type
 
 	// Outgoing data buffer. Bytes written here are in turn written out to the connection.
-	out *buffer
+	out *buffer.Type
 
 	// onPub is the method that gets added to the topic subscribers list by the
 	// processSubscribe() method. When the server finishes the ack cycle for a
@@ -129,27 +139,49 @@ type service struct {
 	rmSgs []*message.PublishMessage
 }
 
-func (s *service) start() error {
+var appLog loggo.Logger
+
+func init() {
+	appLog = loggo.GetLogger("mq.service")
+	appLog.SetLogLevel(loggo.INFO)
+}
+
+// NewService alloc
+func NewService(config Config) (*Type, error) {
+	svc := &Type{
+		Config:             config,
+		disconnectByServer: false,
+	}
+
+	return svc, nil
+}
+
+// Start service
+func (s *Type) Start(inStat, outStat int64) error {
 	var err error
 
+	s.closed = 0
+	s.inStat.increment(inStat)
+	s.outStat.increment(outStat)
+
 	// Create the incoming ring buffer
-	s.in, err = newBuffer(defaultBufferSize)
+	s.in, err = buffer.New(buffer.DefaultBufferSize)
 	if err != nil {
 		return err
 	}
 
 	// Create the outgoing ring buffer
-	s.out, err = newBuffer(defaultBufferSize)
+	s.out, err = buffer.New(buffer.DefaultBufferSize)
 	if err != nil {
 		return err
 	}
 
 	// If this is a server
-	if !s.client {
+	if !s.Client {
 		// Create the onPublishFunc so it can be used for published messages
 		s.onPub = func(msg *message.PublishMessage) error {
-			if err := s.publish(msg, nil); err != nil {
-				glog.Errorf("service/onPublish: Error publishing message: %v", err)
+			if err := s.Publish(msg, nil); err != nil {
+				appLog.Errorf("service/onPublish: Error publishing message: %v", err)
 				return err
 			}
 
@@ -157,13 +189,26 @@ func (s *service) start() error {
 		}
 
 		// If this is a recovered session, then add any topics it subscribed before
-		topics, qoss, err := s.sess.Topics()
+		topics, err := s.sess.Topics()
 		if err != nil {
 			return err
 		}
 
-		for i, t := range topics {
-			s.topicsMgr.Subscribe([]byte(t), qoss[i], &s.onPub) // nolint: errcheck
+		for t, q := range *topics {
+			if _, err = s.TopicsMgr.Subscribe(t, q, &s.onPub); err != nil {
+				// error happened, un-subscribe to previously subscribed topics
+				for iT := range *topics {
+					if iT != t {
+						if err2 := s.TopicsMgr.UnSubscribe(iT, &s.onPub); err2 != nil {
+							appLog.Errorf(err2.Error())
+						}
+					} else {
+						break
+					}
+				}
+
+				return err
+			}
 		}
 	}
 
@@ -190,13 +235,12 @@ func (s *service) start() error {
 	return nil
 }
 
-// FIXME: The order of closing here causes panic sometimes. For example, if receiver
-// calls this, and closes the buffers, somehow it causes buffer.go:476 to panic.
-func (s *service) stop() {
+// Stop service
+func (s *Type) Stop() {
 	defer func() {
 		// Let's recover from panic
 		if r := recover(); r != nil {
-			glog.Errorf("(%s) Recovering from panic: %v", s.cid(), r)
+			appLog.Errorf("[%s] recovering from panic: %v", s.CID(), r)
 		}
 	}()
 
@@ -206,63 +250,70 @@ func (s *service) stop() {
 
 	// Close quit channel, effectively telling all the goroutines it's time to quit
 	if s.done != nil {
-		glog.Debugf("(%s) closing this.done", s.cid())
+		appLog.Debugf("[%s] closing done channel", s.CID())
 		close(s.done)
 	}
 
 	// Close the network connection
-	if s.conn != nil {
-		glog.Debugf("(%s) closing this.conn", s.cid())
-		s.conn.Close() // nolint: errcheck
+	if s.Conn != nil {
+		appLog.Debugf("[%s] closing network connection", s.CID())
+		if err := s.Conn.Close(); err != nil {
+			appLog.Errorf("close connection [%s] error: %s", s.CID(), err.Error())
+		}
 	}
 
-	s.in.Close()  // nolint: errcheck
-	s.out.Close() // nolint: errcheck
+	if err := s.in.Close(); err != nil {
+		appLog.Errorf("[%s] close input buffer error: %s", s.CID(), err.Error())
+	}
+
+	if err := s.out.Close(); err != nil {
+		appLog.Errorf("[%s] close output buffer error: %s", s.CID(), err.Error())
+	}
 
 	// Wait for all the goroutines to stop.
 	s.wgStopped.Wait()
 
-	glog.Debugf("(%s) Received %d bytes in %d messages.", s.cid(), s.inStat.bytes, s.inStat.mSgs)
-	glog.Debugf("(%s) Sent %d bytes in %d messages.", s.cid(), s.outStat.bytes, s.outStat.mSgs)
+	appLog.Debugf("[%s] received %d bytes in %d messages.", s.CID(), s.inStat.bytes, s.inStat.mSgs)
+	appLog.Debugf("[%s] sent %d bytes in %d messages.", s.CID(), s.outStat.bytes, s.outStat.mSgs)
 
-	// UnSubscribe from all the topics for this client, only for the server side though
-	if !s.client && s.sess != nil {
-		topics, _, err := s.sess.Topics()
-		if err != nil {
-			glog.Errorf("(%s/%d): %v", s.cid(), s.id, err)
-		} else {
-			for _, t := range topics {
-				if err := s.topicsMgr.UnSubscribe([]byte(t), &s.onPub); err != nil {
-					glog.Errorf("(%s): Error unsubscribing topic %q: %v", s.cid(), t, err)
+	if !s.Client {
+		if s.sess != nil {
+			// UnSubscribe from all the topics for this client, only for the server side though
+			if topics, err := s.sess.Topics(); err != nil {
+				appLog.Errorf("[%s]: %v", s.CID(), err)
+			} else {
+				for t := range *topics {
+					if err := s.TopicsMgr.UnSubscribe(t, &s.onPub); err != nil {
+						appLog.Errorf("[%s]: error unsubscribing topic %q: %v", s.CID(), t, err)
+					}
 				}
 			}
+
+			// Publish will message if WillFlag is set
+			if s.sess.Will != nil {
+				appLog.Infof("[%s] service/stop: connection unexpectedly closed. Sending Will.", s.CID())
+				s.onPublish(s.sess.Will) // nolint: errcheck
+			}
 		}
-	}
-
-	// Publish will message if WillFlag is set. Server side only.
-	if !s.client && s.sess.CMsg.WillFlag() {
-		glog.Infof("(%s) service/stop: connection unexpectedly closed. Sending Will.", s.cid())
-		s.onPublish(s.sess.Will) // nolint: errcheck
-	}
-
-	// Remove the client topics manager
-	if s.client {
+	} else {
+		// Remove the client topics manager
 		topics.UnRegister(s.sess.ID())
 	}
 
-	// Remove the session from session store if it's suppose to be clean session
-	if s.sess.CMsg.CleanSession() && s.sessMgr != nil {
-		s.sessMgr.Del(s.sess.ID())
+	// Remove the session from sessions store if it's suppose to be clean session
+	if s.sess != nil && s.sess.IsClean() {
+		s.SessionMgr.Del(s.sess.ID())
 	}
 
-	s.conn = nil
+	s.Conn = nil
 	s.in = nil
 	s.out = nil
 }
 
-func (s *service) publish(msg *message.PublishMessage, onComplete OnCompleteFunc) error {
+// Publish send message
+func (s *Type) Publish(msg *message.PublishMessage, onComplete OnCompleteFunc) error {
 	if _, err := s.writeMessage(msg); err != nil {
-		return fmt.Errorf("(%s) Error sending %s message: %v", s.cid(), msg.Name(), err)
+		return fmt.Errorf("[%s] couldn't send [%s] message: %v", s.CID(), msg.Name(), err)
 	}
 
 	switch msg.QoS() {
@@ -272,10 +323,8 @@ func (s *service) publish(msg *message.PublishMessage, onComplete OnCompleteFunc
 		}
 
 		return nil
-
 	case message.QosAtLeastOnce:
 		return s.sess.Pub1ack.Wait(msg, onComplete)
-
 	case message.QosExactlyOnce:
 		return s.sess.Pub2out.Wait(msg, onComplete)
 	}
@@ -283,14 +332,15 @@ func (s *service) publish(msg *message.PublishMessage, onComplete OnCompleteFunc
 	return nil
 }
 
-func (s *service) subscribe(msg *message.SubscribeMessage, onComplete OnCompleteFunc, onPublish OnPublishFunc) error {
+// Subscribe send message
+func (s *Type) Subscribe(msg *message.SubscribeMessage, onComplete OnCompleteFunc, onPublish OnPublishFunc) error {
 	if onPublish == nil {
-		return errors.New("onPublish function is nil. No need to subscribe")
+		return message.ErrOnPublishNil
 	}
 
 	_, err := s.writeMessage(msg)
 	if err != nil {
-		return fmt.Errorf("(%s) Error sending %s message: %v", s.cid(), msg.Name(), err)
+		return fmt.Errorf("[%s] couldn't send [%s] message: %v", s.CID(), msg.Name(), err)
 	}
 
 	var onc OnCompleteFunc = func(msg, ack message.Message, err error) error {
@@ -307,7 +357,7 @@ func (s *service) subscribe(msg *message.SubscribeMessage, onComplete OnComplete
 		sub, ok := msg.(*message.SubscribeMessage)
 		if !ok {
 			if onComplete != nil {
-				return onComplete(msg, ack, errors.New("Invalid SubscribeMessage received"))
+				return onComplete(msg, ack, message.ErrInvalidUnSubscribe)
 			}
 			return nil
 		}
@@ -315,15 +365,14 @@ func (s *service) subscribe(msg *message.SubscribeMessage, onComplete OnComplete
 		subAck, ok := ack.(*message.SubAckMessage)
 		if !ok {
 			if onComplete != nil {
-				return onComplete(msg, ack, errors.New("Invalid SubackMessage received"))
+				return onComplete(msg, ack, message.ErrInvalidUnSubAck)
 			}
 			return nil
 		}
 
 		if sub.PacketID() != subAck.PacketID() {
 			if onComplete != nil {
-				fmtMsg := "Sub and Suback packet ID not the same. %d != %d"
-				return onComplete(msg, ack, fmt.Errorf(fmtMsg, sub.PacketID(), subAck.PacketID()))
+				return onComplete(msg, ack, message.ErrPackedIDNotMatched)
 			}
 			return nil
 		}
@@ -348,7 +397,7 @@ func (s *service) subscribe(msg *message.SubscribeMessage, onComplete OnComplete
 				err2 = fmt.Errorf("Failed to subscribe to '%s'\n%v", string(t), err2)
 			} else {
 				s.sess.AddTopic(string(t), c) // nolint: errcheck
-				_, err := s.topicsMgr.Subscribe(t, c, &onPublish)
+				_, err := s.TopicsMgr.Subscribe(string(t), c, &onPublish)
 				if err != nil {
 					err2 = fmt.Errorf("Failed to subscribe to '%s' (%v)\n%v", string(t), err, err2)
 				}
@@ -365,9 +414,10 @@ func (s *service) subscribe(msg *message.SubscribeMessage, onComplete OnComplete
 	return s.sess.SubAck.Wait(msg, onc)
 }
 
-func (s *service) unSubscribe(msg *message.UnSubscribeMessage, onComplete OnCompleteFunc) error {
+// UnSubscribe send message
+func (s *Type) UnSubscribe(msg *message.UnSubscribeMessage, onComplete OnCompleteFunc) error {
 	if _, err := s.writeMessage(msg); err != nil {
-		return fmt.Errorf("(%s) Error sending %s message: %v", s.cid(), msg.Name(), err)
+		return fmt.Errorf("[%s] couldn't send [%s] message: %v", s.CID(), msg.Name(), err)
 	}
 
 	var onc OnCompleteFunc = func(msg, ack message.Message, err error) error {
@@ -383,7 +433,7 @@ func (s *service) unSubscribe(msg *message.UnSubscribeMessage, onComplete OnComp
 		unSub, ok := msg.(*message.UnSubscribeMessage)
 		if !ok {
 			if onComplete != nil {
-				return onComplete(msg, ack, errors.New("Invalid UnsubscribeMessage received"))
+				return onComplete(msg, ack, message.ErrInvalidUnSubscribe)
 			}
 			return nil
 		}
@@ -391,14 +441,14 @@ func (s *service) unSubscribe(msg *message.UnSubscribeMessage, onComplete OnComp
 		unSubAck, ok := ack.(*message.UnSubAckMessage)
 		if !ok {
 			if onComplete != nil {
-				return onComplete(msg, ack, errors.New("Invalid UnsubackMessage received"))
+				return onComplete(msg, ack, message.ErrInvalidUnSubAck)
 			}
 			return nil
 		}
 
 		if unSub.PacketID() != unSubAck.PacketID() {
 			if onComplete != nil {
-				return onComplete(msg, ack, fmt.Errorf("Unsub and Unsuback packet ID not the same. %d != %d", unSub.PacketID(), unSubAck.PacketID()))
+				return onComplete(msg, ack, message.ErrPackedIDNotMatched)
 			}
 			return nil
 		}
@@ -408,7 +458,7 @@ func (s *service) unSubscribe(msg *message.UnSubscribeMessage, onComplete OnComp
 		for _, tb := range unSub.Topics() {
 			// Remove all subscribers, which basically it's just this client, since
 			// each client has it's own topic tree.
-			err := s.topicsMgr.UnSubscribe(tb, nil)
+			err := s.TopicsMgr.UnSubscribe(string(tb), nil)
 			if err != nil {
 				err2 = fmt.Errorf("%v\n%v", err2, err)
 			}
@@ -426,18 +476,20 @@ func (s *service) unSubscribe(msg *message.UnSubscribeMessage, onComplete OnComp
 	return s.sess.UnSubAck.Wait(msg, onc)
 }
 
-func (s *service) ping(onComplete OnCompleteFunc) error {
+// Ping service
+func (s *Type) Ping(onComplete OnCompleteFunc) error {
 	msg := message.NewPingReqMessage()
 
 	_, err := s.writeMessage(msg)
 	if err != nil {
-		return fmt.Errorf("(%s) Error sending %s message: %v", s.cid(), msg.Name(), err)
+		return fmt.Errorf("[%s] couldn't send [%s] message: %v", s.CID(), msg.Name(), err)
 	}
 
 	return s.sess.PingAck.Wait(msg, onComplete)
 }
 
-func (s *service) isDone() bool {
+// IsDone is service finished
+func (s *Type) IsDone() bool {
 	select {
 	case <-s.done:
 		return true
@@ -448,6 +500,12 @@ func (s *service) isDone() bool {
 	return false
 }
 
-func (s *service) cid() string {
-	return fmt.Sprintf("%d/%s", s.id, s.sess.ID())
+// CID get service id
+func (s *Type) CID() string {
+	return fmt.Sprintf("%d/%s", s.ID, s.sess.ID())
+}
+
+// SetSession set service session
+func (s *Type) SetSession(ses *session.Type) {
+	s.sess = ses
 }

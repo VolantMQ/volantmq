@@ -56,13 +56,16 @@ var (
 	providers = make(map[string]Provider)
 )
 
+// Topics map
+type Topics map[string]byte
+
 // Provider interface
 type Provider interface {
-	Subscribe(topic []byte, qos byte, subscriber interface{}) (byte, error)
-	UnSubscribe(topic []byte, subscriber interface{}) error
-	Subscribers(topic []byte, qos byte, subs *[]interface{}, qoss *[]byte) error
+	Subscribe(topic string, qos byte, subscriber interface{}) (byte, error)
+	UnSubscribe(topic string, subscriber interface{}) error
+	Subscribers(topic string, qos byte, subs *[]interface{}, qoss *[]byte) error
 	Retain(msg *message.PublishMessage) error
-	Retained(topic []byte, msgs *[]*message.PublishMessage) error
+	Retained(topic string, msgs *[]*message.PublishMessage) error
 	Close() error
 }
 
@@ -100,17 +103,17 @@ func NewManager(providerName string) (*Manager, error) {
 }
 
 // Subscribe to topic
-func (m *Manager) Subscribe(topic []byte, qos byte, subscriber interface{}) (byte, error) {
+func (m *Manager) Subscribe(topic string, qos byte, subscriber interface{}) (byte, error) {
 	return m.p.Subscribe(topic, qos, subscriber)
 }
 
 // UnSubscribe from topic
-func (m *Manager) UnSubscribe(topic []byte, subscriber interface{}) error {
+func (m *Manager) UnSubscribe(topic string, subscriber interface{}) error {
 	return m.p.UnSubscribe(topic, subscriber)
 }
 
 // Subscribers get
-func (m *Manager) Subscribers(topic []byte, qos byte, subs *[]interface{}, qoss *[]byte) error {
+func (m *Manager) Subscribers(topic string, qos byte, subs *[]interface{}, qoss *[]byte) error {
 	return m.p.Subscribers(topic, qos, subs, qoss)
 }
 
@@ -120,7 +123,7 @@ func (m *Manager) Retain(msg *message.PublishMessage) error {
 }
 
 // Retained messages
-func (m *Manager) Retained(topic []byte, msgs *[]*message.PublishMessage) error {
+func (m *Manager) Retained(topic string, msgs *[]*message.PublishMessage) error {
 	return m.p.Retained(topic, msgs)
 }
 

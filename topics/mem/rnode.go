@@ -22,7 +22,7 @@ func newRNode() *rNode {
 	}
 }
 
-func (rn *rNode) insert(topic []byte, msg *message.PublishMessage) error {
+func (rn *rNode) insert(topic string, msg *message.PublishMessage) error {
 	// If there's no more topic levels, that means we are at the matching rnode.
 	if len(topic) == 0 {
 		l := msg.Len()
@@ -59,7 +59,7 @@ func (rn *rNode) insert(topic []byte, msg *message.PublishMessage) error {
 		return err
 	}
 
-	level := string(ntl)
+	level := ntl
 
 	// Add sNode if it doesn't already exist
 	n, ok := rn.nodes[level]
@@ -72,7 +72,7 @@ func (rn *rNode) insert(topic []byte, msg *message.PublishMessage) error {
 }
 
 // Remove the retained message for the supplied topic
-func (rn *rNode) remove(topic []byte) error {
+func (rn *rNode) remove(topic string) error {
 	// If the topic is empty, it means we are at the final matching rnode. If so,
 	// let's remove the buffer and message.
 	if len(topic) == 0 {
@@ -90,7 +90,7 @@ func (rn *rNode) remove(topic []byte) error {
 		return err
 	}
 
-	level := string(ntl)
+	level := ntl
 
 	// Find the rNode that matches the topic level
 	n, ok := rn.nodes[level]
@@ -114,7 +114,7 @@ func (rn *rNode) remove(topic []byte) error {
 // match() finds the retained messages for the topic and qos provided. It's somewhat
 // of a reverse match compare to match() since the supplied topic can contain
 // wildcards, whereas the retained message topic is a full (no wildcard) topic.
-func (rn *rNode) match(topic []byte, msgs *[]*message.PublishMessage) error {
+func (rn *rNode) match(topic string, msgs *[]*message.PublishMessage) error {
 	// If the topic is empty, it means we are at the final matching rNode. If so,
 	// add the retained msg to the list.
 	if len(topic) == 0 {
@@ -130,7 +130,7 @@ func (rn *rNode) match(topic []byte, msgs *[]*message.PublishMessage) error {
 		return err
 	}
 
-	level := string(ntl)
+	level := ntl
 
 	if level == topics.MWC {
 		// If '#', add all retained messages starting this node

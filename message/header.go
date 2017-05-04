@@ -79,9 +79,9 @@ func (h *header) Type() Type {
 
 // SetType sets the message type of this message. It also correctly sets the
 // default flags for the message type. It returns an error if the type is invalid.
-func (h *header) SetType(mtype Type) error {
-	if !mtype.Valid() {
-		return fmt.Errorf("header/SetType: Invalid control packet type %d", mtype)
+func (h *header) SetType(mType Type) error {
+	if !mType.Valid() {
+		return fmt.Errorf("header/SetType: Invalid control packet type %d", mType)
 	}
 
 	// Notice we don't set the message to be dirty when we are not allocating a new
@@ -93,7 +93,7 @@ func (h *header) SetType(mtype Type) error {
 		h.dirty = true
 	}
 
-	h.mTypeFlags[0] = byte(mtype)<<4 | (mtype.DefaultFlags() & 0xf)
+	h.mTypeFlags[0] = byte(mType)<<4 | (mType.DefaultFlags() & 0xf)
 
 	return nil
 }
