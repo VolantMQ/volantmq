@@ -369,13 +369,13 @@ func (s *Type) onPublish(msg *message.PublishMessage) error {
 	appLog.Debugf("(%s) Publishing to topic %q and %d subscribers", s.CID(), msg.Topic(), len(subscribers))
 	for _, s := range subscribers {
 		if s != nil {
-			fn, ok := s.(*OnPublishFunc)
-			if !ok {
-				appLog.Errorf("Invalid onPublish Function")
-				return errors.New("Invalid onPublish Function")
-			}
 
-			(*fn)(msg) // nolint: errcheck
+			if onPub, ok := s.(*OnPublishFunc); !ok {
+				appLog.Errorf("Invalid onPublish Function")
+				continue
+			} else {
+				(*onPub)(msg) // nolint: errcheck
+			}
 		}
 	}
 

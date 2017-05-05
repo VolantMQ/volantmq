@@ -132,12 +132,13 @@ func (mT *provider) Close() error {
 	return nil
 }
 
+// nolint
 const (
 	stateCHR byte = iota // Regular character
 	stateMWC             // Multi-level wildcard
 	stateSWC             // Single-level wildcard
-	//stateSEP             // Topic level separator
-	stateSYS // System level topic ($)
+	stateSEP             // Topic level separator
+	stateSYS             // System level topic ($)
 )
 
 // Returns topic level, remaining topic levels and any errors

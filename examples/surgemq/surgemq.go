@@ -21,8 +21,9 @@ import (
 	"os/signal"
 	"runtime/pprof"
 
-	"github.com/surge/glog"
+	"github.com/juju/loggo"
 	"github.com/troian/surgemq"
+	"github.com/troian/surgemq/auth"
 	"github.com/troian/surgemq/server"
 	"syscall"
 )
@@ -58,6 +59,8 @@ func init() {
 	flag.Parse()
 }
 
+var appLog loggo.Logger
+
 func main() {
 	var f *os.File
 
@@ -84,10 +87,10 @@ func main() {
 	signal.Notify(sigchan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-sigchan
-		glog.Errorf("Existing due to trapped signal; %v", sig)
+		appLog.Errorf("Existing due to trapped signal; %v", sig)
 
 		if f != nil {
-			glog.Errorf("Stopping profile")
+			appLog.Errorf("Stopping profile")
 			pprof.StopCPUProfile()
 			f.Close() // nolint: errcheck
 		}
@@ -96,8 +99,6 @@ func main() {
 
 		os.Exit(0)
 	}()
-
-	mqttaddr := "tcp://:1883"
 
 	if len(wsAddr) > 0 || len(wssAddr) > 0 {
 		addr := "tcp://127.0.0.1:1883"
@@ -112,9 +113,21 @@ func main() {
 		}
 	}
 
-	/* create plain MQTT listener */
-	err = svr.ListenAndServe(mqttaddr)
+	authMng, err := auth.NewManager("mockSuccess")
 	if err != nil {
-		glog.Errorf("surgemq/main: %v", err)
+		appLog.Errorf("Couldn't register *mockSuccess* auth provider: %s", err.Error())
+		return
+	}
+
+	config := &server.Listener{
+		Scheme:      "tcp",
+		Host:        "127.0.0.1",
+		Port:        1883,
+		AuthManager: authMng,
+	}
+	/* create plain MQTT listener */
+	err = svr.ListenAndServe(config)
+	if err != nil {
+		appLog.Errorf("surgemq/main: %v", err)
 	}
 }

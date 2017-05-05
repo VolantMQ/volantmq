@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,6 +31,7 @@ import (
 	"github.com/troian/surgemq/service"
 	"github.com/troian/surgemq/session"
 	"github.com/troian/surgemq/topics"
+	"strconv"
 )
 
 // Config server configuration
@@ -87,6 +87,21 @@ func (sm *servicesManager) insert(svc *service.Type) {
 	sm.list[svc.ID] = svc
 }
 
+// Listener listener
+type Listener struct {
+	Scheme      string
+	Host        string
+	Port        int
+	CertFile    string
+	KeyFile     string
+	AuthManager *auth.Manager
+	listener    net.Listener
+	tlsConfig   *tls.Config
+	// The quit channel for the server. If the server detects that this channel
+	// is closed, then it's a signal for it to shutdown as well.
+	quit chan struct{}
+}
+
 // Type is a library implementation of the MQTT server that, as best it can, complies
 // with the MQTT 3.1 and 3.1.1 specs.
 type Type struct {
@@ -106,22 +121,13 @@ type Type struct {
 	// is closed, then it's a signal for it to shutdown as well.
 	quit chan struct{}
 
-	ln    net.Listener
-	lnTLS net.Listener
-
-	// optional TLS config, used by ListenAndServeTLS
-	tlsConfig *tls.Config
-
-	// A indicator on whether none secure server is running
-	running int32
-
-	// A indicator on whether secure server is running
-	runningTLS int32
+	listeners   map[int]*Listener
+	wgListeners sync.WaitGroup
+	lLock       sync.Mutex
 
 	subs []interface{}
 	qoss []message.QosType
 
-	waitServers   sync.WaitGroup
 	wgStopped     sync.WaitGroup
 	wgConnections sync.WaitGroup
 
@@ -136,21 +142,15 @@ func init() {
 	appLog.SetLogLevel(loggo.TRACE)
 }
 
-// cloneTLSConfig returns a shallow clone of cfg, or a new zero tls.Config if
-// cfg is nil. This is safe to call even if cfg is in active use by a TLS
-// client or server.
-func cloneTLSConfig(cfg *tls.Config) *tls.Config {
-	if cfg == nil {
-		return &tls.Config{}
-	}
-	return cfg.Clone()
-}
-
 // New new server
 func New(config Config) (*Type, error) {
 	s := Type{
-		config: config,
-		quit:   make(chan struct{}),
+		config:    config,
+		quit:      make(chan struct{}),
+		listeners: make(map[int]*Listener),
+		services: servicesManager{
+			list: make(map[uint64]*service.Type),
+		},
 	}
 
 	if s.config.KeepAlive == 0 {
@@ -193,8 +193,6 @@ func New(config Config) (*Type, error) {
 		return nil, err
 	}
 
-	s.services.list = make(map[uint64]*service.Type)
-
 	//s.servicesExit = make(chan uint64, 1024)
 
 	//s.wgStopped.Add(1)
@@ -208,78 +206,51 @@ func New(config Config) (*Type, error) {
 // or if there's some critical error that stops the server from running. The URI
 // supplied should be of the form "protocol://host:port" that can be parsed by
 // url.Parse(). For example, an URI could be "tcp://0.0.0.0:1883".
-func (s *Type) ListenAndServe(uri string) error {
-	defer atomic.CompareAndSwapInt32(&s.running, 1, 0)
+func (s *Type) ListenAndServe(listener *Listener) error {
+	var err error
 
-	if !atomic.CompareAndSwapInt32(&s.running, 0, 1) {
-		return errors.New("server/ListenAndServe: Server is already running")
-	}
+	if listener.CertFile != "" && listener.KeyFile != "" {
+		listener.tlsConfig = &tls.Config{
+			Certificates: make([]tls.Certificate, 1),
+		}
 
-	u, err := url.Parse(uri)
-	if err != nil {
-		return err
-	}
-
-	s.waitServers.Add(1)
-	defer s.waitServers.Done()
-
-	s.ln, err = net.Listen(u.Scheme, u.Host)
-	if err != nil {
-		return err
-	}
-
-	appLog.Infof("mqtt server is ready...")
-
-	err = s.serve(s.ln)
-
-	appLog.Infof("mqtt server stopped")
-	return err
-}
-
-// ListenAndServeTLS listens to connections on the URI requested, and handles any
-// incoming MQTT client sessions. It should not return until Close() is called
-// or if there's some critical error that stops the server from running. The URI
-// supplied should be of the form "protocol://host:port" that can be parsed by
-// url.Parse(). For example, an URI could be "tcp://0.0.0.0:8883".
-func (s *Type) ListenAndServeTLS(uri string, certFile, keyFile string) error {
-	defer atomic.CompareAndSwapInt32(&s.runningTLS, 1, 0)
-
-	if !atomic.CompareAndSwapInt32(&s.runningTLS, 0, 1) {
-		return errors.New("server/ListenAndServeTLS: Server is already running")
-	}
-
-	u, err := url.Parse(uri)
-	if err != nil {
-		return err
-	}
-
-	config := cloneTLSConfig(s.tlsConfig)
-	configHasCert := len(config.Certificates) > 0 || config.GetCertificate != nil
-	if !configHasCert || certFile != "" || keyFile != "" {
-		config.Certificates = make([]tls.Certificate, 1)
-		config.Certificates[0], err = tls.LoadX509KeyPair(certFile, keyFile)
+		listener.tlsConfig.Certificates[0], err = tls.LoadX509KeyPair(listener.CertFile, listener.KeyFile)
 		if err != nil {
+			listener.tlsConfig = nil
 			return err
 		}
+
 	}
 
-	s.waitServers.Add(1)
-	defer s.waitServers.Done()
-
 	var ln net.Listener
-
-	ln, err = net.Listen(u.Scheme, u.Host)
-	if err != nil {
+	if ln, err = net.Listen(listener.Scheme, listener.Host+":"+strconv.Itoa(listener.Port)); err != nil {
 		return err
 	}
 
-	s.lnTLS = tls.NewListener(ln, config)
+	if listener.tlsConfig != nil {
+		listener.listener = tls.NewListener(ln, listener.tlsConfig)
+	} else {
+		listener.listener = ln
+	}
 
-	appLog.Infof("mqtts server is ready...")
+	s.lLock.Lock()
+	if _, ok := s.listeners[listener.Port]; !ok {
+		listener.quit = s.quit
+		s.listeners[listener.Port] = listener
+		s.lLock.Unlock()
 
-	err = s.serve(s.lnTLS)
+		s.wgListeners.Add(1)
+		defer s.wgListeners.Done()
 
-	appLog.Infof("mqtts server stopped")
+		appLog.Infof("mqtt server on [%s://%s:%d] is ready...", listener.Scheme, listener.Host, listener.Port)
+
+		err = s.serve(listener)
+
+		appLog.Infof("mqtt server on [%s://%s:%d] stopped", listener.Scheme, listener.Host, listener.Port)
+	} else {
+		s.lLock.Unlock()
+		err = errors.New("Listener already exists")
+	}
 
 	return err
 }
@@ -324,21 +295,16 @@ func (s *Type) Close() error {
 	// connection.
 	close(s.quit)
 
-	// We then close the net.Listener, which will force Accept() to return if it's
+	// We then close all net.Listener, which will force Accept() to return if it's
 	// blocked waiting for new connections.
-	if s.ln != nil {
-		if err := s.ln.Close(); err != nil {
+
+	for _, l := range s.listeners {
+		if err := l.listener.Close(); err != nil {
 			appLog.Errorf(err.Error())
 		}
 	}
 
-	if s.lnTLS != nil {
-		if err := s.lnTLS.Close(); err != nil {
-			appLog.Errorf(err.Error())
-		}
-	}
-
-	s.waitServers.Wait()
+	s.wgListeners.Wait()
 	s.wgConnections.Wait()
 
 	s.services.lock.Lock()
@@ -362,9 +328,9 @@ func (s *Type) Close() error {
 	return nil
 }
 
-func (s *Type) serve(l net.Listener) error {
+func (s *Type) serve(l *Listener) error {
 	defer func() {
-		l.Close() // nolint: errcheck
+		l.listener.Close() // nolint: errcheck
 	}()
 
 	var tempDelay time.Duration // how long to sleep on accept failure
@@ -373,7 +339,7 @@ func (s *Type) serve(l net.Listener) error {
 		var conn net.Conn
 		var err error
 
-		if conn, err = l.Accept(); err != nil {
+		if conn, err = l.listener.Accept(); err != nil {
 			// http://zhen.org/blog/graceful-shutdown-of-go-net-dot-listeners/
 			select {
 			case <-s.quit:
@@ -401,13 +367,13 @@ func (s *Type) serve(l net.Listener) error {
 		s.wgConnections.Add(1)
 		go func() {
 			defer s.wgConnections.Done()
-			s.handleConnection(conn) // nolint: errcheck
+			s.handleConnection(conn, l.AuthManager) // nolint: errcheck
 		}()
 	}
 }
 
 // handleConnection is for the broker to handle an incoming connection from a client
-func (s *Type) handleConnection(c io.Closer) error {
+func (s *Type) handleConnection(c io.Closer, authMng *auth.Manager) error {
 	if c == nil {
 		return surgemq.ErrInvalidConnectionType
 	}
@@ -463,7 +429,7 @@ func (s *Type) handleConnection(c io.Closer) error {
 		}
 	} else {
 		if req.UsernameFlag() {
-			if err = s.authMgr.Password(string(req.Username()), string(req.Password())); err == nil {
+			if err = authMng.Password(string(req.Username()), string(req.Password())); err == nil {
 				resp.SetReturnCode(message.ConnectionAccepted)
 			} else {
 				resp.SetReturnCode(message.ErrBadUsernameOrPassword)
