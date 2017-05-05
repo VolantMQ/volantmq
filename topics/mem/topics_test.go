@@ -267,7 +267,7 @@ func TestSNodeMatch1(t *testing.T) {
 	n.insert(topic, 1, "sub1") // nolint: errcheck
 
 	subs := make([]interface{}, 0, 5)
-	qoss := make([]byte, 0, 5)
+	qoss := make([]message.QosType, 0, 5)
 
 	err := n.match("sport/tennis/player1/anzel", 1, &subs, &qoss)
 
@@ -282,7 +282,7 @@ func TestSNodeMatch2(t *testing.T) {
 	n.insert(topic, 1, "sub1") // nolint: errcheck
 
 	subs := make([]interface{}, 0, 5)
-	qoss := make([]byte, 0, 5)
+	qoss := make([]message.QosType, 0, 5)
 
 	err := n.match("sport/tennis/player1/anzel", 1, &subs, &qoss)
 
@@ -297,7 +297,7 @@ func TestSNodeMatch3(t *testing.T) {
 	n.insert(topic, 2, "sub1") // nolint: errcheck
 
 	subs := make([]interface{}, 0, 5)
-	qoss := make([]byte, 0, 5)
+	qoss := make([]message.QosType, 0, 5)
 
 	err := n.match("sport/tennis/player1/anzel", 2, &subs, &qoss)
 
@@ -311,7 +311,7 @@ func TestSNodeMatch4(t *testing.T) {
 	n.insert("sport/tennis/#", 2, "sub1") // nolint: errcheck
 
 	subs := make([]interface{}, 0, 5)
-	qoss := make([]byte, 0, 5)
+	qoss := make([]message.QosType, 0, 5)
 
 	err := n.match("sport/tennis/player1/anzel", 2, &subs, &qoss)
 
@@ -326,7 +326,7 @@ func TestSNodeMatch5(t *testing.T) {
 	n.insert("sport/tennis/player1/anzel", 1, "sub2") // nolint: errcheck
 
 	subs := make([]interface{}, 0, 5)
-	qoss := make([]byte, 0, 5)
+	qoss := make([]message.QosType, 0, 5)
 
 	err := n.match("sport/tennis/player1/anzel", 1, &subs, &qoss)
 
@@ -340,7 +340,7 @@ func TestSNodeMatch6(t *testing.T) {
 	n.insert("sport/tennis", 1, "sub2")   // nolint: errcheck
 
 	subs := make([]interface{}, 0, 5)
-	qoss := make([]byte, 0, 5)
+	qoss := make([]message.QosType, 0, 5)
 
 	err := n.match("sport/tennis/player1/anzel", 2, &subs, &qoss)
 
@@ -354,7 +354,7 @@ func TestSNodeMatch7(t *testing.T) {
 	n.insert("+/+", 2, "sub1") // nolint: errcheck
 
 	subs := make([]interface{}, 0, 5)
-	qoss := make([]byte, 0, 5)
+	qoss := make([]message.QosType, 0, 5)
 
 	err := n.match("/finance", 1, &subs, &qoss)
 
@@ -367,7 +367,7 @@ func TestSNodeMatch8(t *testing.T) {
 	n.insert("/+", 2, "sub1") // nolint: errcheck
 
 	subs := make([]interface{}, 0, 5)
-	qoss := make([]byte, 0, 5)
+	qoss := make([]message.QosType, 0, 5)
 
 	err := n.match("/finance", 1, &subs, &qoss)
 
@@ -380,7 +380,7 @@ func TestSNodeMatch9(t *testing.T) {
 	n.insert("+", 2, "sub1") // nolint: errcheck
 
 	subs := make([]interface{}, 0, 5)
-	qoss := make([]byte, 0, 5)
+	qoss := make([]message.QosType, 0, 5)
 
 	err := n.match("/finance", 1, &subs, &qoss)
 
@@ -543,7 +543,7 @@ func TestMemTopicsSubscription(t *testing.T) {
 	require.Error(t, err)
 
 	subs := make([]interface{}, 5)
-	qoss := make([]byte, 5)
+	qoss := make([]message.QosType, 5)
 
 	err = mgr.Subscribers("sports/tennis/anzel/stats", 2, &subs, &qoss)
 
@@ -640,7 +640,7 @@ func TestMemTopicsRetained(t *testing.T) {
 	require.Equal(t, 3, len(msglist))
 }
 
-func newPublishMessageLarge(topic string, qos byte) *message.PublishMessage {
+func newPublishMessageLarge(topic string, qos message.QosType) *message.PublishMessage {
 	msg := message.NewPublishMessage()
 	msg.SetTopic(topic)                // nolint: errcheck
 	msg.SetPayload(make([]byte, 1024)) // nolint: errcheck

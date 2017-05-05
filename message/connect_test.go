@@ -82,12 +82,12 @@ func TestConnectMessageFields(t *testing.T) {
 
 	msg.SetVersion(0x3) // nolint: errcheck
 
-	msg.SetWillTopic([]byte("willtopic"))
+	msg.SetWillTopic("willtopic")
 	require.Equal(t, "willtopic", string(msg.WillTopic()), "Error setting will topic.")
 
 	require.True(t, msg.WillFlag(), "Error setting will flag.")
 
-	msg.SetWillTopic([]byte(""))
+	msg.SetWillTopic("")
 	require.Equal(t, "", string(msg.WillTopic()), "Error setting will topic.")
 
 	require.False(t, msg.WillFlag(), "Error setting will flag.")
@@ -102,9 +102,9 @@ func TestConnectMessageFields(t *testing.T) {
 
 	require.False(t, msg.WillFlag(), "Error setting will flag.")
 
-	msg.SetWillTopic([]byte("willtopic"))
+	msg.SetWillTopic("willtopic")
 	msg.SetWillMessage([]byte("this is a will message"))
-	msg.SetWillTopic([]byte(""))
+	msg.SetWillTopic("")
 	require.True(t, msg.WillFlag(), "Error setting will topic.")
 
 	msg.SetUsername([]byte("myname"))
@@ -310,7 +310,7 @@ func TestConnectMessageEncode(t *testing.T) {
 	msg.SetCleanSession(true)
 	msg.SetClientID([]byte("surgemq")) // nolint: errcheck
 	msg.SetKeepAlive(10)
-	msg.SetWillTopic([]byte("will"))
+	msg.SetWillTopic("will")
 	msg.SetWillMessage([]byte("send me home"))
 	msg.SetUsername([]byte("surgemq"))
 	msg.SetPassword([]byte("verysecret"))

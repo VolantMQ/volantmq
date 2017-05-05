@@ -32,14 +32,15 @@ var (
 func (s *Type) processor() {
 	defer func() {
 		// Let's recover from panic if happened
-		if r := recover(); r != nil {
-			appLog.Errorf("(%s) Recovering from panic: %v", s.CID(), r)
-		}
+		//if r := recover(); r != nil {
+		//	appLog.Errorf("(%s) Recovering from panic: %v", s.CID(), r)
+		//}
 
 		s.wgStopped.Done()
-		s.Stop()
-		s.ExitSignal <- s.ID
-		appLog.Debugf("(%s) Stopping processor", s.CID())
+		//s.Stop()
+		if s.Stop() {
+			s.OnClose(s.ID)
+		}
 	}()
 
 	appLog.Debugf("(%s) Starting processor", s.CID())
@@ -71,11 +72,11 @@ func (s *Type) processor() {
 		// 5. Process the read message
 		err = s.processIncoming(msg)
 		if err != nil {
-			if err != errDisconnect {
-				appLog.Errorf("(%s) Error processing %s: %v", s.CID(), msg.Name(), err)
-			} else {
-				return
-			}
+			//if err != errDisconnect {
+			//	appLog.Errorf("(%s) Error processing %s: %v", s.CID(), msg.Name(), err)
+			//} else {
+			return
+			//}
 		}
 
 		// 7. We should commit the bytes in the buffer so we can move on
@@ -91,10 +92,6 @@ func (s *Type) processor() {
 		if s.IsDone() && s.in.Len() == 0 {
 			return
 		}
-
-		//if this.inStat.msgs%1000 == 0 {
-		//	appLog.Debugf("(%s) Going to process message %d", this.cid(), this.inStat.msgs)
-		//}
 	}
 }
 
@@ -292,7 +289,7 @@ func (s *Type) processSubscribe(msg *message.SubscribeMessage) error {
 	resp.SetPacketID(msg.PacketID())
 
 	// Subscribe to the different topics
-	var retCodes []byte
+	var retCodes []message.QosType
 
 	topics := msg.Topics()
 	qos := msg.Qos()
@@ -300,18 +297,18 @@ func (s *Type) processSubscribe(msg *message.SubscribeMessage) error {
 	s.rmSgs = s.rmSgs[0:0]
 
 	for i, t := range topics {
-		rqos, err := s.TopicsMgr.Subscribe(string(t), qos[i], &s.onPub)
+		rqos, err := s.TopicsMgr.Subscribe(t, qos[i], &s.onPub)
 		if err != nil {
 			return err
 		}
-		s.sess.AddTopic(string(t), qos[i]) // nolint: errcheck
+		s.sess.AddTopic(t, qos[i]) // nolint: errcheck
 
 		retCodes = append(retCodes, rqos)
 
 		// yeah I am not checking errors here. If there's an error we don't want the
 		// subscription to stop, just let it go.
-		s.TopicsMgr.Retained(string(t), &s.rmSgs) // nolint: errcheck
-		appLog.Debugf("(%s) topic = %s, retained count = %d", s.CID(), string(t), len(s.rmSgs))
+		s.TopicsMgr.Retained(t, &s.rmSgs) // nolint: errcheck
+		appLog.Debugf("(%s) topic = %s, retained count = %d", s.CID(), t, len(s.rmSgs))
 	}
 
 	if err := resp.AddReturnCodes(retCodes); err != nil {
@@ -337,8 +334,8 @@ func (s *Type) processUnSubscribe(msg *message.UnSubscribeMessage) error {
 	topics := msg.Topics()
 
 	for _, t := range topics {
-		s.TopicsMgr.UnSubscribe(string(t), &s.onPub) // nolint: errcheck
-		s.sess.RemoveTopic(string(t))                // nolint: errcheck
+		s.TopicsMgr.UnSubscribe(t, &s.onPub) // nolint: errcheck
+		s.sess.RemoveTopic(t)                // nolint: errcheck
 	}
 
 	resp := message.NewUnSubAckMessage()
@@ -358,7 +355,10 @@ func (s *Type) onPublish(msg *message.PublishMessage) error {
 		}
 	}
 
-	err := s.TopicsMgr.Subscribers(msg.Topic(), msg.QoS(), &s.subs, &s.qoss)
+	var subscribers []interface{}
+	var qoss []message.QosType
+
+	err := s.TopicsMgr.Subscribers(msg.Topic(), msg.QoS(), &subscribers, &qoss)
 	if err != nil {
 		appLog.Errorf("(%s) Error retrieving subscribers list: %v", s.CID(), err)
 		return err
@@ -366,8 +366,8 @@ func (s *Type) onPublish(msg *message.PublishMessage) error {
 
 	msg.SetRetain(false)
 
-	appLog.Debugf("(%s) Publishing to topic %q and %d subscribers", s.CID(), msg.Topic(), len(s.subs))
-	for _, s := range s.subs {
+	appLog.Debugf("(%s) Publishing to topic %q and %d subscribers", s.CID(), msg.Topic(), len(subscribers))
+	for _, s := range subscribers {
 		if s != nil {
 			fn, ok := s.(*OnPublishFunc)
 			if !ok {
@@ -375,9 +375,7 @@ func (s *Type) onPublish(msg *message.PublishMessage) error {
 				return errors.New("Invalid onPublish Function")
 			}
 
-			if err := (*fn)(msg); err != nil {
-				appLog.Errorf("Error onPublish")
-			}
+			(*fn)(msg) // nolint: errcheck
 		}
 	}
 

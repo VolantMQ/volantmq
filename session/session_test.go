@@ -91,7 +91,7 @@ func newConnectMessage() *message.ConnectMessage {
 	msg.SetCleanSession(true)          // nolint: errcheck
 	msg.SetClientID([]byte("surgemq")) // nolint: errcheck
 	msg.SetKeepAlive(10)
-	msg.SetWillTopic([]byte("will"))
+	msg.SetWillTopic("will")
 	msg.SetWillMessage([]byte("send me home"))
 	msg.SetUsername([]byte("surgemq"))
 	msg.SetPassword([]byte("verysecret"))
@@ -99,12 +99,12 @@ func newConnectMessage() *message.ConnectMessage {
 	return msg
 }
 
-func newPublishMessage(pktID uint16, qos byte) *message.PublishMessage {
+func newPublishMessage(pktID uint16, qos message.QosType) *message.PublishMessage {
 	msg := message.NewPublishMessage()
-	msg.SetPacketID(pktID) // nolint
-	msg.SetTopic("abc")    // nolint
-	msg.SetPayload("abc")  // nolint
-	msg.SetQoS(qos)        // nolint
+	msg.SetPacketID(pktID)        // nolint
+	msg.SetTopic("abc")           // nolint
+	msg.SetPayload([]byte("abc")) // nolint
+	msg.SetQoS(qos)               // nolint
 
 	return msg
 }

@@ -35,7 +35,6 @@ func GetConnectMessage(conn io.Closer) (*message.ConnectMessage, error) {
 	msg := message.NewConnectMessage()
 
 	_, err = msg.Decode(buf)
-	//glog.Debugf("Received: %s", msg)
 	return msg, err
 }
 

@@ -15,7 +15,6 @@
 package message
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -25,14 +24,16 @@ import (
 type UnSubscribeMessage struct {
 	header
 
-	topics [][]byte
+	topics TopicsQoS
 }
 
 var _ Message = (*UnSubscribeMessage)(nil)
 
 // NewUnSubscribeMessage creates a new UNSUBSCRIBE message.
 func NewUnSubscribeMessage() *UnSubscribeMessage {
-	msg := &UnSubscribeMessage{}
+	msg := &UnSubscribeMessage{
+		topics: make(TopicsQoS),
+	}
 	msg.SetType(UNSUBSCRIBE) // nolint: errcheck
 
 	return msg
@@ -41,55 +42,49 @@ func NewUnSubscribeMessage() *UnSubscribeMessage {
 func (usm UnSubscribeMessage) String() string {
 	msgstr := fmt.Sprintf("%s", usm.header)
 
-	for i, t := range usm.topics {
-		msgstr = fmt.Sprintf("%s, Topic%d=%s", msgstr, i, string(t))
+	i := 0
+	for t := range usm.topics {
+		msgstr = fmt.Sprintf("%s, Topic%d=%s", msgstr, i, t)
+		i++
 	}
 
 	return msgstr
 }
 
 // Topics returns a list of topics sent by the Client.
-func (usm *UnSubscribeMessage) Topics() [][]byte {
-	return usm.topics
+func (usm *UnSubscribeMessage) Topics() Topics {
+	topics := Topics{}
+
+	for t := range usm.topics {
+		topics = append(topics, t)
+	}
+
+	return topics
 }
 
 // AddTopic adds a single topic to the message.
-func (usm *UnSubscribeMessage) AddTopic(topic []byte) {
+func (usm *UnSubscribeMessage) AddTopic(topic string) {
 	if usm.TopicExists(topic) {
 		return
 	}
 
-	usm.topics = append(usm.topics, topic)
+	usm.topics[topic] = 0
 	usm.dirty = true
 }
 
 // RemoveTopic removes a single topic from the list of existing ones in the message.
 // If topic does not exist it just does nothing.
-func (usm *UnSubscribeMessage) RemoveTopic(topic []byte) {
-	var i int
-	var t []byte
-	var found bool
-
-	for i, t = range usm.topics {
-		if bytes.Equal(t, topic) {
-			found = true
-			break
-		}
+func (usm *UnSubscribeMessage) RemoveTopic(topic string) {
+	if usm.TopicExists(topic) {
+		delete(usm.topics, topic)
+		usm.dirty = true
 	}
-
-	if found {
-		usm.topics = append(usm.topics[:i], usm.topics[i+1:]...)
-	}
-
-	usm.dirty = true
 }
 
 // TopicExists checks to see if a topic exists in the list.
-func (usm *UnSubscribeMessage) TopicExists(topic []byte) bool {
-	for _, t := range usm.topics {
-		if bytes.Equal(t, topic) {
-			return true
-		}
+func (usm *UnSubscribeMessage) TopicExists(topic string) bool {
+	if _, ok := usm.topics[topic]; ok {
+		return true
 	}
 
 	return false
@@ -134,7 +129,7 @@ func (usm *UnSubscribeMessage) Decode(src []byte) (int, error) {
 			return total, err
 		}
 
-		usm.topics = append(usm.topics, t)
+		usm.topics[string(t)] = 0
 		remlen = remlen - n - 1
 	}
 
@@ -189,8 +184,8 @@ func (usm *UnSubscribeMessage) Encode(dst []byte) (int, error) {
 	//binary.BigEndian.PutUint16(dst[total:], this.packetId)
 	total += n
 
-	for _, t := range usm.topics {
-		n, err := writeLPBytes(dst[total:], t)
+	for t := range usm.topics {
+		n, err := writeLPBytes(dst[total:], []byte(t))
 		total += n
 		if err != nil {
 			return total, err
@@ -204,7 +199,7 @@ func (usm *UnSubscribeMessage) msgLen() int {
 	// packet ID
 	total := 2
 
-	for _, t := range usm.topics {
+	for t := range usm.topics {
 		total += 2 + len(t)
 	}
 

@@ -26,13 +26,13 @@ func TestSubscribeMessageFields(t *testing.T) {
 	msg.SetPacketID(100)
 	require.Equal(t, 100, int(msg.PacketID()), "Error setting packet ID.")
 
-	msg.AddTopic([]byte("/a/b/#/c"), 1) // nolint: errcheck
+	msg.AddTopic("/a/b/#/c", 1) // nolint: errcheck
 	require.Equal(t, 1, len(msg.Topics()), "Error adding topic.")
 
-	require.False(t, msg.TopicExists([]byte("a/b")), "Topic should not exist.")
+	require.False(t, msg.TopicExists("a/b"), "Topic should not exist.")
 
-	msg.RemoveTopic([]byte("/a/b/#/c"))
-	require.False(t, msg.TopicExists([]byte("/a/b/#/c")), "Topic should not exist.")
+	msg.RemoveTopic("/a/b/#/c")
+	require.False(t, msg.TopicExists("/a/b/#/c"), "Topic should not exist.")
 }
 
 func TestSubscribeMessageDecode(t *testing.T) {
@@ -62,12 +62,12 @@ func TestSubscribeMessageDecode(t *testing.T) {
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
 	require.Equal(t, SUBSCRIBE, msg.Type(), "Error decoding message.")
 	require.Equal(t, 3, len(msg.Topics()), "Error decoding topics.")
-	require.True(t, msg.TopicExists([]byte("surgemq")), "Topic 'surgemq' should exist.")
-	require.Equal(t, 0, int(msg.TopicQos([]byte("surgemq"))), "Incorrect topic qos.")
-	require.True(t, msg.TopicExists([]byte("/a/b/#/c")), "Topic '/a/b/#/c' should exist.")
-	require.Equal(t, 1, int(msg.TopicQos([]byte("/a/b/#/c"))), "Incorrect topic qos.")
-	require.True(t, msg.TopicExists([]byte("/a/b/#/cdd")), "Topic '/a/b/#/c' should exist.")
-	require.Equal(t, 2, int(msg.TopicQos([]byte("/a/b/#/cdd"))), "Incorrect topic qos.")
+	require.True(t, msg.TopicExists("surgemq"), "Topic 'surgemq' should exist.")
+	require.Equal(t, 0, int(msg.TopicQos("surgemq")), "Incorrect topic qos.")
+	require.True(t, msg.TopicExists("/a/b/#/c"), "Topic '/a/b/#/c' should exist.")
+	require.Equal(t, 1, int(msg.TopicQos("/a/b/#/c")), "Incorrect topic qos.")
+	require.True(t, msg.TopicExists("/a/b/#/cdd"), "Topic '/a/b/#/c' should exist.")
+	require.Equal(t, 2, int(msg.TopicQos("/a/b/#/cdd")), "Incorrect topic qos.")
 }
 
 // test empty topic list
@@ -107,9 +107,9 @@ func TestSubscribeMessageEncode(t *testing.T) {
 
 	msg := NewSubscribeMessage()
 	msg.SetPacketID(7)
-	msg.AddTopic([]byte("surgemq"), 0)    // nolint: errcheck
-	msg.AddTopic([]byte("/a/b/#/c"), 1)   // nolint: errcheck
-	msg.AddTopic([]byte("/a/b/#/cdd"), 2) // nolint: errcheck
+	msg.AddTopic("surgemq", 0)    // nolint: errcheck
+	msg.AddTopic("/a/b/#/c", 1)   // nolint: errcheck
+	msg.AddTopic("/a/b/#/cdd", 2) // nolint: errcheck
 
 	dst := make([]byte, 100)
 	n, err := msg.Encode(dst)

@@ -17,7 +17,6 @@ package message
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/pkg/errors"
 	"strings"
 )
 
@@ -27,12 +26,15 @@ const (
 	maxRemainingLength int32 = 268435455 // bytes, or 256 MB
 )
 
+// QosType QoS type
+type QosType byte
+
 const (
 	// QosAtMostOnce QoS 0: At most once delivery
 	// The message is delivered according to the capabilities of the underlying network.
 	// No response is sent by the receiver and no retry is performed by the sender. The
 	// message arrives at the receiver either once or not at all.
-	QosAtMostOnce byte = iota
+	QosAtMostOnce QosType = iota
 
 	// QosAtLeastOnce QoS 1: At least once delivery
 	// This quality of service ensures that the message arrives at the receiver at least once.
@@ -61,6 +63,12 @@ var SupportedVersions = map[byte]string{
 // Type is the type representing the MQTT packet types. In the MQTT spec,
 // MQTT control packet type is represented as a 4-bit unsigned value.
 type Type byte
+
+// Topics slice of topics
+type Topics []string
+
+// TopicsQoS is a map if topic and corresponding QoS
+type TopicsQoS map[string]QosType
 
 // Message is an interface defined for all MQTT message types.
 type Message interface {
@@ -153,16 +161,55 @@ const (
 	RESERVED2
 )
 
-var (
-	// ErrInvalidUnSubscribe message is not of UNSUBSCRIBE type
-	ErrInvalidUnSubscribe = errors.New("Invalid UnSubscribe message")
-	// ErrInvalidUnSubAck message is not of UNSUBACK type
-	ErrInvalidUnSubAck = errors.New("Invalid UnSubAckMessage received")
-	// ErrPackedIDNotMatched packets id not matched
-	ErrPackedIDNotMatched = errors.New("Packed's ID does not match")
-	// ErrOnPublishNil publisher is nil
-	ErrOnPublishNil = errors.New("OnPublish function is nil")
+// Error errors
+type Error byte
+
+const (
+	// ErrInvalidUnSubscribe Invalid UNSUBSCRIBE message
+	ErrInvalidUnSubscribe Error = iota
+	// ErrInvalidUnSubAck Invalid UNSUBACK message
+	ErrInvalidUnSubAck
+	// ErrPackedIDNotMatched Packet ID does not match
+	ErrPackedIDNotMatched
+	// ErrOnPublishNil Publisher is nil
+	ErrOnPublishNil
+	// ErrInvalidMessageType Invalid message type
+	ErrInvalidMessageType
+	// ErrInvalidMessageTypeFlags Invalid message flags
+	ErrInvalidMessageTypeFlags
+	// ErrInvalidQoS Invalid message QoS
+	ErrInvalidQoS
+	// ErrInvalidLength Invalid message length
+	ErrInvalidLength
+	// ErrWillViolation Message Will violation
+	ErrWillViolation
 )
+
+// Error returns the corresponding error string for the ConnAckCode
+func (me Error) Error() string {
+	switch me {
+	case ErrInvalidUnSubscribe:
+		return "Invalid UNSUBSCRIBE message"
+	case ErrInvalidUnSubAck:
+		return "Invalid UNSUBACK message"
+	case ErrPackedIDNotMatched:
+		return "Packet ID does not match"
+	case ErrOnPublishNil:
+		return "Publisher is nil"
+	case ErrInvalidMessageType:
+		return "Invalid message type"
+	case ErrInvalidMessageTypeFlags:
+		return "Invalid message flags"
+	case ErrInvalidQoS:
+		return "Invalid message QoS"
+	case ErrInvalidLength:
+		return "Invalid message length"
+	case ErrWillViolation:
+		return "Message Will violation"
+	}
+
+	return "Unknown error"
+}
 
 func (mt Type) String() string {
 	return mt.Name()
@@ -345,7 +392,7 @@ func ValidTopic(topic string) bool {
 
 // ValidQos checks the QoS value to see if it's valid. Valid QoS are QosAtMostOnce,
 // QosAtLeastOnce, and QosExactlyOnce.
-func ValidQos(qos byte) bool {
+func ValidQos(qos QosType) bool {
 	return qos == QosAtMostOnce || qos == QosAtLeastOnce || qos == QosExactlyOnce
 }
 
@@ -356,9 +403,14 @@ func ValidVersion(v byte) bool {
 }
 
 // ValidConnAckError checks to see if the error is a ConnAck Error or not
-func ValidConnAckError(err error) bool {
-	return err == ErrInvalidProtocolVersion || err == ErrIdentifierRejected ||
-		err == ErrServerUnavailable || err == ErrBadUsernameOrPassword || err == ErrNotAuthorized
+func ValidConnAckError(err error) (ConnAckCode, bool) {
+	if code, ok := err.(ConnAckCode); ok {
+		return code, true
+	}
+
+	return 0, false
+	//return err == ErrInvalidProtocolVersion || err == ErrIdentifierRejected ||
+	//	err == ErrServerUnavailable || err == ErrBadUsernameOrPassword || err == ErrNotAuthorized
 }
 
 // Read length prefixed bytes

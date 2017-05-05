@@ -109,7 +109,6 @@ func (s *Type) sender() {
 	case net.Conn:
 		for {
 			_, err := s.out.WriteTo(conn)
-
 			if err != nil {
 				if err != io.EOF {
 					appLog.Errorf("(%s) error writing data: %v", s.CID(), err)
@@ -266,6 +265,9 @@ func (s *Type) writeMessage(msg message.Message) (int, error) {
 		wrap bool
 	)
 
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+
 	if s.out == nil {
 		return 0, surgemq.ErrBufferNotReady
 	}
@@ -282,9 +284,6 @@ func (s *Type) writeMessage(msg message.Message) (int, error) {
 	// to this client, then they will all block. However, this will do for now.
 	//
 	// FIXME: Try to find a better way than a mutex...if possible.
-	s.wmu.Lock()
-	defer s.wmu.Unlock()
-
 	buf, wrap, err = s.out.WriteWait(l)
 	if err != nil {
 		return 0, err

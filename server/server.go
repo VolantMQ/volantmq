@@ -71,7 +71,6 @@ type servicesManager struct {
 	svcID uint64
 	// Mutex for updating services
 	lock sync.Mutex
-
 	// A list of services created by the server. We keep track of them so we can
 	// gracefully shut them down if they are still alive when the server goes down.
 	list map[uint64]*service.Type
@@ -120,15 +119,14 @@ type Type struct {
 	runningTLS int32
 
 	subs []interface{}
-	qoss []byte
+	qoss []message.QosType
 
 	waitServers   sync.WaitGroup
 	wgStopped     sync.WaitGroup
 	wgConnections sync.WaitGroup
 
+	//services sync.Map
 	services servicesManager
-
-	servicesExit chan uint64
 }
 
 var appLog loggo.Logger
@@ -197,10 +195,10 @@ func New(config Config) (*Type, error) {
 
 	s.services.list = make(map[uint64]*service.Type)
 
-	s.servicesExit = make(chan uint64, 1024)
+	//s.servicesExit = make(chan uint64, 1024)
 
-	s.wgStopped.Add(1)
-	go s.processDisconnects()
+	//s.wgStopped.Add(1)
+	//go s.processDisconnects()
 
 	return &s, nil
 }
@@ -230,9 +228,12 @@ func (s *Type) ListenAndServe(uri string) error {
 		return err
 	}
 
-	appLog.Infof("server/ListenAndServe: server is ready...")
+	appLog.Infof("mqtt server is ready...")
 
-	return s.serve(s.ln)
+	err = s.serve(s.ln)
+
+	appLog.Infof("mqtt server stopped")
+	return err
 }
 
 // ListenAndServeTLS listens to connections on the URI requested, and handles any
@@ -274,9 +275,13 @@ func (s *Type) ListenAndServeTLS(uri string, certFile, keyFile string) error {
 
 	s.lnTLS = tls.NewListener(ln, config)
 
-	appLog.Infof("server/ListenAndServeTLS: server is ready...")
+	appLog.Infof("mqtts server is ready...")
 
-	return s.serve(s.lnTLS)
+	err = s.serve(s.lnTLS)
+
+	appLog.Infof("mqtts server stopped")
+
+	return err
 }
 
 // Publish sends a single MQTT PUBLISH message to the server. On completion, the
@@ -337,15 +342,12 @@ func (s *Type) Close() error {
 	s.wgConnections.Wait()
 
 	s.services.lock.Lock()
-	for i, svc := range s.services.list {
-		appLog.Infof("Stopping service %d", svc.ID)
+	for id, svc := range s.services.list {
 		svc.Stop()
-		delete(s.services.list, i)
+		delete(s.services.list, id)
 	}
 
 	s.services.lock.Unlock()
-
-	close(s.servicesExit)
 
 	s.wgStopped.Wait()
 
@@ -360,31 +362,10 @@ func (s *Type) Close() error {
 	return nil
 }
 
-func (s *Type) processDisconnects() {
-	defer s.wgStopped.Done()
-
-	loop := true
-	for loop {
-		select {
-		case id, ok := <-s.servicesExit:
-			if !ok {
-				loop = false
-				break
-			} else {
-				s.services.lock.Lock()
-				delete(s.services.list, id)
-				s.services.lock.Unlock()
-			}
-		}
-	}
-}
-
 func (s *Type) serve(l net.Listener) error {
-	//defer func() {
-	//	if err := l.Close(); err != nil {
-	//		appLog.Tracef("Close error: %v", err)
-	//	}
-	//}()
+	defer func() {
+		l.Close() // nolint: errcheck
+	}()
 
 	var tempDelay time.Duration // how long to sleep on accept failure
 
@@ -420,10 +401,7 @@ func (s *Type) serve(l net.Listener) error {
 		s.wgConnections.Add(1)
 		go func() {
 			defer s.wgConnections.Done()
-
-			if err := s.handleConnection(conn); err != nil {
-				appLog.Errorf(err.Error())
-			}
+			s.handleConnection(conn) // nolint: errcheck
 		}()
 	}
 }
@@ -460,27 +438,28 @@ func (s *Type) handleConnection(c io.Closer) error {
 	// a CONNACK error. If it's CONNACK error, send the proper CONNACK error back
 	// to client. Exit regardless of error type.
 
-	conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(s.config.ConnectTimeout))) // nolint: errcheck
+	//conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(s.config.ConnectTimeout))) // nolint: errcheck
 
 	resp := message.NewConnAckMessage()
 
 	svc, _ := service.NewService(service.Config{
-		Client:         false,
 		ConnectTimeout: s.config.ConnectTimeout,
 		AckTimeout:     s.config.AckTimeout,
 		TimeoutRetries: s.config.TimeoutRetries,
 		Conn:           conn,
 		SessionMgr:     s.sessionsMgr,
 		TopicsMgr:      s.topicsMgr,
-		ExitSignal:     s.servicesExit,
+		OnClose:        s.onSessionClose,
 	})
 
 	var req *message.ConnectMessage
 
 	if req, err = service.GetConnectMessage(conn); err != nil {
-		if cErr, ok := err.(message.ConnAckCode); ok {
-			//appLog.Errorf("request   message: %s\nresponse message: %s\nerror           : %v", mreq, resp, err)
-			resp.SetReturnCode(cErr)
+		if code, ok := message.ValidConnAckError(err); ok {
+			resp.SetReturnCode(code)
+		} else {
+			appLog.Warningf("Couldn't read connect message: %s", err.Error())
+			return err
 		}
 	} else {
 		if req.UsernameFlag() {
@@ -533,7 +512,7 @@ func (s *Type) handleConnection(c io.Closer) error {
 
 		s.services.insert(svc)
 
-		appLog.Debugf("[%s] server/handleConnection: Connection established.", svc.CID())
+		appLog.Debugf("[%s] new connection established", svc.CID())
 		return nil
 	}
 
@@ -597,4 +576,19 @@ func (s *Type) getSession(svc *service.Type, req *message.ConnectMessage, resp *
 	}
 
 	return nil
+}
+
+func (s *Type) onSessionClose(id uint64) {
+	select {
+	case <-s.quit:
+		return
+	default:
+	}
+
+	s.services.lock.Lock()
+	defer s.services.lock.Unlock()
+
+	if _, ok := s.services.list[id]; ok {
+		delete(s.services.list, id)
+	}
 }

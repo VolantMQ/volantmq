@@ -2,6 +2,7 @@ package mem
 
 import (
 	"errors"
+	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/topics"
 )
 
@@ -9,7 +10,7 @@ import (
 type sNode struct {
 	// If this is the end of the topic string, then add subscribers here
 	subs []interface{}
-	qos  []byte
+	qos  []message.QosType
 
 	// Otherwise add the next topic level here
 	nodes map[string]*sNode
@@ -21,7 +22,7 @@ func newSNode() *sNode {
 	}
 }
 
-func (sn *sNode) insert(topic string, qos byte, sub interface{}) error {
+func (sn *sNode) insert(topic string, qos message.QosType, sub interface{}) error {
 	// If there's no more topic levels, that means we are at the matching sNode
 	// to insert the subscriber. So let's see if there's such subscriber,
 	// if so, update it. Otherwise insert it.
@@ -124,7 +125,7 @@ func (sn *sNode) remove(topic string, sub interface{}) error {
 // with no wildcards (publish topic), it returns a list of subscribers that subscribes
 // to the topic. For each of the level names, it's a match
 // - if there are subscribers to '#', then all the subscribers are added to result set
-func (sn *sNode) match(topic string, qos byte, subs *[]interface{}, qoss *[]byte) error {
+func (sn *sNode) match(topic string, qos message.QosType, subs *[]interface{}, qoss *[]message.QosType) error {
 	// If the topic is empty, it means we are at the final matching snode. If so,
 	// let's find the subscribers that match the qos and append them to the list.
 	if len(topic) == 0 {

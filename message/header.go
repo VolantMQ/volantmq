@@ -81,7 +81,7 @@ func (h *header) Type() Type {
 // default flags for the message type. It returns an error if the type is invalid.
 func (h *header) SetType(mType Type) error {
 	if !mType.Valid() {
-		return fmt.Errorf("header/SetType: Invalid control packet type %d", mType)
+		return ErrInvalidMessageType
 	}
 
 	// Notice we don't set the message to be dirty when we are not allocating a new
@@ -114,7 +114,7 @@ func (h *header) RemainingLength() int32 {
 // message length as defined by the MQTT spec.
 func (h *header) SetRemainingLength(remlen int32) error {
 	if remlen > maxRemainingLength || remlen < 0 {
-		return fmt.Errorf("header/SetLength: Remaining length (%d) out of bound (max %d, min 0)", remlen, maxRemainingLength)
+		return ErrInvalidLength
 	}
 
 	h.remLen = remlen
@@ -161,17 +161,17 @@ func (h *header) encode(dst []byte) (int, error) {
 	ml := h.msgLen()
 
 	if len(dst) < ml {
-		return 0, fmt.Errorf("header/Encode: Insufficient buffer size. Expecting %d, got %d", ml, len(dst))
+		return 0, ErrInvalidLength
 	}
 
 	total := 0
 
 	if h.remLen > maxRemainingLength || h.remLen < 0 {
-		return total, fmt.Errorf("header/Encode: Remaining length (%d) out of bound (max %d, min 0)", h.remLen, maxRemainingLength)
+		return total, ErrInvalidLength
 	}
 
 	if !h.Type().Valid() {
-		return total, fmt.Errorf("header/Encode: Invalid message type %d", h.Type())
+		return total, ErrInvalidMessageType
 	}
 
 	dst[total] = h.mTypeFlags[0]
@@ -197,20 +197,20 @@ func (h *header) decode(src []byte) (int, error) {
 	h.mTypeFlags = src[total : total+1]
 	//mType := MessageType(src[total] >> 4)
 	if !h.Type().Valid() {
-		return total, fmt.Errorf("header/Decode: Invalid message type %d", mType)
+		return total, ErrInvalidMessageType
 	}
 
 	if mType != h.Type() {
-		return total, fmt.Errorf("header/Decode: Invalid message type %d. Expecting %d", h.Type(), mType)
+		return total, ErrInvalidMessageType
 	}
 
 	//this.flags = src[total] & 0x0f
 	if h.Type() != PUBLISH && h.Flags() != h.Type().DefaultFlags() {
-		return total, fmt.Errorf("header/Decode: Invalid message (%d) flags. Expecting %d, got %d", h.Type(), h.Type().DefaultFlags(), h.Flags())
+		return total, ErrInvalidMessageTypeFlags
 	}
 
-	if h.Type() == PUBLISH && !ValidQos((h.Flags()>>1)&0x3) {
-		return total, fmt.Errorf("header/Decode: Invalid QoS (%d) for PUBLISH message", (h.Flags()>>1)&0x3)
+	if h.Type() == PUBLISH && !ValidQos(QosType(h.Flags()>>1)&0x3) {
+		return total, ErrInvalidQoS
 	}
 
 	total++
@@ -220,7 +220,7 @@ func (h *header) decode(src []byte) (int, error) {
 	h.remLen = int32(remLen)
 
 	if h.remLen > maxRemainingLength {
-		return total, fmt.Errorf("header/Decode: Remaining length (%d) out of bound (max %d, min 0)", h.remLen, maxRemainingLength)
+		return total, ErrInvalidLength
 	}
 
 	//if h.remLen > maxRemainingLength || remLen < 0 {
@@ -228,7 +228,7 @@ func (h *header) decode(src []byte) (int, error) {
 	//}
 
 	if int(h.remLen) > len(src[total:]) {
-		return total, fmt.Errorf("header/Decode: Remaining length (%d) is greater than remaining buffer (%d)", h.remLen, len(src[total:]))
+		return total, ErrInvalidLength
 	}
 
 	return total, nil

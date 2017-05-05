@@ -81,19 +81,19 @@ func (pm *PublishMessage) SetRetain(v bool) {
 
 // QoS returns the field that indicates the level of assurance for delivery of an
 // Application Message. The values are QosAtMostOnce, QosAtLeastOnce and QosExactlyOnce.
-func (pm *PublishMessage) QoS() byte {
-	return (pm.Flags() >> 1) & 0x3
+func (pm *PublishMessage) QoS() QosType {
+	return QosType((pm.Flags() >> 1) & 0x3)
 }
 
 // SetQoS sets the field that indicates the level of assurance for delivery of an
 // Application Message. The values are QosAtMostOnce, QosAtLeastOnce and QosExactlyOnce.
 // An error is returned if the value is not one of these.
-func (pm *PublishMessage) SetQoS(v byte) error {
+func (pm *PublishMessage) SetQoS(v QosType) error {
 	if v != 0x0 && v != 0x1 && v != 0x2 {
 		return fmt.Errorf("publish/SetQoS: Invalid QoS %d", v)
 	}
 
-	pm.mTypeFlags[0] = (pm.mTypeFlags[0] & 249) | (v << 1) // 249 = 11111001
+	pm.mTypeFlags[0] = (pm.mTypeFlags[0] & 249) | byte(v<<1) // 249 = 11111001
 
 	return nil
 }

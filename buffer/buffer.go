@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -87,8 +88,8 @@ type Type struct {
 	pCond *sync.Cond
 	cCond *sync.Cond
 
-	cWait int64
-	pWait int64
+	//cWait int64
+	//pWait int64
 }
 
 // New buffer
@@ -118,8 +119,8 @@ func New(size int64) (*Type, error) {
 		cSeq:  newSequence(),
 		pCond: sync.NewCond(new(sync.Mutex)),
 		cCond: sync.NewCond(new(sync.Mutex)),
-		cWait: 0,
-		pWait: 0,
+		//cWait: 0,
+		//pWait: 0,
 	}, nil
 }
 
@@ -205,9 +206,13 @@ func (b *Type) WriteTo(w io.Writer) (int64, error) {
 			var n int
 			n, err = w.Write(p)
 			total += int64(n)
-			//glog.Debugf("Wrote %d bytes, totaling %d bytes", n, total)
 
 			if err != nil {
+				if strings.Contains(err.Error(), "use of closed network connection") {
+					return total, io.EOF
+				} else if strings.Contains(err.Error(), "broken pipe") {
+					return total, io.EOF
+				}
 				return total, err
 			}
 
@@ -294,7 +299,7 @@ func (b *Type) Read(p []byte) (int, error) {
 				return 0, io.EOF
 			}
 
-			b.cWait++
+			//b.cWait++
 			b.cCond.Wait()
 		}
 		b.cCond.L.Unlock()
@@ -351,7 +356,7 @@ func (b *Type) ReadPeek(n int) ([]byte, error) {
 			return nil, io.EOF
 		}
 
-		b.cWait++
+		//b.cWait++
 		b.cCond.Wait()
 	}
 	b.cCond.L.Unlock()
@@ -418,6 +423,10 @@ func (b *Type) ReadWait(n int) ([]byte, error) {
 		b.cCond.Wait()
 	}
 	b.cCond.L.Unlock()
+
+	//if b.isDone() {
+	//	return nil, io.EOF
+	//}
 
 	// If we are here that means we have at least n bytes of data available.
 	cindex := cpos & b.mask
@@ -570,7 +579,7 @@ func (b *Type) waitForWriteSpace(n int) (int64, int, error) {
 				return 0, 0, io.EOF
 			}
 
-			b.pWait++
+			//b.pWait++
 			b.pCond.Wait()
 		}
 

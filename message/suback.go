@@ -24,7 +24,7 @@ import "fmt"
 type SubAckMessage struct {
 	header
 
-	returnCodes []byte
+	returnCodes []QosType
 }
 
 var _ Message = (*SubAckMessage)(nil)
@@ -43,13 +43,13 @@ func (sam SubAckMessage) String() string {
 }
 
 // ReturnCodes returns the list of QoS returns from the subscriptions sent in the SUBSCRIBE message.
-func (sam *SubAckMessage) ReturnCodes() []byte {
+func (sam *SubAckMessage) ReturnCodes() []QosType {
 	return sam.returnCodes
 }
 
 // AddReturnCodes sets the list of QoS returns from the subscriptions sent in the SUBSCRIBE message.
 // An error is returned if any of the QoS values are not valid.
-func (sam *SubAckMessage) AddReturnCodes(ret []byte) error {
+func (sam *SubAckMessage) AddReturnCodes(ret []QosType) error {
 	for _, c := range ret {
 		if c != QosAtMostOnce && c != QosAtLeastOnce && c != QosExactlyOnce && c != QosFailure {
 			return fmt.Errorf("suback/AddReturnCode: Invalid return code %d. Must be 0, 1, 2, 0x80", c)
@@ -64,8 +64,8 @@ func (sam *SubAckMessage) AddReturnCodes(ret []byte) error {
 }
 
 // AddReturnCode adds a single QoS return value.
-func (sam *SubAckMessage) AddReturnCode(ret byte) error {
-	return sam.AddReturnCodes([]byte{ret})
+func (sam *SubAckMessage) AddReturnCode(ret QosType) error {
+	return sam.AddReturnCodes([]QosType{ret})
 }
 
 // Len of message
@@ -98,7 +98,11 @@ func (sam *SubAckMessage) Decode(src []byte) (int, error) {
 	total += 2
 
 	l := int(sam.remLen) - (total - hn)
-	sam.returnCodes = src[total : total+l]
+	//sam.returnCodes = []QosType(src[total : total+l])
+	for q := range src[total : total+l] {
+		sam.returnCodes = append(sam.returnCodes, QosType(q))
+	}
+
 	total += len(sam.returnCodes)
 
 	for i, code := range sam.returnCodes {
@@ -152,7 +156,10 @@ func (sam *SubAckMessage) Encode(dst []byte) (int, error) {
 	}
 	total += 2
 
-	copy(dst[total:], sam.returnCodes)
+	for i, q := range sam.returnCodes {
+		dst[total+i] = byte(q)
+	}
+	//copy(dst[total:], []byte(sam.returnCodes))
 	total += len(sam.returnCodes)
 
 	return total, nil

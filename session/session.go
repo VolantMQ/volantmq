@@ -20,7 +20,6 @@ import (
 	"errors"
 	"github.com/juju/loggo"
 	"github.com/troian/surgemq/message"
-	"github.com/troian/surgemq/topics"
 )
 
 const (
@@ -63,7 +62,7 @@ type Type struct {
 	Retained *message.PublishMessage
 
 	// topics stores all the topics for this session/client
-	topics topics.Topics
+	topics message.TopicsQoS
 
 	// Serialize access to this session
 	mu sync.Mutex
@@ -94,7 +93,7 @@ func (s *Type) Init(msg *message.ConnectMessage) error {
 
 	s.update(msg)
 
-	s.topics = make(map[string]byte, 1)
+	s.topics = make(message.TopicsQoS, 1)
 
 	s.id = string(msg.ClientID())
 
@@ -113,8 +112,8 @@ func (s *Type) Init(msg *message.ConnectMessage) error {
 func (s *Type) update(msg *message.ConnectMessage) {
 	if msg.WillFlag() {
 		s.Will = message.NewPublishMessage()
-		s.Will.SetQoS(msg.WillQos())             // nolint: errcheck
-		s.Will.SetTopic(string(msg.WillTopic())) // nolint: errcheck
+		s.Will.SetQoS(msg.WillQos())     // nolint: errcheck
+		s.Will.SetTopic(msg.WillTopic()) // nolint: errcheck
 		s.Will.SetPayload(msg.WillMessage())
 		s.Will.SetRetain(msg.WillRetain())
 	}
@@ -149,7 +148,7 @@ func (s *Type) RetainMessage(msg *message.PublishMessage) error {
 }
 
 // AddTopic add topic
-func (s *Type) AddTopic(topic string, qos byte) error {
+func (s *Type) AddTopic(topic string, qos message.QosType) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -177,7 +176,7 @@ func (s *Type) RemoveTopic(topic string) error {
 }
 
 // Topics list topics
-func (s *Type) Topics() (*topics.Topics, error) {
+func (s *Type) Topics() (*message.TopicsQoS, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -197,5 +196,8 @@ func (s *Type) ID() string {
 
 // IsClean is session clean or not
 func (s *Type) IsClean() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	return s.clean
 }

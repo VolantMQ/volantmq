@@ -26,22 +26,22 @@ func TestUnSubscribeMessageFields(t *testing.T) {
 	msg.SetPacketID(100)
 	require.Equal(t, 100, int(msg.PacketID()), "Error setting packet ID.")
 
-	msg.AddTopic([]byte("/a/b/#/c"))
+	msg.AddTopic("/a/b/#/c")
 	require.Equal(t, 1, len(msg.Topics()), "Error adding topic.")
 
-	msg.AddTopic([]byte("/a/b/#/c"))
+	msg.AddTopic("/a/b/#/c")
 	require.Equal(t, 1, len(msg.Topics()), "Error adding duplicate topic.")
 
-	msg.RemoveTopic([]byte("/a/b/#/c"))
-	require.False(t, msg.TopicExists([]byte("/a/b/#/c")), "Topic should not exist.")
+	msg.RemoveTopic("/a/b/#/c")
+	require.False(t, msg.TopicExists("/a/b/#/c"), "Topic should not exist.")
 
-	require.False(t, msg.TopicExists([]byte("a/b")), "Topic should not exist.")
+	require.False(t, msg.TopicExists("a/b"), "Topic should not exist.")
 
-	msg.RemoveTopic([]byte("/a/b/#/c"))
-	require.False(t, msg.TopicExists([]byte("/a/b/#/c")), "Topic should not exist.")
+	msg.RemoveTopic("/a/b/#/c")
+	require.False(t, msg.TopicExists("/a/b/#/c"), "Topic should not exist.")
 }
 
-func TestUnsubscribeMessageDecode(t *testing.T) {
+func TestUnSubscribeMessageDecode(t *testing.T) {
 	msgBytes := []byte{
 		byte(UNSUBSCRIBE<<4) | 2,
 		33,
@@ -65,9 +65,9 @@ func TestUnsubscribeMessageDecode(t *testing.T) {
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
 	require.Equal(t, UNSUBSCRIBE, msg.Type(), "Error decoding message.")
 	require.Equal(t, 3, len(msg.Topics()), "Error decoding topics.")
-	require.True(t, msg.TopicExists([]byte("surgemq")), "Topic 'surgemq' should exist.")
-	require.True(t, msg.TopicExists([]byte("/a/b/#/c")), "Topic '/a/b/#/c' should exist.")
-	require.True(t, msg.TopicExists([]byte("/a/b/#/cdd")), "Topic '/a/b/#/c' should exist.")
+	require.True(t, msg.TopicExists("surgemq"), "Topic 'surgemq' should exist.")
+	require.True(t, msg.TopicExists("/a/b/#/c"), "Topic '/a/b/#/c' should exist.")
+	require.True(t, msg.TopicExists("/a/b/#/cdd"), "Topic '/a/b/#/c' should exist.")
 }
 
 // test empty topic list
@@ -104,9 +104,9 @@ func TestUnSubscribeMessageEncode(t *testing.T) {
 
 	msg := NewUnSubscribeMessage()
 	msg.SetPacketID(7)
-	msg.AddTopic([]byte("surgemq"))
-	msg.AddTopic([]byte("/a/b/#/c"))
-	msg.AddTopic([]byte("/a/b/#/cdd"))
+	msg.AddTopic("surgemq")
+	msg.AddTopic("/a/b/#/c")
+	msg.AddTopic("/a/b/#/cdd")
 
 	dst := make([]byte, 100)
 	n, err := msg.Encode(dst)

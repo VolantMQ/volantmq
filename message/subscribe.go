@@ -15,7 +15,6 @@
 package message
 
 import (
-	"bytes"
 	"fmt"
 	"github.com/pkg/errors"
 	"sync/atomic"
@@ -30,15 +29,16 @@ import (
 type SubscribeMessage struct {
 	header
 
-	topics [][]byte
-	qos    []byte
+	topics TopicsQoS
 }
 
 var _ Message = (*SubscribeMessage)(nil)
 
 // NewSubscribeMessage creates a new SUBSCRIBE message.
 func NewSubscribeMessage() *SubscribeMessage {
-	msg := &SubscribeMessage{}
+	msg := &SubscribeMessage{
+		topics: make(TopicsQoS),
+	}
 	msg.SetType(SUBSCRIBE) // nolint: errcheck
 
 	return msg
@@ -47,76 +47,54 @@ func NewSubscribeMessage() *SubscribeMessage {
 func (sm SubscribeMessage) String() string {
 	msgStr := fmt.Sprintf("%s, Packet ID=%d", sm.header, sm.PacketID())
 
-	for i, t := range sm.topics {
-		msgStr = fmt.Sprintf("%s, Topic[%d]=%q/%d", msgStr, i, string(t), sm.qos[i])
+	for t, q := range sm.topics {
+		msgStr = fmt.Sprintf("%s, Topic=%q/%d", msgStr, t, q)
 	}
 
 	return msgStr
 }
 
 // Topics returns a list of topics sent by the Client.
-func (sm *SubscribeMessage) Topics() [][]byte {
-	return sm.topics
+func (sm *SubscribeMessage) Topics() Topics {
+	topics := Topics{}
+
+	for t := range sm.topics {
+		topics = append(topics, t)
+	}
+
+	return topics
 }
 
 // AddTopic adds a single topic to the message, along with the corresponding QoS.
 // An error is returned if QoS is invalid.
-func (sm *SubscribeMessage) AddTopic(topic []byte, qos byte) error {
+func (sm *SubscribeMessage) AddTopic(topic string, qos QosType) error {
 	if !ValidQos(qos) {
 		return fmt.Errorf("Invalid QoS %d", qos)
 	}
 
-	var i int
-	var t []byte
-	var found bool
-
-	for i, t = range sm.topics {
-		if bytes.Equal(t, topic) {
-			found = true
-			break
-		}
+	// if topic exists, update QoS else new entry will be created thus message is dirty
+	if _, ok := sm.topics[topic]; !ok {
+		sm.dirty = true
 	}
 
-	if found {
-		sm.qos[i] = qos
-		return nil
-	}
-
-	sm.topics = append(sm.topics, topic)
-	sm.qos = append(sm.qos, qos)
-	sm.dirty = true
+	sm.topics[topic] = qos
 
 	return nil
 }
 
 // RemoveTopic removes a single topic from the list of existing ones in the message.
 // If topic does not exist it just does nothing.
-func (sm *SubscribeMessage) RemoveTopic(topic []byte) {
-	var i int
-	var t []byte
-	var found bool
-
-	for i, t = range sm.topics {
-		if bytes.Equal(t, topic) {
-			found = true
-			break
-		}
+func (sm *SubscribeMessage) RemoveTopic(topic string) {
+	if _, ok := sm.topics[topic]; ok {
+		delete(sm.topics, topic)
+		sm.dirty = true
 	}
-
-	if found {
-		sm.topics = append(sm.topics[:i], sm.topics[i+1:]...)
-		sm.qos = append(sm.qos[:i], sm.qos[i+1:]...)
-	}
-
-	sm.dirty = true
 }
 
 // TopicExists checks to see if a topic exists in the list.
-func (sm *SubscribeMessage) TopicExists(topic []byte) bool {
-	for _, t := range sm.topics {
-		if bytes.Equal(t, topic) {
-			return true
-		}
+func (sm *SubscribeMessage) TopicExists(topic string) bool {
+	if _, ok := sm.topics[topic]; ok {
+		return true
 	}
 
 	return false
@@ -124,19 +102,24 @@ func (sm *SubscribeMessage) TopicExists(topic []byte) bool {
 
 // TopicQos returns the QoS level of a topic. If topic does not exist, QosFailure
 // is returned.
-func (sm *SubscribeMessage) TopicQos(topic []byte) byte {
-	for i, t := range sm.topics {
-		if bytes.Equal(t, topic) {
-			return sm.qos[i]
-		}
+func (sm *SubscribeMessage) TopicQos(topic string) QosType {
+
+	if _, ok := sm.topics[topic]; ok {
+		return sm.topics[topic]
 	}
 
 	return QosFailure
 }
 
 // Qos returns the list of QoS current in the message.
-func (sm *SubscribeMessage) Qos() []byte {
-	return sm.qos
+func (sm *SubscribeMessage) Qos() []QosType {
+	qos := []QosType{}
+
+	for _, q := range sm.topics {
+		qos = append(qos, q)
+	}
+
+	return qos
 }
 
 // Len of message
@@ -176,9 +159,7 @@ func (sm *SubscribeMessage) Decode(src []byte) (int, error) {
 			return total, err
 		}
 
-		sm.topics = append(sm.topics, t)
-
-		sm.qos = append(sm.qos, src[total])
+		sm.topics[string(t)] = QosType(src[total])
 		total++
 
 		remlen = remlen - n - 1
@@ -231,14 +212,14 @@ func (sm *SubscribeMessage) Encode(dst []byte) (int, error) {
 	//binary.BigEndian.PutUint16(dst[total:], this.packetId)
 	total += n
 
-	for i, t := range sm.topics {
-		n, err := writeLPBytes(dst[total:], t)
+	for t, q := range sm.topics {
+		n, err := writeLPBytes(dst[total:], []byte(t))
 		total += n
 		if err != nil {
 			return total, err
 		}
 
-		dst[total] = sm.qos[i]
+		dst[total] = byte(q)
 		total++
 	}
 
@@ -249,7 +230,7 @@ func (sm *SubscribeMessage) msgLen() int {
 	// packet ID
 	total := 2
 
-	for _, t := range sm.topics {
+	for t := range sm.topics {
 		total += 2 + len(t) + 1
 	}
 

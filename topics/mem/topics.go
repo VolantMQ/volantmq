@@ -60,7 +60,7 @@ func NewMemProvider() topics.Provider {
 	}
 }
 
-func (mT *provider) Subscribe(topic string, qos byte, sub interface{}) (byte, error) {
+func (mT *provider) Subscribe(topic string, qos message.QosType, sub interface{}) (message.QosType, error) {
 	if !message.ValidQos(qos) {
 		return message.QosFailure, fmt.Errorf("Invalid QoS %d", qos)
 	}
@@ -91,7 +91,7 @@ func (mT *provider) UnSubscribe(topic string, sub interface{}) error {
 }
 
 // Returned values will be invalidated by the next Subscribers call
-func (mT *provider) Subscribers(topic string, qos byte, subs *[]interface{}, qoss *[]byte) error {
+func (mT *provider) Subscribers(topic string, qos message.QosType, subs *[]interface{}, qoss *[]message.QosType) error {
 	if !message.ValidQos(qos) {
 		return fmt.Errorf("Invalid QoS %d", qos)
 	}
@@ -202,7 +202,7 @@ func nextTopicLevel(topic string) (string, string, error) {
 // due to the QoS granted is lower than the published message QoS. For example,
 // if the client is granted only QoS 0, and the publish message is QoS 1, then this
 // client is not to be send the published message.
-func (sn *sNode) matchQos(qos byte, subs *[]interface{}, qoss *[]byte) {
+func (sn *sNode) matchQos(qos message.QosType, subs *[]interface{}, qoss *[]message.QosType) {
 	for i, sub := range sn.subs {
 		// If the published QoS is higher than the subscriber QoS, then we skip the
 		// subscriber. Otherwise, add to the list.

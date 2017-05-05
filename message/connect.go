@@ -51,7 +51,7 @@ type ConnectMessage struct {
 	keepAlive    uint16
 	protoName    []byte
 	clientID     []byte
-	willTopic    []byte
+	willTopic    string
 	willMessage  []byte
 	username     []byte
 	password     []byte
@@ -142,18 +142,18 @@ func (cm *ConnectMessage) SetWillFlag(v bool) {
 
 // WillQos returns the two bits that specify the QoS level to be used when publishing
 // the Will Message.
-func (cm *ConnectMessage) WillQos() byte {
-	return (cm.connectFlags >> 3) & 0x3
+func (cm *ConnectMessage) WillQos() QosType {
+	return QosType((cm.connectFlags >> 3) & 0x3)
 }
 
 // SetWillQos sets the two bits that specify the QoS level to be used when publishing
 // the Will Message.
-func (cm *ConnectMessage) SetWillQos(qos byte) error {
+func (cm *ConnectMessage) SetWillQos(qos QosType) error {
 	if qos != QosAtMostOnce && qos != QosAtLeastOnce && qos != QosExactlyOnce {
 		return fmt.Errorf("connect/SetWillQos: Invalid QoS level %d", qos)
 	}
 
-	cm.connectFlags = (cm.connectFlags & 231) | (qos << 3) // 231 = 11100111
+	cm.connectFlags = (cm.connectFlags & 231) | (byte(qos) << 3) // 231 = 11100111
 	cm.dirty = true
 
 	return nil
@@ -251,12 +251,12 @@ func (cm *ConnectMessage) SetClientID(v []byte) error {
 
 // WillTopic returns the topic in which the Will Message should be published to.
 // If the Will Flag is set to 1, the Will Topic must be in the payload.
-func (cm *ConnectMessage) WillTopic() []byte {
+func (cm *ConnectMessage) WillTopic() string {
 	return cm.willTopic
 }
 
 // SetWillTopic sets the topic in which the Will Message should be published to.
-func (cm *ConnectMessage) SetWillTopic(v []byte) {
+func (cm *ConnectMessage) SetWillTopic(v string) {
 	cm.willTopic = v
 
 	if len(v) > 0 {
@@ -436,7 +436,7 @@ func (cm *ConnectMessage) encodeMessage(dst []byte) (int, error) {
 	}
 
 	if cm.WillFlag() {
-		n, err = writeLPBytes(dst[total:], cm.willTopic)
+		n, err = writeLPBytes(dst[total:], []byte(cm.willTopic))
 		total += n
 		if err != nil {
 			return total, err
@@ -500,11 +500,11 @@ func (cm *ConnectMessage) decodeMessage(src []byte) (int, error) {
 	}
 
 	if cm.WillQos() > QosExactlyOnce {
-		return total, fmt.Errorf("connect/decodeMessage: Invalid QoS level (%d) for %s message", cm.WillQos(), cm.Name())
+		return total, ErrInvalidQoS //fmt.Errorf("connect/decodeMessage: Invalid QoS level (%d) for %s message", cm.WillQos(), cm.Name())
 	}
 
 	if !cm.WillFlag() && (cm.WillRetain() || cm.WillQos() != QosAtMostOnce) {
-		return total, fmt.Errorf("connect/decodeMessage: Protocol violation: If the Will Flag (%t) is set to 0 the Will QoS (%d) and Will Retain (%t) fields MUST be set to zero", cm.WillFlag(), cm.WillQos(), cm.WillRetain())
+		return total, ErrWillViolation // fmt.Errorf("connect/decodeMessage: Protocol violation: If the Will Flag (%t) is set to 0 the Will QoS (%d) and Will Retain (%t) fields MUST be set to zero", cm.WillFlag(), cm.WillQos(), cm.WillRetain())
 	}
 
 	if cm.UsernameFlag() && !cm.PasswordFlag() {
@@ -537,11 +537,13 @@ func (cm *ConnectMessage) decodeMessage(src []byte) (int, error) {
 	}
 
 	if cm.WillFlag() {
-		cm.willTopic, n, err = readLPBytes(src[total:])
+		var willBuf []byte
+		willBuf, n, err = readLPBytes(src[total:])
 		total += n
 		if err != nil {
 			return total, err
 		}
+		cm.willTopic = string(willBuf)
 
 		cm.willMessage, n, err = readLPBytes(src[total:])
 		total += n
@@ -550,8 +552,8 @@ func (cm *ConnectMessage) decodeMessage(src []byte) (int, error) {
 		}
 	}
 
-	// According to the 3.1 spec, it's possible that the passwordFlag is set,
-	// but the password string is missing.
+	// According to the 3.1 spec, it's possible that the usernameFlag is set,
+	// but the user string is missing.
 	if cm.UsernameFlag() && len(src[total:]) > 0 {
 		cm.username, n, err = readLPBytes(src[total:])
 		total += n
