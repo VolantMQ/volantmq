@@ -27,7 +27,7 @@ type SubAckMessage struct {
 	returnCodes []QosType
 }
 
-var _ Message = (*SubAckMessage)(nil)
+var _ Provider = (*SubAckMessage)(nil)
 
 // NewSubAckMessage creates a new SUBACK message.
 func NewSubAckMessage() *SubAckMessage {
@@ -51,8 +51,8 @@ func (sam *SubAckMessage) ReturnCodes() []QosType {
 // An error is returned if any of the QoS values are not valid.
 func (sam *SubAckMessage) AddReturnCodes(ret []QosType) error {
 	for _, c := range ret {
-		if c != QosAtMostOnce && c != QosAtLeastOnce && c != QosExactlyOnce && c != QosFailure {
-			return fmt.Errorf("suback/AddReturnCode: Invalid return code %d. Must be 0, 1, 2, 0x80", c)
+		if !c.IsValidFull() {
+			return ErrInvalidReturnCode
 		}
 
 		sam.returnCodes = append(sam.returnCodes, c)
@@ -105,9 +105,9 @@ func (sam *SubAckMessage) Decode(src []byte) (int, error) {
 
 	total += len(sam.returnCodes)
 
-	for i, code := range sam.returnCodes {
-		if code != 0x00 && code != 0x01 && code != 0x02 && code != 0x80 {
-			return total, fmt.Errorf("suback/Decode: Invalid return code %d for topic %d", code, i)
+	for _, code := range sam.returnCodes {
+		if !code.IsValidFull() {
+			return total, ErrInvalidReturnCode
 		}
 	}
 
@@ -120,15 +120,15 @@ func (sam *SubAckMessage) Decode(src []byte) (int, error) {
 func (sam *SubAckMessage) Encode(dst []byte) (int, error) {
 	if !sam.dirty {
 		if len(dst) < len(sam.dBuf) {
-			return 0, fmt.Errorf("suback/Encode: Insufficient buffer size. Expecting %d, got %d", len(sam.dBuf), len(dst))
+			return 0, ErrInsufficientBufferSize
 		}
 
 		return copy(dst, sam.dBuf), nil
 	}
 
-	for i, code := range sam.returnCodes {
-		if code != 0x00 && code != 0x01 && code != 0x02 && code != 0x80 {
-			return 0, fmt.Errorf("suback/Encode: Invalid return code %d for topic %d", code, i)
+	for _, code := range sam.returnCodes {
+		if !code.IsValidFull() {
+			return 0, ErrInvalidReturnCode
 		}
 	}
 
@@ -136,7 +136,7 @@ func (sam *SubAckMessage) Encode(dst []byte) (int, error) {
 	ml := sam.msgLen()
 
 	if len(dst) < hl+ml {
-		return 0, fmt.Errorf("suback/Encode: Insufficient buffer size. Expecting %d, got %d", hl+ml, len(dst))
+		return 0, ErrInsufficientBufferSize
 	}
 
 	if err := sam.SetRemainingLength(int32(ml)); err != nil {

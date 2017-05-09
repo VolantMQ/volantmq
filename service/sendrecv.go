@@ -179,12 +179,12 @@ func (s *Type) peekMessageSize() (message.Type, int, error) {
 
 // peekMessage() reads a message from the buffer, but the bytes are NOT committed.
 // This means the buffer still thinks the bytes are not read yet.
-func (s *Type) peekMessage(mtype message.Type, total int) (message.Message, int, error) {
+func (s *Type) peekMessage(mtype message.Type, total int) (message.Provider, int, error) {
 	var (
 		b    []byte
 		err  error
 		i, n int
-		msg  message.Message
+		msg  message.Provider
 	)
 
 	if s.in == nil {
@@ -216,12 +216,12 @@ func (s *Type) peekMessage(mtype message.Type, total int) (message.Message, int,
 
 // readMessage() reads and copies a message from the buffer. The buffer bytes are
 // committed as a result of the read.
-func (s *Type) readMessage(mType message.Type, total int) (message.Message, int, error) {
+func (s *Type) readMessage(mType message.Type, total int) (message.Provider, int, error) {
 	var (
 		b   []byte
 		err error
 		n   int
-		msg message.Message
+		msg message.Provider
 	)
 
 	if s.in == nil {
@@ -256,7 +256,7 @@ func (s *Type) readMessage(mType message.Type, total int) (message.Message, int,
 }
 
 // writeMessage() writes a message to the outgoing buffer
-func (s *Type) writeMessage(msg message.Message) (int, error) {
+func (s *Type) writeMessage(msg message.Provider) (int, error) {
 	var (
 		l    int = msg.Len()
 		m, n int

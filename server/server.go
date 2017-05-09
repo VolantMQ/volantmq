@@ -297,7 +297,6 @@ func (s *Type) Close() error {
 
 	// We then close all net.Listener, which will force Accept() to return if it's
 	// blocked waiting for new connections.
-
 	for _, l := range s.listeners {
 		if err := l.listener.Close(); err != nil {
 			appLog.Errorf(err.Error())

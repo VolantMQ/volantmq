@@ -95,7 +95,7 @@ func (s *Type) processor() {
 	}
 }
 
-func (s *Type) processIncoming(msg message.Message) error {
+func (s *Type) processIncoming(msg message.Provider) error {
 	var err error
 
 	switch msg := msg.(type) {
@@ -187,7 +187,7 @@ func (s *Type) processAcked(ackq *session.AckQueue) {
 			continue
 		}
 
-		var ack message.Message
+		var ack message.Provider
 		if ack, err = ackmsg.State.New(); err != nil {
 			appLog.Errorf("process/processAcked: Unable to creating new %s message: %v", ackmsg.State, err)
 			continue

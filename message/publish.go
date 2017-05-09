@@ -15,7 +15,6 @@
 package message
 
 import (
-	"errors"
 	"fmt"
 	"sync/atomic"
 )
@@ -29,7 +28,7 @@ type PublishMessage struct {
 	payload []byte
 }
 
-var _ Message = (*PublishMessage)(nil)
+var _ Provider = (*PublishMessage)(nil)
 
 // NewPublishMessage creates a new PUBLISH message.
 func NewPublishMessage() *PublishMessage {
@@ -89,8 +88,8 @@ func (pm *PublishMessage) QoS() QosType {
 // Application Message. The values are QosAtMostOnce, QosAtLeastOnce and QosExactlyOnce.
 // An error is returned if the value is not one of these.
 func (pm *PublishMessage) SetQoS(v QosType) error {
-	if v != 0x0 && v != 0x1 && v != 0x2 {
-		return fmt.Errorf("publish/SetQoS: Invalid QoS %d", v)
+	if !v.IsValid() {
+		return ErrInvalidQoS
 	}
 
 	pm.mTypeFlags[0] = (pm.mTypeFlags[0] & 249) | byte(v<<1) // 249 = 11111001
@@ -108,7 +107,7 @@ func (pm *PublishMessage) Topic() string {
 // payload data is published. An error is returned if ValidTopic() is falbase.
 func (pm *PublishMessage) SetTopic(v string) error {
 	if !ValidTopic(v) {
-		return fmt.Errorf("publish/SetTopic: Invalid topic name (%s). Must not be empty or contain wildcard characters", v)
+		return ErrInvalidTopic
 	}
 
 	pm.topic = v
@@ -163,7 +162,7 @@ func (pm *PublishMessage) Decode(src []byte) (int, error) {
 	}
 
 	if !ValidTopic(pm.topic) {
-		return total, fmt.Errorf("publish/Decode: Invalid topic name (%s). Must not be empty or contain wildcard characters", pm.topic)
+		return total, ErrInvalidTopic
 	}
 
 	// The packet identifier field is only present in the PUBLISH packets where the
@@ -187,18 +186,18 @@ func (pm *PublishMessage) Decode(src []byte) (int, error) {
 func (pm *PublishMessage) Encode(dst []byte) (int, error) {
 	if !pm.dirty {
 		if len(dst) < len(pm.dBuf) {
-			return 0, fmt.Errorf("publish/Encode: Insufficient buffer size. Expecting %d, got %d", len(pm.dBuf), len(dst))
+			return 0, ErrInsufficientBufferSize
 		}
 
 		return copy(dst, pm.dBuf), nil
 	}
 
 	if len(pm.topic) == 0 {
-		return 0, errors.New("publish/Encode: Topic name is empty")
+		return 0, ErrInvalidTopic
 	}
 
 	if len(pm.payload) == 0 {
-		return 0, errors.New("publish/Encode: Payload is empty")
+		return 0, ErrEmptyPayload
 	}
 
 	ml := pm.msgLen()
@@ -210,7 +209,7 @@ func (pm *PublishMessage) Encode(dst []byte) (int, error) {
 	hl := pm.header.msgLen()
 
 	if len(dst) < hl+ml {
-		return 0, fmt.Errorf("publish/Encode: Insufficient buffer size. Expecting %d, got %d", hl+ml, len(dst))
+		return 0, ErrInsufficientBufferSize
 	}
 
 	total := 0

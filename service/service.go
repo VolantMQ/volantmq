@@ -29,7 +29,7 @@ import (
 
 type (
 	// OnCompleteFunc on complete
-	OnCompleteFunc func(msg, ack message.Message, err error) error
+	OnCompleteFunc func(msg, ack message.Provider, err error) error
 	// OnPublishFunc on publish
 	OnPublishFunc func(msg *message.PublishMessage) error
 
@@ -338,7 +338,7 @@ func (s *Type) Subscribe(msg *message.SubscribeMessage, onComplete OnCompleteFun
 		return fmt.Errorf("[%s] couldn't send [%s] message: %v", s.CID(), msg.Name(), err)
 	}
 
-	var onc OnCompleteFunc = func(msg, ack message.Message, err error) error {
+	var onc OnCompleteFunc = func(msg, ack message.Provider, err error) error {
 		onComplete := onComplete
 		onPublish := onPublish
 
@@ -415,7 +415,7 @@ func (s *Type) UnSubscribe(msg *message.UnSubscribeMessage, onComplete OnComplet
 		return fmt.Errorf("[%s] couldn't send [%s] message: %v", s.CID(), msg.Name(), err)
 	}
 
-	var onc OnCompleteFunc = func(msg, ack message.Message, err error) error {
+	var onc OnCompleteFunc = func(msg, ack message.Provider, err error) error {
 		onComplete := onComplete
 
 		if err != nil {

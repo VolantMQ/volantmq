@@ -14,13 +14,17 @@
 
 package message
 
+import (
+	"fmt"
+)
+
 // PubCompMessage The PUBCOMP Packet is the response to a PUBREL Packet. It is the fourth and
 // final packet of the QoS 2 protocol exchange.
 type PubCompMessage struct {
-	PubAckMessage
+	header
 }
 
-var _ Message = (*PubCompMessage)(nil)
+var _ Provider = (*PubCompMessage)(nil)
 
 // NewPubCompMessage creates a new PUBCOMP message.
 func NewPubCompMessage() *PubCompMessage {
@@ -28,4 +32,85 @@ func NewPubCompMessage() *PubCompMessage {
 	msg.SetType(PUBCOMP) // nolint: errcheck
 
 	return msg
+}
+
+// String message as string
+func (pam *PubCompMessage) String() string {
+	return fmt.Sprintf("%s, Packet ID=%d", pam.header, pam.packetID)
+}
+
+// Len of message
+func (pam *PubCompMessage) Len() int {
+	if !pam.dirty {
+		return len(pam.dBuf)
+	}
+
+	ml := pam.msgLen()
+
+	if err := pam.SetRemainingLength(int32(ml)); err != nil {
+		return 0
+	}
+
+	return pam.header.msgLen() + ml
+}
+
+// Decode message
+func (pam *PubCompMessage) Decode(src []byte) (int, error) {
+	total := 0
+
+	n, err := pam.header.decode(src[total:])
+	total += n
+	if err != nil {
+		return total, err
+	}
+
+	//this.packetID = binary.BigEndian.Uint16(src[total:])
+	pam.packetID = src[total : total+2]
+	total += 2
+
+	pam.dirty = false
+
+	return total, nil
+}
+
+// Encode message
+func (pam *PubCompMessage) Encode(dst []byte) (int, error) {
+	if !pam.dirty {
+		if len(dst) < len(pam.dBuf) {
+			return 0, ErrInsufficientBufferSize
+		}
+
+		return copy(dst, pam.dBuf), nil
+	}
+
+	hl := pam.header.msgLen()
+	ml := pam.msgLen()
+
+	if len(dst) < hl+ml {
+		return 0, ErrInsufficientBufferSize
+	}
+
+	if err := pam.SetRemainingLength(int32(ml)); err != nil {
+		return 0, err
+	}
+
+	total := 0
+
+	n, err := pam.header.encode(dst[total:])
+	total += n
+	if err != nil {
+		return total, err
+	}
+
+	if copy(dst[total:total+2], pam.packetID) != 2 {
+		dst[total], dst[total+1] = 0, 0
+	}
+	total += 2
+
+	return total, nil
+}
+
+func (pam *PubCompMessage) msgLen() int {
+	// packet ID
+	return 2
 }

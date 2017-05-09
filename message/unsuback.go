@@ -14,13 +14,17 @@
 
 package message
 
+import (
+	"fmt"
+)
+
 // UnSubAckMessage The UNSUBACK Packet is sent by the Server to the Client to confirm receipt of an
 // UNSUBSCRIBE Packet.
 type UnSubAckMessage struct {
-	PubAckMessage
+	header
 }
 
-var _ Message = (*UnSubAckMessage)(nil)
+var _ Provider = (*UnSubAckMessage)(nil)
 
 // NewUnSubAckMessage creates a new UNSUBACK message.
 func NewUnSubAckMessage() *UnSubAckMessage {
@@ -28,4 +32,85 @@ func NewUnSubAckMessage() *UnSubAckMessage {
 	msg.SetType(UNSUBACK) // nolint: errcheck
 
 	return msg
+}
+
+// String message as string
+func (pam *UnSubAckMessage) String() string {
+	return fmt.Sprintf("%s, Packet ID=%d", pam.header, pam.packetID)
+}
+
+// Len of message
+func (pam *UnSubAckMessage) Len() int {
+	if !pam.dirty {
+		return len(pam.dBuf)
+	}
+
+	ml := pam.msgLen()
+
+	if err := pam.SetRemainingLength(int32(ml)); err != nil {
+		return 0
+	}
+
+	return pam.header.msgLen() + ml
+}
+
+// Decode message
+func (pam *UnSubAckMessage) Decode(src []byte) (int, error) {
+	total := 0
+
+	n, err := pam.header.decode(src[total:])
+	total += n
+	if err != nil {
+		return total, err
+	}
+
+	//this.packetID = binary.BigEndian.Uint16(src[total:])
+	pam.packetID = src[total : total+2]
+	total += 2
+
+	pam.dirty = false
+
+	return total, nil
+}
+
+// Encode message
+func (pam *UnSubAckMessage) Encode(dst []byte) (int, error) {
+	if !pam.dirty {
+		if len(dst) < len(pam.dBuf) {
+			return 0, ErrInsufficientBufferSize
+		}
+
+		return copy(dst, pam.dBuf), nil
+	}
+
+	hl := pam.header.msgLen()
+	ml := pam.msgLen()
+
+	if len(dst) < hl+ml {
+		return 0, ErrInsufficientBufferSize
+	}
+
+	if err := pam.SetRemainingLength(int32(ml)); err != nil {
+		return 0, err
+	}
+
+	total := 0
+
+	n, err := pam.header.encode(dst[total:])
+	total += n
+	if err != nil {
+		return total, err
+	}
+
+	if copy(dst[total:total+2], pam.packetID) != 2 {
+		dst[total], dst[total+1] = 0, 0
+	}
+	total += 2
+
+	return total, nil
+}
+
+func (pam *UnSubAckMessage) msgLen() int {
+	// packet ID
+	return 2
 }

@@ -54,7 +54,7 @@ func GetConnAckMessage(conn io.Closer) (*message.ConnAckMessage, error) {
 }
 
 // WriteMessage into connection
-func WriteMessage(conn io.Closer, msg message.Message) error {
+func WriteMessage(conn io.Closer, msg message.Provider) error {
 	buf := make([]byte, msg.Len())
 	_, err := msg.Encode(buf)
 	if err != nil {

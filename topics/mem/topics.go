@@ -15,7 +15,6 @@
 package mem
 
 import (
-	"fmt"
 	"reflect"
 	"sync"
 
@@ -61,8 +60,8 @@ func NewMemProvider() topics.Provider {
 }
 
 func (mT *provider) Subscribe(topic string, qos message.QosType, sub interface{}) (message.QosType, error) {
-	if !message.ValidQos(qos) {
-		return message.QosFailure, fmt.Errorf("Invalid QoS %d", qos)
+	if !qos.IsValid() {
+		return message.QosFailure, message.ErrInvalidQoS
 	}
 
 	if sub == nil {
@@ -92,8 +91,8 @@ func (mT *provider) UnSubscribe(topic string, sub interface{}) error {
 
 // Returned values will be invalidated by the next Subscribers call
 func (mT *provider) Subscribers(topic string, qos message.QosType, subs *[]interface{}, qoss *[]message.QosType) error {
-	if !message.ValidQos(qos) {
-		return fmt.Errorf("Invalid QoS %d", qos)
+	if !qos.IsValid() {
+		return message.ErrInvalidQoS
 	}
 
 	mT.smu.RLock()

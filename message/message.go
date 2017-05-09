@@ -53,6 +53,22 @@ const (
 	QosFailure = 0x80
 )
 
+// IsValid checks the QoS value to see if it's valid. Valid QoS are QosAtMostOnce,
+// QosAtLeastOnce, and QosExactlyOnce.
+func (c QosType) IsValid() bool {
+	return c == QosAtMostOnce || c == QosAtLeastOnce || c == QosExactlyOnce
+}
+
+// IsValidFull checks the QoS value to see if it's valid. Valid QoS are QosAtMostOnce,
+// QosAtLeastOnce, QosExactlyOnce and QosFailure.
+func (c QosType) IsValidFull() bool {
+	if c != QosAtMostOnce && c != QosAtLeastOnce && c != QosExactlyOnce && c != QosFailure {
+		return false
+	}
+
+	return true
+}
+
 // SupportedVersions is a map of the version number (0x3 or 0x4) to the version string,
 // "MQIsdp" for 0x3, and "MQTT" for 0x4.
 var SupportedVersions = map[byte]string{
@@ -70,8 +86,8 @@ type Topics []string
 // TopicsQoS is a map if topic and corresponding QoS
 type TopicsQoS map[string]QosType
 
-// Message is an interface defined for all MQTT message types.
-type Message interface {
+// Provider is an interface defined for all MQTT message types.
+type Provider interface {
 	// Name returns a string representation of the message type. Examples include
 	// "PUBLISH", "SUBSCRIBE", and others. This is statically defined for each of
 	// the message types and cannot be changed.
@@ -181,13 +197,21 @@ const (
 	ErrInvalidQoS
 	// ErrInvalidLength Invalid message length
 	ErrInvalidLength
-	// ErrWillViolation Message Will violation
-	ErrWillViolation
+	// ErrProtocolViolation Message Will violation
+	ErrProtocolViolation
+	// ErrInsufficientBufferSize Insufficient buffer size
+	ErrInsufficientBufferSize
+	// ErrInvalidTopic Topic is empty
+	ErrInvalidTopic
+	// ErrEmptyPayload Payload is empty
+	ErrEmptyPayload
+	// ErrInvalidReturnCode invalid return code
+	ErrInvalidReturnCode
 )
 
 // Error returns the corresponding error string for the ConnAckCode
-func (me Error) Error() string {
-	switch me {
+func (e Error) Error() string {
+	switch e {
 	case ErrInvalidUnSubscribe:
 		return "Invalid UNSUBSCRIBE message"
 	case ErrInvalidUnSubAck:
@@ -204,8 +228,16 @@ func (me Error) Error() string {
 		return "Invalid message QoS"
 	case ErrInvalidLength:
 		return "Invalid message length"
-	case ErrWillViolation:
-		return "Message Will violation"
+	case ErrProtocolViolation:
+		return "Protocol violation"
+	case ErrInsufficientBufferSize:
+		return "Insufficient buffer size"
+	case ErrInvalidTopic:
+		return "Invalid topic name"
+	case ErrEmptyPayload:
+		return "Payload is empty"
+	case ErrInvalidReturnCode:
+		return "Invalid return code"
 	}
 
 	return "Unknown error"
@@ -342,7 +374,7 @@ func (mt Type) DefaultFlags() byte {
 // New creates a new message based on the message type. It is a shortcut to call
 // one of the New*Message functions. If an error is returned then the message type
 // is invalid.
-func (mt Type) New() (Message, error) {
+func (mt Type) New() (Provider, error) {
 	switch mt {
 	case CONNECT:
 		return NewConnectMessage(), nil
@@ -374,7 +406,7 @@ func (mt Type) New() (Message, error) {
 		return NewDisconnectMessage(), nil
 	}
 
-	return nil, fmt.Errorf("msgtype/NewMessage: Invalid message type %d", mt)
+	return nil, ErrInvalidMessageType
 }
 
 // Valid returns a boolean indicating whether the message type is valid or not.
@@ -386,14 +418,7 @@ func (mt Type) Valid() bool {
 // considered valid if it's longer than 0 bytes, and doesn't contain any wildcard characters
 // such as + and #.
 func ValidTopic(topic string) bool {
-
 	return len(topic) > 0 && !strings.Contains(topic, "#") && !strings.Contains(topic, "+")
-}
-
-// ValidQos checks the QoS value to see if it's valid. Valid QoS are QosAtMostOnce,
-// QosAtLeastOnce, and QosExactlyOnce.
-func ValidQos(qos QosType) bool {
-	return qos == QosAtMostOnce || qos == QosAtLeastOnce || qos == QosExactlyOnce
 }
 
 // ValidVersion checks to see if the version is valid. Current supported versions include 0x3 and 0x4.
@@ -416,7 +441,7 @@ func ValidConnAckError(err error) (ConnAckCode, bool) {
 // Read length prefixed bytes
 func readLPBytes(buf []byte) ([]byte, int, error) {
 	if len(buf) < 2 {
-		return nil, 0, fmt.Errorf("utils/readLPBytes:Insufficient buffer size. Expecting %d, got %d", 2, len(buf))
+		return nil, 0, ErrInsufficientBufferSize
 	}
 
 	var n int
@@ -426,7 +451,7 @@ func readLPBytes(buf []byte) ([]byte, int, error) {
 	total += 2
 
 	if len(buf) < n {
-		return nil, total, fmt.Errorf("utils/readLPBytes: Insufficient buffer size. Expecting %d, got %d", n, len(buf))
+		return nil, total, ErrInsufficientBufferSize
 	}
 
 	total += n
@@ -443,7 +468,7 @@ func writeLPBytes(buf []byte, b []byte) (int, error) {
 	}
 
 	if len(buf) < 2+n {
-		return 0, fmt.Errorf("utils/writeLPBytes: Insufficient buffer size. Expecting %d, got %d", 2+n, len(buf))
+		return 0, ErrInsufficientBufferSize
 	}
 
 	binary.BigEndian.PutUint16(buf, uint16(n))

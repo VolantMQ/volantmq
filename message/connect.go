@@ -23,6 +23,15 @@ import (
 
 var clientIDRegexp *regexp.Regexp
 
+const (
+	connFlagUsernameMask     byte = 0x80
+	connFlagPasswordMask     byte = 0x40
+	connFlagWillRetainMask   byte = 0x20
+	connFlagWillQosMask      byte = 0x18
+	connFlagWillMask         byte = 0x04
+	connFlagCleanSessionMask byte = 0x02
+)
+
 func init() {
 	// Added space for Paho compliance test
 	// Added underscore (_) for MQTT C client test
@@ -57,7 +66,7 @@ type ConnectMessage struct {
 	password     []byte
 }
 
-var _ Message = (*ConnectMessage)(nil)
+var _ Provider = (*ConnectMessage)(nil)
 
 // NewConnectMessage creates a new CONNECT message.
 func NewConnectMessage() *ConnectMessage {
@@ -106,15 +115,15 @@ func (cm *ConnectMessage) SetVersion(v byte) error {
 // continue across a sequence of Network Connections. This bit is used to control
 // the lifetime of the Session state.
 func (cm *ConnectMessage) CleanSession() bool {
-	return ((cm.connectFlags >> 1) & 0x1) == 1
+	return (cm.connectFlags & connFlagCleanSessionMask) != 0
 }
 
 // SetCleanSession sets the bit that specifies the handling of the Session state.
 func (cm *ConnectMessage) SetCleanSession(v bool) {
 	if v {
-		cm.connectFlags |= 0x2 // 00000010
+		cm.connectFlags |= connFlagCleanSessionMask // 0x02 // 00000010
 	} else {
-		cm.connectFlags &= 253 // 11111101
+		cm.connectFlags &= ^connFlagCleanSessionMask // 0xFD // 11111101
 	}
 
 	cm.dirty = true
@@ -125,16 +134,16 @@ func (cm *ConnectMessage) SetCleanSession(v bool) {
 // request is accepted, a Will Message MUST be stored on the Server and associated
 // with the Network Connection.
 func (cm *ConnectMessage) WillFlag() bool {
-	return ((cm.connectFlags >> 2) & 0x1) == 1
+	return (cm.connectFlags & connFlagWillMask) != 0
 }
 
 // SetWillFlag sets the bit that specifies whether a Will Message should be stored
 // on the server.
 func (cm *ConnectMessage) SetWillFlag(v bool) {
 	if v {
-		cm.connectFlags |= 0x4 // 00000100
+		cm.connectFlags |= connFlagWillMask // 0x04 // 00000100
 	} else {
-		cm.connectFlags &= 251 // 11111011
+		cm.connectFlags &= ^connFlagWillMask // 0xFB // 11111011
 	}
 
 	cm.dirty = true
@@ -143,17 +152,18 @@ func (cm *ConnectMessage) SetWillFlag(v bool) {
 // WillQos returns the two bits that specify the QoS level to be used when publishing
 // the Will Message.
 func (cm *ConnectMessage) WillQos() QosType {
-	return QosType((cm.connectFlags >> 3) & 0x3)
+	return QosType((cm.connectFlags & connFlagWillQosMask) >> 0x3)
 }
 
 // SetWillQos sets the two bits that specify the QoS level to be used when publishing
 // the Will Message.
 func (cm *ConnectMessage) SetWillQos(qos QosType) error {
-	if qos != QosAtMostOnce && qos != QosAtLeastOnce && qos != QosExactlyOnce {
-		return fmt.Errorf("connect/SetWillQos: Invalid QoS level %d", qos)
+	if !qos.IsValid() {
+		return ErrInvalidQoS
 	}
 
-	cm.connectFlags = (cm.connectFlags & 231) | (byte(qos) << 3) // 231 = 11100111
+	cm.connectFlags |= byte(qos) << 0x03
+	//cm.connectFlags = (cm.connectFlags & 0xE7) | (byte(qos) << 3) // 231 = 11100111
 	cm.dirty = true
 
 	return nil
@@ -162,16 +172,16 @@ func (cm *ConnectMessage) SetWillQos(qos QosType) error {
 // WillRetain returns the bit specifies if the Will Message is to be Retained when it
 // is published.
 func (cm *ConnectMessage) WillRetain() bool {
-	return ((cm.connectFlags >> 5) & 0x1) == 1
+	return (cm.connectFlags & connFlagWillRetainMask) != 0
 }
 
 // SetWillRetain sets the bit specifies if the Will Message is to be Retained when it
 // is published.
 func (cm *ConnectMessage) SetWillRetain(v bool) {
 	if v {
-		cm.connectFlags |= 32 // 00100000
+		cm.connectFlags |= connFlagWillRetainMask // 0x20 // 00100000
 	} else {
-		cm.connectFlags &= 223 // 11011111
+		cm.connectFlags &= ^connFlagWillRetainMask // 0xDF // 11011111
 	}
 
 	cm.dirty = true
@@ -180,16 +190,16 @@ func (cm *ConnectMessage) SetWillRetain(v bool) {
 // UsernameFlag returns the bit that specifies whether a user name is present in the
 // payload.
 func (cm *ConnectMessage) UsernameFlag() bool {
-	return ((cm.connectFlags >> 7) & 0x1) == 1
+	return (cm.connectFlags & connFlagUsernameMask) != 0
 }
 
 // SetUsernameFlag sets the bit that specifies whether a user name is present in the
 // payload.
 func (cm *ConnectMessage) SetUsernameFlag(v bool) {
 	if v {
-		cm.connectFlags |= 128 // 10000000
+		cm.connectFlags |= connFlagUsernameMask // 0x80 // 10000000
 	} else {
-		cm.connectFlags &= 127 // 01111111
+		cm.connectFlags &= ^connFlagUsernameMask // 0x7F // 01111111
 	}
 
 	cm.dirty = true
@@ -198,16 +208,16 @@ func (cm *ConnectMessage) SetUsernameFlag(v bool) {
 // PasswordFlag returns the bit that specifies whether a password is present in the
 // payload.
 func (cm *ConnectMessage) PasswordFlag() bool {
-	return ((cm.connectFlags >> 6) & 0x1) == 1
+	return (cm.connectFlags & connFlagPasswordMask) != 0
 }
 
 // SetPasswordFlag sets the bit that specifies whether a password is present in the
 // payload.
 func (cm *ConnectMessage) SetPasswordFlag(v bool) {
 	if v {
-		cm.connectFlags |= 64 // 01000000
+		cm.connectFlags |= connFlagPasswordMask // 0x40 // 01000000
 	} else {
-		cm.connectFlags &= 191 // 10111111
+		cm.connectFlags &= ^connFlagPasswordMask // 0xBF // 10111111
 	}
 
 	cm.dirty = true
@@ -332,7 +342,7 @@ func (cm *ConnectMessage) Len() int {
 		return len(cm.dBuf)
 	}
 
-	ml := cm.msglen()
+	ml := cm.msgLen()
 
 	if err := cm.SetRemainingLength(int32(ml)); err != nil {
 		return 0
@@ -371,14 +381,14 @@ func (cm *ConnectMessage) Decode(src []byte) (int, error) {
 func (cm *ConnectMessage) Encode(dst []byte) (int, error) {
 	if !cm.dirty {
 		if len(dst) < len(cm.dBuf) {
-			return 0, fmt.Errorf("connect/Encode: Insufficient buffer size. Expecting %d, got %d", len(cm.dBuf), len(dst))
+			return 0, ErrInsufficientBufferSize
 		}
 
 		return copy(dst, cm.dBuf), nil
 	}
 
 	if cm.Type() != CONNECT {
-		return 0, fmt.Errorf("connect/Encode: Invalid message type. Expecting %d, got %d", CONNECT, cm.Type())
+		return 0, ErrInsufficientBufferSize
 	}
 
 	_, ok := SupportedVersions[cm.version]
@@ -387,10 +397,10 @@ func (cm *ConnectMessage) Encode(dst []byte) (int, error) {
 	}
 
 	hl := cm.header.msgLen()
-	ml := cm.msglen()
+	ml := cm.msgLen()
 
 	if len(dst) < hl+ml {
-		return 0, fmt.Errorf("connect/Encode: Insufficient buffer size. Expecting %d, got %d", hl+ml, len(dst))
+		return 0, ErrInsufficientBufferSize
 	}
 
 	if err := cm.SetRemainingLength(int32(ml)); err != nil {
@@ -499,20 +509,20 @@ func (cm *ConnectMessage) decodeMessage(src []byte) (int, error) {
 		return total, errors.New("connect/decodeMessage: Connect Flags reserved bit 0 is not 0")
 	}
 
-	if cm.WillQos() > QosExactlyOnce {
-		return total, ErrInvalidQoS //fmt.Errorf("connect/decodeMessage: Invalid QoS level (%d) for %s message", cm.WillQos(), cm.Name())
+	if !cm.WillQos().IsValid() {
+		return total, ErrInvalidQoS
 	}
 
-	if !cm.WillFlag() && (cm.WillRetain() || cm.WillQos() != QosAtMostOnce) {
-		return total, ErrWillViolation // fmt.Errorf("connect/decodeMessage: Protocol violation: If the Will Flag (%t) is set to 0 the Will QoS (%d) and Will Retain (%t) fields MUST be set to zero", cm.WillFlag(), cm.WillQos(), cm.WillRetain())
+	if !cm.WillFlag() && (cm.WillRetain() || (cm.WillQos() != QosAtMostOnce)) {
+		return total, ErrProtocolViolation
 	}
 
-	if cm.UsernameFlag() && !cm.PasswordFlag() {
-		return total, errors.New("connect/decodeMessage: Username flag is set but Password flag is not set")
+	if !cm.UsernameFlag() && cm.PasswordFlag() {
+		return total, ErrBadUsernameOrPassword //errors.New("connect/decodeMessage: Username flag is set but Password flag is not set")
 	}
 
 	if len(src[total:]) < 2 {
-		return 0, fmt.Errorf("connect/decodeMessage: Insufficient buffer size. Expecting %d, got %d", 2, len(src[total:]))
+		return 0, ErrInsufficientBufferSize
 	}
 
 	cm.keepAlive = binary.BigEndian.Uint16(src[total:])
@@ -575,7 +585,7 @@ func (cm *ConnectMessage) decodeMessage(src []byte) (int, error) {
 	return total, nil
 }
 
-func (cm *ConnectMessage) msglen() int {
+func (cm *ConnectMessage) msgLen() int {
 	total := 0
 
 	verstr, ok := SupportedVersions[cm.version]

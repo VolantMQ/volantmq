@@ -17,15 +17,33 @@ package message
 // PingRespMessage A PINGRESP Packet is sent by the Server to the Client in response to a PINGREQ
 // Packet. It indicates that the Server is alive.
 type PingRespMessage struct {
-	DisconnectMessage
+	header
 }
 
-var _ Message = (*PingRespMessage)(nil)
+var _ Provider = (*PingRespMessage)(nil)
 
 // NewPingRespMessage creates a new PINGRESP message.
-func NewPingRespMessage() Message {
+func NewPingRespMessage() Provider {
 	msg := &PingRespMessage{}
 	msg.SetType(PINGRESP) // nolint: errcheck
 
 	return msg
+}
+
+// Decode message
+func (dm *PingRespMessage) Decode(src []byte) (int, error) {
+	return dm.header.decode(src)
+}
+
+// Encode message
+func (dm *PingRespMessage) Encode(dst []byte) (int, error) {
+	if !dm.dirty {
+		if len(dst) < len(dm.dBuf) {
+			return 0, ErrInsufficientBufferSize
+		}
+
+		return copy(dst, dm.dBuf), nil
+	}
+
+	return dm.header.encode(dst)
 }

@@ -36,6 +36,9 @@ const (
 
 	// ErrNotAuthorized The Client is not authorized to connect
 	ErrNotAuthorized
+
+	// ConnAckCodeReserved
+	//ConnAckCodeReserved
 )
 
 // Value returns the value of the ConnAckCode, which is just the byte representation
@@ -46,17 +49,17 @@ func (cac ConnAckCode) Value() byte {
 // Desc returns the description of the ConnAckCode
 func (cac ConnAckCode) Desc() string {
 	switch cac {
-	case 0:
+	case ConnectionAccepted:
 		return "Connection accepted"
-	case 1:
+	case ErrInvalidProtocolVersion:
 		return "The Server does not support the level of the MQTT protocol requested by the Client"
-	case 2:
+	case ErrIdentifierRejected:
 		return "The Client identifier is correct UTF-8 but not allowed by the server"
-	case 3:
+	case ErrServerUnavailable:
 		return "The Network Connection has been made but the MQTT service is unavailable"
-	case 4:
+	case ErrBadUsernameOrPassword:
 		return "The data in the user name or password is malformed"
-	case 5:
+	case ErrNotAuthorized:
 		return "The Client is not authorized to connect"
 	}
 
@@ -71,17 +74,17 @@ func (cac ConnAckCode) Valid() bool {
 // Error returns the corresponding error string for the ConnAckCode
 func (cac ConnAckCode) Error() string {
 	switch cac {
-	case 0:
+	case ConnectionAccepted:
 		return "Connection accepted"
-	case 1:
+	case ErrInvalidProtocolVersion:
 		return "Connection Refused, unacceptable protocol version"
-	case 2:
+	case ErrIdentifierRejected:
 		return "Connection Refused, identifier rejected"
-	case 3:
+	case ErrServerUnavailable:
 		return "Connection Refused, Server unavailable"
-	case 4:
+	case ErrBadUsernameOrPassword:
 		return "Connection Refused, bad user name or password"
-	case 5:
+	case ErrNotAuthorized:
 		return "Connection Refused, not authorized"
 	}
 

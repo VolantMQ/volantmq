@@ -100,8 +100,7 @@ func (h *header) SetType(mType Type) error {
 
 // Flags returns the fixed header flags for this message.
 func (h *header) Flags() byte {
-	//return this.flags
-	return h.mTypeFlags[0] & 0x0f
+	return h.mTypeFlags[0] & 0x0F
 }
 
 // RemainingLength returns the length of the non-fixed-header part of the message.
@@ -191,11 +190,10 @@ func (h *header) decode(src []byte) (int, error) {
 
 	h.dBuf = src
 
+	// Decode fixed header
 	mType := h.Type()
-	//mType := MessageType(0)
 
 	h.mTypeFlags = src[total : total+1]
-	//mType := MessageType(src[total] >> 4)
 	if !h.Type().Valid() {
 		return total, ErrInvalidMessageType
 	}
@@ -204,12 +202,12 @@ func (h *header) decode(src []byte) (int, error) {
 		return total, ErrInvalidMessageType
 	}
 
-	//this.flags = src[total] & 0x0f
+	// [MQTT-2.2.2-1]
 	if h.Type() != PUBLISH && h.Flags() != h.Type().DefaultFlags() {
 		return total, ErrInvalidMessageTypeFlags
 	}
 
-	if h.Type() == PUBLISH && !ValidQos(QosType(h.Flags()>>1)&0x3) {
+	if h.Type() == PUBLISH && !QosType((h.Flags()>>1)&0x3).IsValid() {
 		return total, ErrInvalidQoS
 	}
 

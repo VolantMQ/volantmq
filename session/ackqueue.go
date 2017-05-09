@@ -104,7 +104,7 @@ func newAckQueue(n int) *AckQueue {
 
 // Wait copies the message into a waiting queue, and waits for the corresponding
 // ack message to be received.
-func (a *AckQueue) Wait(msg message.Message, onComplete interface{}) error {
+func (a *AckQueue) Wait(msg message.Provider, onComplete interface{}) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -138,7 +138,7 @@ func (a *AckQueue) Wait(msg message.Message, onComplete interface{}) error {
 }
 
 // Ack takes the ack message supplied and updates the status of messages waiting.
-func (a *AckQueue) Ack(msg message.Message) error {
+func (a *AckQueue) Ack(msg message.Provider) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -202,7 +202,7 @@ FORNOTEMPTY:
 	return a.ackDone
 }
 
-func (a *AckQueue) insert(pktid uint16, msg message.Message, onComplete interface{}) error {
+func (a *AckQueue) insert(pktid uint16, msg message.Provider, onComplete interface{}) error {
 	if a.full() {
 		a.grow()
 	}

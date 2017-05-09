@@ -32,7 +32,7 @@ type ConnAckMessage struct {
 	returnCode     ConnAckCode
 }
 
-var _ Message = (*ConnAckMessage)(nil)
+var _ Provider = (*ConnAckMessage)(nil)
 
 // NewConnAckMessage creates a new CONNACK message
 func NewConnAckMessage() *ConnAckMessage {
@@ -54,12 +54,7 @@ func (cm *ConnAckMessage) SessionPresent() bool {
 
 // SetSessionPresent sets the value of the session present flag
 func (cm *ConnAckMessage) SetSessionPresent(v bool) {
-	if v {
-		cm.sessionPresent = true
-	} else {
-		cm.sessionPresent = false
-	}
-
+	cm.sessionPresent = v
 	cm.dirty = true
 }
 
@@ -106,14 +101,14 @@ func (cm *ConnAckMessage) Decode(src []byte) (int, error) {
 		return 0, errors.New("connack/Decode: Bits 7-1 in Connack Acknowledge Flags byte (1) are not 0")
 	}
 
-	cm.sessionPresent = b&0x1 == 1
+	cm.sessionPresent = b&0x01 != 0
 	total++
 
 	b = src[total]
 
 	// Read return code
 	if b > 5 {
-		return 0, fmt.Errorf("connack/Decode: Invalid CONNACK return code (%d)", b)
+		return 0, ErrInvalidReturnCode
 	}
 
 	cm.returnCode = ConnAckCode(b)
@@ -128,7 +123,7 @@ func (cm *ConnAckMessage) Decode(src []byte) (int, error) {
 func (cm *ConnAckMessage) Encode(dst []byte) (int, error) {
 	if !cm.dirty {
 		if len(dst) < len(cm.dBuf) {
-			return 0, fmt.Errorf("connack/Encode: Insufficient buffer size. Expecting %d, got %d", len(cm.dBuf), len(dst))
+			return 0, ErrInsufficientBufferSize
 		}
 
 		return copy(dst, cm.dBuf), nil
@@ -139,7 +134,7 @@ func (cm *ConnAckMessage) Encode(dst []byte) (int, error) {
 	ml := cm.msgLen()
 
 	if len(dst) < hl+ml {
-		return 0, fmt.Errorf("connack/Encode: Insufficient buffer size. Expecting %d, got %d", hl+ml, len(dst))
+		return 0, ErrInsufficientBufferSize
 	}
 
 	if err := cm.SetRemainingLength(int32(ml)); err != nil {
@@ -160,7 +155,7 @@ func (cm *ConnAckMessage) Encode(dst []byte) (int, error) {
 	total++
 
 	if cm.returnCode > 5 {
-		return total, fmt.Errorf("connack/Encode: Invalid CONNACK return code (%d)", cm.returnCode)
+		return total, ErrInvalidReturnCode
 	}
 
 	dst[total] = cm.returnCode.Value()

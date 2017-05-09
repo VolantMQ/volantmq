@@ -32,7 +32,7 @@ type SubscribeMessage struct {
 	topics TopicsQoS
 }
 
-var _ Message = (*SubscribeMessage)(nil)
+var _ Provider = (*SubscribeMessage)(nil)
 
 // NewSubscribeMessage creates a new SUBSCRIBE message.
 func NewSubscribeMessage() *SubscribeMessage {
@@ -68,8 +68,8 @@ func (sm *SubscribeMessage) Topics() Topics {
 // AddTopic adds a single topic to the message, along with the corresponding QoS.
 // An error is returned if QoS is invalid.
 func (sm *SubscribeMessage) AddTopic(topic string, qos QosType) error {
-	if !ValidQos(qos) {
-		return fmt.Errorf("Invalid QoS %d", qos)
+	if !qos.IsValid() {
+		return ErrInvalidQoS
 	}
 
 	// if topic exists, update QoS else new entry will be created thus message is dirty

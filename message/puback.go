@@ -21,7 +21,7 @@ type PubAckMessage struct {
 	header
 }
 
-var _ Message = (*PubAckMessage)(nil)
+var _ Provider = (*PubAckMessage)(nil)
 
 // NewPubAckMessage creates a new PUBACK message.
 func NewPubAckMessage() *PubAckMessage {
@@ -74,7 +74,7 @@ func (pam *PubAckMessage) Decode(src []byte) (int, error) {
 func (pam *PubAckMessage) Encode(dst []byte) (int, error) {
 	if !pam.dirty {
 		if len(dst) < len(pam.dBuf) {
-			return 0, fmt.Errorf("puback/Encode: Insufficient buffer size. Expecting %d, got %d", len(pam.dBuf), len(dst))
+			return 0, ErrInsufficientBufferSize
 		}
 
 		return copy(dst, pam.dBuf), nil
@@ -84,7 +84,7 @@ func (pam *PubAckMessage) Encode(dst []byte) (int, error) {
 	ml := pam.msgLen()
 
 	if len(dst) < hl+ml {
-		return 0, fmt.Errorf("puback/Encode: Insufficient buffer size. Expecting %d, got %d", hl+ml, len(dst))
+		return 0, ErrInsufficientBufferSize
 	}
 
 	if err := pam.SetRemainingLength(int32(ml)); err != nil {

@@ -26,7 +26,7 @@ const (
 
 type (
 	// OnCompleteFunc on complete
-	OnCompleteFunc func(msg, ack message.Message, err error) error
+	OnCompleteFunc func(msg, ack message.Provider, err error) error
 	// OnPublishFunc on publish
 	OnPublishFunc func(msg *message.PublishMessage) error
 )

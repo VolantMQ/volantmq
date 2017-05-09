@@ -27,7 +27,7 @@ type UnSubscribeMessage struct {
 	topics TopicsQoS
 }
 
-var _ Message = (*UnSubscribeMessage)(nil)
+var _ Provider = (*UnSubscribeMessage)(nil)
 
 // NewUnSubscribeMessage creates a new UNSUBSCRIBE message.
 func NewUnSubscribeMessage() *UnSubscribeMessage {
