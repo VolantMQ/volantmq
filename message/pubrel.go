@@ -16,6 +16,7 @@ package message
 
 import (
 	"fmt"
+	"github.com/troian/surgemq/buffer"
 )
 
 // PubRelMessage A PUBREL Packet is the response to a PUBREC Packet. It is the third packet of the
@@ -35,82 +36,106 @@ func NewPubRelMessage() *PubRelMessage {
 }
 
 // String message as string
-func (pam *PubRelMessage) String() string {
-	return fmt.Sprintf("%s, Packet ID=%d", pam.header, pam.packetID)
+func (msg *PubRelMessage) String() string {
+	return fmt.Sprintf("%s, Packet ID=%d", msg.header, msg.packetID)
 }
 
 // Len of message
-func (pam *PubRelMessage) Len() int {
-	if !pam.dirty {
-		return len(pam.dBuf)
+func (msg *PubRelMessage) Len() int {
+	if !msg.dirty {
+		return len(msg.dBuf)
 	}
 
-	ml := pam.msgLen()
+	ml := msg.msgLen()
 
-	if err := pam.SetRemainingLength(int32(ml)); err != nil {
+	if err := msg.SetRemainingLength(int32(ml)); err != nil {
 		return 0
 	}
 
-	return pam.header.msgLen() + ml
+	return msg.header.msgLen() + ml
 }
 
 // Decode message
-func (pam *PubRelMessage) Decode(src []byte) (int, error) {
+func (msg *PubRelMessage) Decode(src []byte) (int, error) {
 	total := 0
 
-	n, err := pam.header.decode(src[total:])
+	n, err := msg.header.decode(src[total:])
 	total += n
 	if err != nil {
 		return total, err
 	}
 
 	//this.packetID = binary.BigEndian.Uint16(src[total:])
-	pam.packetID = src[total : total+2]
+	msg.packetID = src[total : total+2]
 	total += 2
 
-	pam.dirty = false
+	msg.dirty = false
 
 	return total, nil
 }
 
 // Encode message
-func (pam *PubRelMessage) Encode(dst []byte) (int, error) {
-	if !pam.dirty {
-		if len(dst) < len(pam.dBuf) {
-			return 0, ErrInsufficientBufferSize
-		}
-
-		return copy(dst, pam.dBuf), nil
+func (msg *PubRelMessage) Encode(dst []byte) (int, error) {
+	expectedSize := msg.Len()
+	if len(dst) < expectedSize {
+		return expectedSize, ErrInsufficientBufferSize
 	}
 
-	hl := pam.header.msgLen()
-	ml := pam.msgLen()
-
-	if len(dst) < hl+ml {
-		return 0, ErrInsufficientBufferSize
-	}
-
-	if err := pam.SetRemainingLength(int32(ml)); err != nil {
-		return 0, err
-	}
-
+	var err error
 	total := 0
 
-	n, err := pam.header.encode(dst[total:])
-	total += n
-	if err != nil {
-		return total, err
-	}
+	if !msg.dirty {
+		total = copy(dst, msg.dBuf)
+	} else {
+		var n int
 
-	if copy(dst[total:total+2], pam.packetID) != 2 {
-		dst[total], dst[total+1] = 0, 0
-	}
-	total += 2
+		if n, err = msg.header.encode(dst[total:]); err != nil {
+			return 0, err
+		}
+		total += n
 
+		if copy(dst[total:total+2], msg.packetID) != 2 {
+			dst[total] = 0
+			dst[total+1] = 0
+		}
+		total += 2
+	}
 	return total, nil
 }
 
-func (pam *PubRelMessage) msgLen() int {
+// Send encode and send message into ring buffer
+func (msg *PubRelMessage) Send(to *buffer.Type) (int, error) {
+	var err error
+	total := 0
+
+	if !msg.dirty {
+		total, err = to.Send(msg.dBuf)
+	} else {
+		expectedSize := msg.Len()
+		if len(to.ExternalBuf) < expectedSize {
+			to.ExternalBuf = make([]byte, expectedSize)
+		}
+
+		var n int
+
+		if n, err = msg.header.encode(to.ExternalBuf[total:]); err != nil {
+			return 0, err
+		}
+		total += n
+
+		if copy(to.ExternalBuf[total:total+2], msg.packetID) != 2 {
+			to.ExternalBuf[total] = 0
+			to.ExternalBuf[total+1] = 0
+		}
+		total += 2
+
+		total, err = to.Send(to.ExternalBuf[:total])
+	}
+
+	return total, err
+}
+
+func (msg *PubRelMessage) msgLen() int {
 	// packet ID
 	return 2
 }

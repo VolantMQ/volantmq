@@ -207,7 +207,7 @@ func (h *header) decode(src []byte) (int, error) {
 		return total, ErrInvalidMessageTypeFlags
 	}
 
-	if h.Type() == PUBLISH && !QosType((h.Flags()>>1)&0x3).IsValid() {
+	if h.Type() == PUBLISH && !QosType((h.Flags()&publishFlagQosMask)>>1).IsValid() {
 		return total, ErrInvalidQoS
 	}
 

@@ -14,7 +14,10 @@
 
 package message
 
-import "fmt"
+import (
+	"fmt"
+	"github.com/troian/surgemq/buffer"
+)
 
 // SubAckMessage A SUBACK Packet is sent by the Server to the Client to confirm receipt and processing
 // of a SUBSCRIBE Packet.
@@ -38,133 +41,160 @@ func NewSubAckMessage() *SubAckMessage {
 }
 
 // String returns a string representation of the message.
-func (sam SubAckMessage) String() string {
-	return fmt.Sprintf("%s, Packet ID=%d, Return Codes=%v", sam.header, sam.PacketID(), sam.returnCodes)
+func (msg *SubAckMessage) String() string {
+	return fmt.Sprintf("%s, Packet ID=%d, Return Codes=%v", msg.header, msg.PacketID(), msg.returnCodes)
 }
 
 // ReturnCodes returns the list of QoS returns from the subscriptions sent in the SUBSCRIBE message.
-func (sam *SubAckMessage) ReturnCodes() []QosType {
-	return sam.returnCodes
+func (msg *SubAckMessage) ReturnCodes() []QosType {
+	return msg.returnCodes
 }
 
 // AddReturnCodes sets the list of QoS returns from the subscriptions sent in the SUBSCRIBE message.
 // An error is returned if any of the QoS values are not valid.
-func (sam *SubAckMessage) AddReturnCodes(ret []QosType) error {
+func (msg *SubAckMessage) AddReturnCodes(ret []QosType) error {
 	for _, c := range ret {
 		if !c.IsValidFull() {
 			return ErrInvalidReturnCode
 		}
 
-		sam.returnCodes = append(sam.returnCodes, c)
+		msg.returnCodes = append(msg.returnCodes, c)
 	}
 
-	sam.dirty = true
+	msg.dirty = true
 
 	return nil
 }
 
 // AddReturnCode adds a single QoS return value.
-func (sam *SubAckMessage) AddReturnCode(ret QosType) error {
-	return sam.AddReturnCodes([]QosType{ret})
+func (msg *SubAckMessage) AddReturnCode(ret QosType) error {
+	return msg.AddReturnCodes([]QosType{ret})
 }
 
 // Len of message
-func (sam *SubAckMessage) Len() int {
-	if !sam.dirty {
-		return len(sam.dBuf)
+func (msg *SubAckMessage) Len() int {
+	if !msg.dirty {
+		return len(msg.dBuf)
 	}
 
-	ml := sam.msgLen()
+	ml := msg.msgLen()
 
-	if err := sam.SetRemainingLength(int32(ml)); err != nil {
+	if err := msg.SetRemainingLength(int32(ml)); err != nil {
 		return 0
 	}
 
-	return sam.header.msgLen() + ml
+	return msg.header.msgLen() + ml
 }
 
 // Decode message
-func (sam *SubAckMessage) Decode(src []byte) (int, error) {
+func (msg *SubAckMessage) Decode(src []byte) (int, error) {
 	total := 0
 
-	hn, err := sam.header.decode(src[total:])
+	hn, err := msg.header.decode(src[total:])
 	total += hn
 	if err != nil {
 		return total, err
 	}
 
 	//this.packetID = binary.BigEndian.Uint16(src[total:])
-	sam.packetID = src[total : total+2]
+	msg.packetID = src[total : total+2]
 	total += 2
 
-	l := int(sam.remLen) - (total - hn)
-	//sam.returnCodes = []QosType(src[total : total+l])
-	for q := range src[total : total+l] {
-		sam.returnCodes = append(sam.returnCodes, QosType(q))
+	l := int(msg.remLen) - (total - hn)
+
+	if len(msg.returnCodes) < l {
+		msg.returnCodes = make([]QosType, l)
+	}
+	for i, q := range src[total : total+l] {
+		msg.returnCodes[i] = QosType(q)
 	}
 
-	total += len(sam.returnCodes)
+	total += len(msg.returnCodes)
 
-	for _, code := range sam.returnCodes {
+	for _, code := range msg.returnCodes {
 		if !code.IsValidFull() {
 			return total, ErrInvalidReturnCode
 		}
 	}
 
-	sam.dirty = false
+	msg.dirty = false
 
 	return total, nil
 }
 
 // Encode message
-func (sam *SubAckMessage) Encode(dst []byte) (int, error) {
-	if !sam.dirty {
-		if len(dst) < len(sam.dBuf) {
-			return 0, ErrInsufficientBufferSize
-		}
-
-		return copy(dst, sam.dBuf), nil
+func (msg *SubAckMessage) Encode(dst []byte) (int, error) {
+	expectedSize := msg.Len()
+	if len(dst) < expectedSize {
+		return expectedSize, ErrInsufficientBufferSize
 	}
 
-	for _, code := range sam.returnCodes {
-		if !code.IsValidFull() {
-			return 0, ErrInvalidReturnCode
-		}
-	}
-
-	hl := sam.header.msgLen()
-	ml := sam.msgLen()
-
-	if len(dst) < hl+ml {
-		return 0, ErrInsufficientBufferSize
-	}
-
-	if err := sam.SetRemainingLength(int32(ml)); err != nil {
-		return 0, err
-	}
-
+	var err error
 	total := 0
 
-	n, err := sam.header.encode(dst[total:])
-	total += n
-	if err != nil {
-		return total, err
+	if !msg.dirty {
+		total = copy(dst, msg.dBuf)
+	} else {
+		var n int
+
+		if n, err = msg.header.encode(dst[total:]); err != nil {
+			return total, err
+		}
+		total += n
+
+		if copy(dst[total:total+2], msg.packetID) != 2 {
+			dst[total] = 0
+			dst[total+1] = 0
+		}
+		total += 2
+
+		for i, q := range msg.returnCodes {
+			dst[total+i] = byte(q)
+			total++
+		}
 	}
 
-	if copy(dst[total:total+2], sam.packetID) != 2 {
-		dst[total], dst[total+1] = 0, 0
-	}
-	total += 2
-
-	for i, q := range sam.returnCodes {
-		dst[total+i] = byte(q)
-	}
-	//copy(dst[total:], []byte(sam.returnCodes))
-	total += len(sam.returnCodes)
-
-	return total, nil
+	return total, err
 }
 
-func (sam *SubAckMessage) msgLen() int {
-	return 2 + len(sam.returnCodes)
+// Send encode and send message into ring buffer
+func (msg *SubAckMessage) Send(to *buffer.Type) (int, error) {
+	var err error
+	total := 0
+
+	if !msg.dirty {
+		total, err = to.Send(msg.dBuf)
+	} else {
+		expectedSize := msg.Len()
+		if len(to.ExternalBuf) < expectedSize {
+			to.ExternalBuf = make([]byte, expectedSize)
+		}
+
+		var n int
+
+		if n, err = msg.header.encode(to.ExternalBuf[total:]); err != nil {
+			return 0, err
+		}
+		total += n
+
+		if copy(to.ExternalBuf[total:total+2], msg.packetID) != 2 {
+			to.ExternalBuf[total] = 0
+			to.ExternalBuf[total+1] = 0
+		}
+
+		total += 2
+
+		for i, q := range msg.returnCodes {
+			to.ExternalBuf[total+i] = byte(q)
+		}
+		total += len(msg.returnCodes)
+
+		total, err = to.Send(to.ExternalBuf[:total])
+	}
+
+	return total, err
+}
+
+func (msg *SubAckMessage) msgLen() int {
+	return 2 + len(msg.returnCodes)
 }

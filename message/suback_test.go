@@ -48,6 +48,9 @@ func TestSubAckMessageDecode(t *testing.T) {
 	msg := NewSubAckMessage()
 	n, err := msg.Decode(msgBytes)
 
+	if err != nil {
+		t.Log(err)
+	}
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
 	require.Equal(t, SUBACK, msg.Type(), "Error decoding message.")
@@ -123,9 +126,9 @@ func TestSubAckDecodeEncodeEquiv(t *testing.T) {
 	dst := make([]byte, 100)
 	n2, err := msg.Encode(dst)
 
-	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n2, "Error decoding message.")
-	require.Equal(t, msgBytes, dst[:n2], "Error decoding message.")
+	require.NoError(t, err, "Error encoding message.")
+	require.Equal(t, len(msgBytes), n2, "Error encoding message.")
+	require.Equal(t, msgBytes, dst[:n2], "Error encoding message.")
 
 	n3, err := msg.Decode(dst)
 

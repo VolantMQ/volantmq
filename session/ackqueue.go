@@ -55,8 +55,8 @@ type AckMsg struct {
 // AckQueue is a growing queue implemented based on a ring buffer. As the buffer
 // gets full, it will auto-grow.
 //
-// AckQueue is used to store messages that are waiting for acks to come back. There
-// are a few scenarios in which acks are required.
+// AckQueue is used to store messages that are waiting for acknowledgement to come back. There
+// are a few scenarios in which acknowledgements are required.
 //   1. Client sends SUBSCRIBE message to server, waits for SUBACK.
 //   2. Client sends UNSUBSCRIBE message to server, waits for UNSUBACK.
 //   3. Client sends PUBLISH QoS 1 message to server, waits for PUBACK.
@@ -108,33 +108,30 @@ func (a *AckQueue) Wait(msg message.Provider, onComplete interface{}) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	var err error
 	switch msg := msg.(type) {
 	case *message.PublishMessage:
 		if msg.QoS() == message.QosAtMostOnce {
 			//return fmt.Errorf("QoS 0 messages don't require ack")
-			return errWaitMessage
+			err = errWaitMessage
+		} else {
+			err = a.insert(msg.PacketID(), msg, onComplete) // nolint: errcheck
 		}
-
-		a.insert(msg.PacketID(), msg, onComplete) // nolint: errcheck
-
 	case *message.SubscribeMessage:
-		a.insert(msg.PacketID(), msg, onComplete) // nolint: errcheck
-
+		err = a.insert(msg.PacketID(), msg, onComplete) // nolint: errcheck
 	case *message.UnSubscribeMessage:
-		a.insert(msg.PacketID(), msg, onComplete) // nolint: errcheck
-
+		err = a.insert(msg.PacketID(), msg, onComplete) // nolint: errcheck
 	case *message.PingReqMessage:
 		a.ping = AckMsg{
 			MType:      message.PINGREQ,
 			State:      message.RESERVED,
 			OnComplete: onComplete,
 		}
-
 	default:
 		return errWaitMessage
 	}
 
-	return nil
+	return err
 }
 
 // Ack takes the ack message supplied and updates the status of messages waiting.
@@ -142,8 +139,20 @@ func (a *AckQueue) Ack(msg message.Provider) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	var err error
+
 	switch msg.Type() {
-	case message.PUBACK, message.PUBREC, message.PUBREL, message.PUBCOMP, message.SUBACK, message.UNSUBACK:
+	case message.PUBACK:
+		fallthrough
+	case message.PUBREC:
+		fallthrough
+	case message.PUBREL:
+		fallthrough
+	case message.PUBCOMP:
+		fallthrough
+	case message.SUBACK:
+		fallthrough
+	case message.UNSUBACK:
 		// Check to see if the message w/ the same packet ID is in the queue
 		i, ok := a.eMap[msg.PacketID()]
 		if ok {
@@ -154,10 +163,10 @@ func (a *AckQueue) Ack(msg message.Provider) error {
 			ml := msg.Len()
 			a.ring[i].AckBuf = make([]byte, ml)
 
-			_, err := msg.Encode(a.ring[i].AckBuf)
-			if err != nil {
-				return err
-			}
+			_, err = msg.Encode(a.ring[i].AckBuf)
+			//if err != nil {
+			//	return err
+			//}
 			//glog.Debugf("Acked: %v", msg)
 			//} else {
 			//glog.Debugf("Cannot ack %s message with packet ID %d", msg.Type(), msg.PacketID())
@@ -172,7 +181,7 @@ func (a *AckQueue) Ack(msg message.Provider) error {
 		return errAckMessage
 	}
 
-	return nil
+	return err
 }
 
 // GetAckMsg returns the list of messages that have completed the ack cycle.
@@ -190,10 +199,17 @@ func (a *AckQueue) GetAckMsg() []AckMsg {
 FORNOTEMPTY:
 	for !a.empty() {
 		switch a.ring[a.head].State {
-		case message.PUBACK, message.PUBREL, message.PUBCOMP, message.SUBACK, message.UNSUBACK:
+		case message.PUBACK:
+			fallthrough
+		case message.PUBREL:
+			fallthrough
+		case message.PUBCOMP:
+			fallthrough
+		case message.SUBACK:
+			fallthrough
+		case message.UNSUBACK:
 			a.ackDone = append(a.ackDone, a.ring[a.head])
 			a.removeHead() // nolint: errcheck
-
 		default:
 			break FORNOTEMPTY
 		}

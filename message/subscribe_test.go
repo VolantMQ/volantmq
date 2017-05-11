@@ -113,10 +113,31 @@ func TestSubscribeMessageEncode(t *testing.T) {
 
 	dst := make([]byte, 100)
 	n, err := msg.Encode(dst)
+	require.NoError(t, err, "Error encoding message.")
+	require.Equal(t, len(msgBytes), n, "Error encoding message.")
 
+	msg1 := NewSubscribeMessage()
+	n, err = msg1.Decode(dst)
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
-	require.Equal(t, msgBytes, dst[:n], "Error decoding message.")
+
+	exists := msg1.TopicExists("surgemq")
+	require.Equal(t, true, exists, "Error decoding message.")
+	qos := msg1.TopicQos("surgemq")
+	require.Equal(t, QosType(0), qos, "Error decoding message.")
+
+	exists = msg1.TopicExists("/a/b/#/c")
+	require.Equal(t, true, exists, "Error decoding message.")
+	qos = msg1.TopicQos("/a/b/#/c")
+	require.Equal(t, QosType(1), qos, "Error decoding message.")
+
+	exists = msg1.TopicExists("/a/b/#/cdd")
+	require.Equal(t, true, exists, "Error decoding message.")
+	qos = msg1.TopicQos("/a/b/#/cdd")
+	require.Equal(t, QosType(2), qos, "Error decoding message.")
+
+	topics := msg1.Topics()
+	require.Equal(t, 3, len(topics), "Error decoding message.")
 }
 
 // test to ensure encoding and decoding are the same

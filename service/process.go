@@ -57,21 +57,34 @@ func (s *Type) processor() {
 			return
 		}
 
-		msg, n, err := s.peekMessage(mType, total)
+		var msg message.Provider
+		var n int
+
+		msg, n, err = s.readMessage(mType, total)
 		if err != nil {
 			if err != io.EOF {
-				appLog.Errorf("(%s) Error peeking next message: %v", s.CID(), err)
+				appLog.Errorf("(%s) Error peeking next message: %v: total len: %d", s.CID(), err, total)
 			}
 			return
 		}
-
-		appLog.Tracef("(%s) Received: %s", s.CID(), msg)
+		//} else {
+		//	commit = true
+		//
+		//	msg, n, err = s.peekMessage(mType, total)
+		//	if err != nil {
+		//		if err != io.EOF {
+		//			appLog.Errorf("(%s) Error peeking next message: %v: total len: %d", s.CID(), err, total)
+		//		}
+		//		return
+		//	}
+		//
+		//
+		//}
 
 		s.inStat.increment(int64(n))
 
 		// 5. Process the read message
-		err = s.processIncoming(msg)
-		if err != nil {
+		if err = s.processIncoming(msg); err != nil {
 			//if err != errDisconnect {
 			//	appLog.Errorf("(%s) Error processing %s: %v", s.CID(), msg.Name(), err)
 			//} else {
@@ -79,15 +92,15 @@ func (s *Type) processor() {
 			//}
 		}
 
-		// 7. We should commit the bytes in the buffer so we can move on
-		_, err = s.in.ReadCommit(total)
-		if err != nil {
-			if err != io.EOF {
-				appLog.Errorf("(%s) Error committing %d read bytes: %v", s.CID(), total, err)
-			}
-			return
-		}
-
+		//// 7. We should commit the bytes in the buffer so we can move on
+		//if commit {
+		//if _, err = s.in.ReadCommit(cnt); err != nil {
+		//	if err != io.EOF {
+		//		appLog.Errorf("(%s) Error committing %d read bytes: %v", s.CID(), cnt, err)
+		//	}
+		//	return
+		//}
+		//}
 		// 7. Check to see if done is closed, if so, exit
 		if s.IsDone() && s.in.Len() == 0 {
 			return
@@ -167,7 +180,8 @@ func (s *Type) processIncoming(msg message.Provider) error {
 	}
 
 	if err != nil {
-		appLog.Debugf("(%s) Error processing acked message: %v", s.CID(), err)
+		appLog.Errorf("(%s) Error processing ack message: %v", s.CID(), err)
+		panic(err)
 	}
 
 	return err
@@ -255,7 +269,6 @@ func (s *Type) processAcked(ackq *session.AckQueue) {
 // If QoS == 2, we need to put it in the ack queue, send back PUBREC
 func (s *Type) processPublish(msg *message.PublishMessage) error {
 	// check for topic access
-
 	switch msg.QoS() {
 	case message.QosExactlyOnce:
 		s.sess.Pub2in.Wait(msg, nil) // nolint: errcheck
@@ -275,7 +288,6 @@ func (s *Type) processPublish(msg *message.PublishMessage) error {
 		}
 
 		return s.onPublish(msg)
-
 	case message.QosAtMostOnce:
 		return s.onPublish(msg)
 	}
@@ -365,16 +377,16 @@ func (s *Type) onPublish(msg *message.PublishMessage) error {
 	}
 
 	msg.SetRetain(false)
-
-	appLog.Debugf("(%s) Publishing to topic %q and %d subscribers", s.CID(), msg.Topic(), len(subscribers))
 	for _, s := range subscribers {
 		if s != nil {
-
 			if onPub, ok := s.(*OnPublishFunc); !ok {
 				appLog.Errorf("Invalid onPublish Function")
 				continue
 			} else {
-				(*onPub)(msg) // nolint: errcheck
+				err = (*onPub)(msg) // nolint: errcheck
+				if err != nil {
+					appLog.Errorf(err.Error())
+				}
 			}
 		}
 	}

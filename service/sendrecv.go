@@ -47,9 +47,9 @@ func (r timeoutReader) Read(b []byte) (int, error) {
 func (s *Type) receiver() {
 	defer func() {
 		// Let's recover from panic
-		if r := recover(); r != nil {
-			appLog.Errorf("(%s) Recovering from panic: %v", s.CID(), r)
-		}
+		//if r := recover(); r != nil {
+		//	appLog.Errorf("(%s) Recovering from panic: %v", s.CID(), r)
+		//}
 
 		s.wgStopped.Done()
 
@@ -70,9 +70,7 @@ func (s *Type) receiver() {
 		}
 
 		for {
-			_, err := s.in.ReadFrom(r)
-
-			if err != nil {
+			if _, err := s.in.ReadFrom(r); err != nil {
 				//if err != io.EOF {
 				//	appLog.Errorf("(%s) error reading from connection: %v", s.CID(), err)
 				//}
@@ -92,16 +90,16 @@ func (s *Type) receiver() {
 func (s *Type) sender() {
 	defer func() {
 		// Let's recover from panic
-		if r := recover(); r != nil {
-			appLog.Errorf("(%s) Recovering from panic: %v", s.CID(), r)
-		}
+		//if r := recover(); r != nil {
+		//	appLog.Errorf("(%s) Recovering from panic: %v", s.CID(), r)
+		//}
 
 		s.wgStopped.Done()
 
-		appLog.Debugf("(%s) Stopping sender", s.CID())
+		appLog.Tracef("(%s) Stopping sender", s.CID())
 	}()
 
-	appLog.Debugf("(%s) Starting sender", s.CID())
+	appLog.Tracef("(%s) Starting sender", s.CID())
 
 	s.wgStarted.Done()
 
@@ -128,11 +126,9 @@ func (s *Type) sender() {
 // peekMessageSize() reads, but not commits, enough bytes to determine the size of
 // the next message and returns the type and size.
 func (s *Type) peekMessageSize() (message.Type, int, error) {
-	var (
-		b   []byte
-		err error
-		cnt = 2
-	)
+	var b []byte
+	var err error
+	cnt := 2
 
 	if s.in == nil {
 		err = surgemq.ErrBufferNotReady
@@ -167,25 +163,25 @@ func (s *Type) peekMessageSize() (message.Type, int, error) {
 	}
 
 	// Get the remaining length of the message
-	remlen, m := binary.Uvarint(b[1:])
+	remLen, m := binary.Uvarint(b[1:])
 
 	// Total message length is remlen + 1 (msg type) + m (remlen bytes)
-	total := int(remlen) + 1 + m
+	total := int(remLen) + 1 + m
 
-	mtype := message.Type(b[0] >> 4)
+	mType := message.Type(b[0] >> 4)
 
-	return mtype, total, err
+	return mType, total, err
 }
 
 // peekMessage() reads a message from the buffer, but the bytes are NOT committed.
 // This means the buffer still thinks the bytes are not read yet.
 func (s *Type) peekMessage(mtype message.Type, total int) (message.Provider, int, error) {
-	var (
-		b    []byte
-		err  error
-		i, n int
-		msg  message.Provider
-	)
+
+	var b []byte
+	var err error
+	var i int
+	var n int
+	var msg message.Provider
 
 	if s.in == nil {
 		return nil, 0, surgemq.ErrBufferNotReady
@@ -217,56 +213,61 @@ func (s *Type) peekMessage(mtype message.Type, total int) (message.Provider, int
 // readMessage() reads and copies a message from the buffer. The buffer bytes are
 // committed as a result of the read.
 func (s *Type) readMessage(mType message.Type, total int) (message.Provider, int, error) {
-	var (
-		b   []byte
-		err error
-		n   int
-		msg message.Provider
-	)
+	defer func() {
+		if int64(len(s.in.ExternalBuf)) > s.in.Size() {
+			s.in.ExternalBuf = make([]byte, s.in.Size())
+		}
+	}()
+
+	var err error
+	var n int
+	var msg message.Provider
 
 	if s.in == nil {
 		err = surgemq.ErrBufferNotReady
 		return nil, 0, err
 	}
 
-	if len(s.inTmp) < total {
-		s.inTmp = make([]byte, total)
+	if len(s.in.ExternalBuf) < total {
+		s.in.ExternalBuf = make([]byte, total)
 	}
 
 	// Read until we get total bytes
 	l := 0
+	toRead := total
 	for l < total {
-		n, err = s.in.Read(s.inTmp[l:])
+		n, err = s.in.Read(s.in.ExternalBuf[l : l+toRead])
 		l += n
-		appLog.Debugf("read %d bytes, total %d", n, l)
+		toRead -= n
 		if err != nil {
 			return nil, 0, err
 		}
 	}
 
-	b = s.inTmp[:total]
-
 	msg, err = mType.New()
 	if err != nil {
+		appLog.Errorf(err.Error())
 		return msg, 0, err
 	}
 
-	n, err = msg.Decode(b)
+	n, err = msg.Decode(s.in.ExternalBuf[:total])
+	if err != nil {
+		appLog.Errorf(err.Error())
+	}
+
 	return msg, n, err
 }
 
 // writeMessage() writes a message to the outgoing buffer
 func (s *Type) writeMessage(msg message.Provider) (int, error) {
-	var (
-		l    int = msg.Len()
-		m, n int
-		err  error
-		buf  []byte
-		wrap bool
-	)
-
+	// FIXME: Try to find a better way than a mutex...if possible.
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
+	defer func() {
+		if s.out != nil && int64(len(s.out.ExternalBuf)) > s.out.Size() {
+			s.out.ExternalBuf = make([]byte, s.out.Size())
+		}
+	}()
 
 	if s.out == nil {
 		return 0, surgemq.ErrBufferNotReady
@@ -283,39 +284,12 @@ func (s *Type) writeMessage(msg message.Provider) (int, error) {
 	// Mainly because when there's a large number of goroutines that want to publish
 	// to this client, then they will all block. However, this will do for now.
 	//
-	// FIXME: Try to find a better way than a mutex...if possible.
-	buf, wrap, err = s.out.WriteWait(l)
-	if err != nil {
-		return 0, err
+
+	total, err := msg.Send(s.out)
+
+	if err == nil {
+		s.outStat.increment(int64(total))
 	}
 
-	if wrap {
-		if len(s.outTmp) < l {
-			s.outTmp = make([]byte, l)
-		}
-
-		n, err = msg.Encode(s.outTmp[0:])
-		if err != nil {
-			return 0, err
-		}
-
-		m, err = s.out.Write(s.outTmp[0:n])
-		if err != nil {
-			return m, err
-		}
-	} else {
-		n, err = msg.Encode(buf[0:])
-		if err != nil {
-			return 0, err
-		}
-
-		m, err = s.out.WriteCommit(n)
-		if err != nil {
-			return 0, err
-		}
-	}
-
-	s.outStat.increment(int64(m))
-
-	return m, nil
+	return total, nil
 }

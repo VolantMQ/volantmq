@@ -37,7 +37,7 @@ func TestSessionInit(t *testing.T) {
 	//require.Equal(t, cmsg.WillMessage(), sess.CMsg.WillMessage())
 	//require.Equal(t, cmsg.Username(), sess.CMsg.Username())
 	//require.Equal(t, cmsg.Password(), sess.CMsg.Password())
-	require.Equal(t, []byte("will"), sess.Will.Topic())
+	require.Equal(t, "will", sess.Will.Topic())
 	require.Equal(t, cmsg.WillQos(), sess.Will.QoS())
 
 	sess.AddTopic("test", 1) // nolint: errcheck

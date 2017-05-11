@@ -17,6 +17,7 @@ package message
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/troian/surgemq/buffer"
 	"strings"
 )
 
@@ -113,6 +114,9 @@ type Provider interface {
 	// considered invalid.
 	Encode([]byte) (int, error)
 
+	// Send
+	Send(to *buffer.Type) (int, error)
+
 	// Decode reads the bytes in the byte slice from the argument. It returns the
 	// total number of bytes decoded, and whether there's any errors during the
 	// process. The byte slice MUST NOT be modified during the duration of this
@@ -207,6 +211,8 @@ const (
 	ErrEmptyPayload
 	// ErrInvalidReturnCode invalid return code
 	ErrInvalidReturnCode
+	// ErrUnimplemented method not implemented
+	ErrUnimplemented
 )
 
 // Error returns the corresponding error string for the ConnAckCode
@@ -238,6 +244,8 @@ func (e Error) Error() string {
 		return "Payload is empty"
 	case ErrInvalidReturnCode:
 		return "Invalid return code"
+	case ErrUnimplemented:
+		return "Function not implemented yet"
 	}
 
 	return "Unknown error"

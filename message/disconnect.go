@@ -14,6 +14,10 @@
 
 package message
 
+import (
+	"github.com/troian/surgemq/buffer"
+)
+
 // DisconnectMessage The DISCONNECT Packet is the final Control Packet sent from the Client to the Server.
 // It indicates that the Client is disconnecting cleanly.
 type DisconnectMessage struct {
@@ -31,19 +35,56 @@ func NewDisconnectMessage() *DisconnectMessage {
 }
 
 // Decode message
-func (dm *DisconnectMessage) Decode(src []byte) (int, error) {
-	return dm.header.decode(src)
+func (msg *DisconnectMessage) Decode(src []byte) (int, error) {
+	return msg.header.decode(src)
 }
 
 // Encode message
-func (dm *DisconnectMessage) Encode(dst []byte) (int, error) {
-	if !dm.dirty {
-		if len(dst) < len(dm.dBuf) {
-			return 0, ErrInsufficientBufferSize
-		}
-
-		return copy(dst, dm.dBuf), nil
+func (msg *DisconnectMessage) Encode(dst []byte) (int, error) {
+	expectedSize := msg.Len()
+	if len(dst) < expectedSize {
+		return expectedSize, ErrInsufficientBufferSize
 	}
 
-	return dm.header.encode(dst)
+	var err error
+	total := 0
+
+	if !msg.dirty {
+		total = copy(dst, msg.dBuf)
+	} else {
+		var n int
+
+		if n, err = msg.header.encode(dst[total:]); err != nil {
+			return total, err
+		}
+		total += n
+	}
+
+	return total, err
+}
+
+// Send encode and send message into ring buffer
+func (msg *DisconnectMessage) Send(to *buffer.Type) (int, error) {
+	var err error
+	total := 0
+
+	if !msg.dirty {
+		total, err = to.Send(msg.dBuf)
+	} else {
+		expectedSize := msg.Len()
+		if len(to.ExternalBuf) < expectedSize {
+			to.ExternalBuf = make([]byte, expectedSize)
+		}
+
+		var n int
+
+		if n, err = msg.header.encode(to.ExternalBuf[total:]); err != nil {
+			return total, err
+		}
+		total += n
+
+		total, err = to.Send(to.ExternalBuf[:total])
+	}
+
+	return total, err
 }

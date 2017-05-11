@@ -28,7 +28,7 @@ import (
 func GetConnectMessage(conn io.Closer) (*message.ConnectMessage, error) {
 	buf, err := GetMessageBuffer(conn)
 	if err != nil {
-		appLog.Debugf("Receive error: %v", err)
+		appLog.Errorf("Receive error: %v", err)
 		return nil, err
 	}
 
@@ -77,16 +77,11 @@ func GetMessageBuffer(c io.Closer) ([]byte, error) {
 		return nil, surgemq.ErrInvalidConnectionType
 	}
 
-	var (
-		// the message buffer
-		buf []byte
-
-		// tmp buffer to read a single byte
-		b = make([]byte, 1)
-
-		// total bytes read
-		l int
-	)
+	var buf []byte
+	// tmp buffer to read a single byte
+	var b = make([]byte, 1)
+	// total bytes read
+	var l int
 
 	// Let's read enough bytes to get the message header (msg type, remaining length)
 	for {
@@ -97,8 +92,12 @@ func GetMessageBuffer(c io.Closer) ([]byte, error) {
 
 		n, err := conn.Read(b[0:])
 		if err != nil {
-			appLog.Debugf("Read error: %v", err)
+			//if err == io.EOF {
+			//	continue
+			//} else {
+			appLog.Errorf("Read error: %v", err)
 			return nil, err
+			//}
 		}
 
 		// Technically i don't think we will ever get here

@@ -15,8 +15,9 @@
 package message
 
 import (
+	"errors"
 	"fmt"
-	"github.com/pkg/errors"
+	"github.com/troian/surgemq/buffer"
 	"sync/atomic"
 )
 
@@ -44,10 +45,10 @@ func NewSubscribeMessage() *SubscribeMessage {
 	return msg
 }
 
-func (sm SubscribeMessage) String() string {
-	msgStr := fmt.Sprintf("%s, Packet ID=%d", sm.header, sm.PacketID())
+func (msg *SubscribeMessage) String() string {
+	msgStr := fmt.Sprintf("%s, Packet ID=%d", msg.header, msg.PacketID())
 
-	for t, q := range sm.topics {
+	for t, q := range msg.topics {
 		msgStr = fmt.Sprintf("%s, Topic=%q/%d", msgStr, t, q)
 	}
 
@@ -55,10 +56,10 @@ func (sm SubscribeMessage) String() string {
 }
 
 // Topics returns a list of topics sent by the Client.
-func (sm *SubscribeMessage) Topics() Topics {
+func (msg *SubscribeMessage) Topics() Topics {
 	topics := Topics{}
 
-	for t := range sm.topics {
+	for t := range msg.topics {
 		topics = append(topics, t)
 	}
 
@@ -67,33 +68,34 @@ func (sm *SubscribeMessage) Topics() Topics {
 
 // AddTopic adds a single topic to the message, along with the corresponding QoS.
 // An error is returned if QoS is invalid.
-func (sm *SubscribeMessage) AddTopic(topic string, qos QosType) error {
+func (msg *SubscribeMessage) AddTopic(topic string, qos QosType) error {
 	if !qos.IsValid() {
 		return ErrInvalidQoS
 	}
 
 	// if topic exists, update QoS else new entry will be created thus message is dirty
-	if _, ok := sm.topics[topic]; !ok {
-		sm.dirty = true
-	}
+	//if _, ok := msg.topics[topic]; !ok {
+	//
+	//}
 
-	sm.topics[topic] = qos
+	msg.topics[topic] = qos
+	msg.dirty = true
 
 	return nil
 }
 
 // RemoveTopic removes a single topic from the list of existing ones in the message.
 // If topic does not exist it just does nothing.
-func (sm *SubscribeMessage) RemoveTopic(topic string) {
-	if _, ok := sm.topics[topic]; ok {
-		delete(sm.topics, topic)
-		sm.dirty = true
+func (msg *SubscribeMessage) RemoveTopic(topic string) {
+	if _, ok := msg.topics[topic]; ok {
+		delete(msg.topics, topic)
+		msg.dirty = true
 	}
 }
 
 // TopicExists checks to see if a topic exists in the list.
-func (sm *SubscribeMessage) TopicExists(topic string) bool {
-	if _, ok := sm.topics[topic]; ok {
+func (msg *SubscribeMessage) TopicExists(topic string) bool {
+	if _, ok := msg.topics[topic]; ok {
 		return true
 	}
 
@@ -102,20 +104,20 @@ func (sm *SubscribeMessage) TopicExists(topic string) bool {
 
 // TopicQos returns the QoS level of a topic. If topic does not exist, QosFailure
 // is returned.
-func (sm *SubscribeMessage) TopicQos(topic string) QosType {
+func (msg *SubscribeMessage) TopicQos(topic string) QosType {
 
-	if _, ok := sm.topics[topic]; ok {
-		return sm.topics[topic]
+	if _, ok := msg.topics[topic]; ok {
+		return msg.topics[topic]
 	}
 
 	return QosFailure
 }
 
 // Qos returns the list of QoS current in the message.
-func (sm *SubscribeMessage) Qos() []QosType {
+func (msg *SubscribeMessage) Qos() []QosType {
 	qos := []QosType{}
 
-	for _, q := range sm.topics {
+	for _, q := range msg.topics {
 		qos = append(qos, q)
 	}
 
@@ -123,35 +125,35 @@ func (sm *SubscribeMessage) Qos() []QosType {
 }
 
 // Len of message
-func (sm *SubscribeMessage) Len() int {
-	if !sm.dirty {
-		return len(sm.dBuf)
+func (msg *SubscribeMessage) Len() int {
+	if !msg.dirty {
+		return len(msg.dBuf)
 	}
 
-	ml := sm.msgLen()
+	ml := msg.msgLen()
 
-	if err := sm.SetRemainingLength(int32(ml)); err != nil {
+	if err := msg.SetRemainingLength(int32(ml)); err != nil {
 		return 0
 	}
 
-	return sm.header.msgLen() + ml
+	return msg.header.msgLen() + ml
 }
 
 // Decode message
-func (sm *SubscribeMessage) Decode(src []byte) (int, error) {
+func (msg *SubscribeMessage) Decode(src []byte) (int, error) {
 	total := 0
 
-	hn, err := sm.header.decode(src[total:])
+	hn, err := msg.header.decode(src[total:])
 	total += hn
 	if err != nil {
 		return total, err
 	}
 
 	//this.packetId = binary.BigEndian.Uint16(src[total:])
-	sm.packetID = src[total : total+2]
+	msg.packetID = src[total : total+2]
 	total += 2
 
-	remlen := int(sm.remLen) - (total - hn)
+	remlen := int(msg.remLen) - (total - hn)
 	for remlen > 0 {
 		t, n, err := readLPBytes(src[total:])
 		total += n
@@ -159,78 +161,115 @@ func (sm *SubscribeMessage) Decode(src []byte) (int, error) {
 			return total, err
 		}
 
-		sm.topics[string(t)] = QosType(src[total])
+		msg.topics[string(t)] = QosType(src[total])
 		total++
 
 		remlen = remlen - n - 1
 	}
 
-	if len(sm.topics) == 0 {
+	if len(msg.topics) == 0 {
 		return 0, errors.New("subscribe/Decode: Empty topic list")
 	}
 
-	sm.dirty = false
+	msg.dirty = false
 
 	return total, nil
 }
 
 // Encode message
-func (sm *SubscribeMessage) Encode(dst []byte) (int, error) {
-	if !sm.dirty {
-		if len(dst) < len(sm.dBuf) {
-			return 0, fmt.Errorf("subscribe/Encode: Insufficient buffer size. Expecting %d, got %d", len(sm.dBuf), len(dst))
-		}
-
-		return copy(dst, sm.dBuf), nil
+func (msg *SubscribeMessage) Encode(dst []byte) (int, error) {
+	expectedSize := msg.Len()
+	if len(dst) < expectedSize {
+		return expectedSize, ErrInsufficientBufferSize
 	}
 
-	hl := sm.header.msgLen()
-	ml := sm.msgLen()
-
-	if len(dst) < hl+ml {
-		return 0, fmt.Errorf("subscribe/Encode: Insufficient buffer size. Expecting %d, got %d", hl+ml, len(dst))
-	}
-
-	if err := sm.SetRemainingLength(int32(ml)); err != nil {
-		return 0, err
-	}
-
+	var err error
 	total := 0
 
-	n, err := sm.header.encode(dst[total:])
-	total += n
-	if err != nil {
-		return total, err
-	}
+	if !msg.dirty {
+		total = copy(dst, msg.dBuf)
+	} else {
+		var n int
 
-	if sm.PacketID() == 0 {
-		sm.SetPacketID(uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff))
-		//this.packetID = uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff)
-	}
-
-	n = copy(dst[total:], sm.packetID)
-	//binary.BigEndian.PutUint16(dst[total:], this.packetId)
-	total += n
-
-	for t, q := range sm.topics {
-		n, err := writeLPBytes(dst[total:], []byte(t))
-		total += n
-		if err != nil {
+		if n, err = msg.header.encode(dst[total:]); err != nil {
 			return total, err
 		}
+		total += n
 
-		dst[total] = byte(q)
-		total++
+		if msg.PacketID() == 0 {
+			msg.SetPacketID(uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff))
+		}
+
+		total += copy(dst[total:], msg.packetID)
+
+		for t, q := range msg.topics {
+			n, err = writeLPBytes(dst[total:], []byte(t))
+			total += n
+			if err != nil {
+				return total, err
+			}
+
+			dst[total] = byte(q)
+			total++
+		}
 	}
 
-	return total, nil
+	return total, err
 }
 
-func (sm *SubscribeMessage) msgLen() int {
+// Send encode and send message into ring buffer
+func (msg *SubscribeMessage) Send(to *buffer.Type) (int, error) {
+	var err error
+	total := 0
+
+	if !msg.dirty {
+		total, err = to.Send(msg.dBuf)
+	} else {
+		expectedSize := msg.Len()
+		if len(to.ExternalBuf) < expectedSize {
+			to.ExternalBuf = make([]byte, expectedSize)
+		}
+
+		var n int
+
+		if n, err = msg.header.encode(to.ExternalBuf[total:]); err != nil {
+			return 0, err
+		}
+		total += n
+
+		if msg.PacketID() == 0 {
+			msg.SetPacketID(uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff))
+		}
+
+		if copy(to.ExternalBuf[total:total+2], msg.packetID) != 2 {
+			to.ExternalBuf[total] = 0
+			to.ExternalBuf[total+1] = 0
+		}
+
+		total += 2
+
+		for t, q := range msg.topics {
+			n, err = writeLPBytes(to.ExternalBuf[total:], []byte(t))
+			total += n
+			if err != nil {
+				return 0, err
+			}
+
+			to.ExternalBuf[total] = byte(q)
+			total++
+		}
+
+		total, err = to.Send(to.ExternalBuf[:total])
+	}
+
+	return total, err
+}
+
+func (msg *SubscribeMessage) msgLen() int {
 	// packet ID
 	total := 2
 
-	for t := range sm.topics {
+	for t := range msg.topics {
 		total += 2 + len(t) + 1
 	}
 

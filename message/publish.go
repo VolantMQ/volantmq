@@ -16,7 +16,14 @@ package message
 
 import (
 	"fmt"
+	"github.com/troian/surgemq/buffer"
 	"sync/atomic"
+)
+
+const (
+	publishFlagDupMask    byte = 0x08
+	publishFlagQosMask    byte = 0x06
+	publishFlagRetainMask byte = 0x01
 )
 
 // PublishMessage A PUBLISH Control Packet is sent from a Client to a Server or from Server to a Client
@@ -38,9 +45,9 @@ func NewPublishMessage() *PublishMessage {
 	return msg
 }
 
-func (pm PublishMessage) String() string {
+func (msg *PublishMessage) String() string {
 	return fmt.Sprintf("%s, Topic=%q, Packet ID=%d, QoS=%d, Retained=%t, Dup=%t, Payload=%v",
-		pm.header, pm.topic, pm.packetID, pm.QoS(), pm.Retain(), pm.Dup(), pm.payload)
+		msg.header, msg.topic, msg.packetID, msg.QoS(), msg.Retain(), msg.Dup(), msg.payload)
 }
 
 // Dup returns the value specifying the duplicate delivery of a PUBLISH Control Packet.
@@ -48,16 +55,16 @@ func (pm PublishMessage) String() string {
 // Client or Server has attempted to send this MQTT PUBLISH Packet. If the DUP flag is
 // set to 1, it indicates that this might be re-delivery of an earlier attempt to send
 // the Packet.
-func (pm *PublishMessage) Dup() bool {
-	return ((pm.Flags() >> 3) & 0x1) == 1
+func (msg *PublishMessage) Dup() bool {
+	return (msg.Flags() & publishFlagDupMask) != 0
 }
 
 // SetDup sets the value specifying the duplicate delivery of a PUBLISH Control Packet.
-func (pm *PublishMessage) SetDup(v bool) {
+func (msg *PublishMessage) SetDup(v bool) {
 	if v {
-		pm.mTypeFlags[0] |= 0x8 // 00001000
+		msg.mTypeFlags[0] |= publishFlagDupMask // 0x8 // 00001000
 	} else {
-		pm.mTypeFlags[0] &= 247 // 11110111
+		msg.mTypeFlags[0] &= ^publishFlagDupMask // 247 // 11110111
 	}
 }
 
@@ -65,88 +72,89 @@ func (pm *PublishMessage) SetDup(v bool) {
 // Packet. If the RETAIN flag is set to 1, in a PUBLISH Packet sent by a Client to a
 // Server, the Server MUST store the Application Message and its QoS, so that it can be
 // delivered to future subscribers whose subscriptions match its topic name.
-func (pm *PublishMessage) Retain() bool {
-	return (pm.Flags() & 0x1) == 1
+func (msg *PublishMessage) Retain() bool {
+	return (msg.Flags() & publishFlagRetainMask) != 0
 }
 
 // SetRetain sets the value of the RETAIN flag.
-func (pm *PublishMessage) SetRetain(v bool) {
+func (msg *PublishMessage) SetRetain(v bool) {
 	if v {
-		pm.mTypeFlags[0] |= 0x1 // 00000001
+		msg.mTypeFlags[0] |= publishFlagRetainMask //0x1 // 00000001
 	} else {
-		pm.mTypeFlags[0] &= 254 // 11111110
+		msg.mTypeFlags[0] &= ^publishFlagRetainMask // 254 // 11111110
 	}
 }
 
 // QoS returns the field that indicates the level of assurance for delivery of an
 // Application Message. The values are QosAtMostOnce, QosAtLeastOnce and QosExactlyOnce.
-func (pm *PublishMessage) QoS() QosType {
-	return QosType((pm.Flags() >> 1) & 0x3)
+func (msg *PublishMessage) QoS() QosType {
+	return QosType((msg.Flags() & publishFlagQosMask) >> 1)
 }
 
 // SetQoS sets the field that indicates the level of assurance for delivery of an
 // Application Message. The values are QosAtMostOnce, QosAtLeastOnce and QosExactlyOnce.
 // An error is returned if the value is not one of these.
-func (pm *PublishMessage) SetQoS(v QosType) error {
+func (msg *PublishMessage) SetQoS(v QosType) error {
 	if !v.IsValid() {
 		return ErrInvalidQoS
 	}
+	msg.mTypeFlags[0] &= ^publishFlagQosMask
 
-	pm.mTypeFlags[0] = (pm.mTypeFlags[0] & 249) | byte(v<<1) // 249 = 11111001
+	msg.mTypeFlags[0] |= byte(v) << 1 // (msg.mTypeFlags[0] & 249) | byte(v<<1) // 249 = 11111001
 
 	return nil
 }
 
 // Topic returns the the topic name that identifies the information channel to which
 // payload data is published.
-func (pm *PublishMessage) Topic() string {
-	return pm.topic
+func (msg *PublishMessage) Topic() string {
+	return msg.topic
 }
 
 // SetTopic sets the the topic name that identifies the information channel to which
 // payload data is published. An error is returned if ValidTopic() is falbase.
-func (pm *PublishMessage) SetTopic(v string) error {
+func (msg *PublishMessage) SetTopic(v string) error {
 	if !ValidTopic(v) {
 		return ErrInvalidTopic
 	}
 
-	pm.topic = v
-	pm.dirty = true
+	msg.topic = v
+	msg.dirty = true
 
 	return nil
 }
 
 // Payload returns the application message that's part of the PUBLISH message.
-func (pm *PublishMessage) Payload() []byte {
-	return pm.payload
+func (msg *PublishMessage) Payload() []byte {
+	return msg.payload
 }
 
 // SetPayload sets the application message that's part of the PUBLISH message.
-func (pm *PublishMessage) SetPayload(v []byte) {
-	pm.payload = v
-	pm.dirty = true
+func (msg *PublishMessage) SetPayload(v []byte) {
+	msg.payload = v
+	msg.dirty = true
 }
 
 // Len of message
-func (pm *PublishMessage) Len() int {
-	if !pm.dirty {
-		return len(pm.dBuf)
+func (msg *PublishMessage) Len() int {
+	if !msg.dirty {
+		return len(msg.dBuf)
 	}
 
-	ml := pm.msgLen()
+	ml := msg.msgLen()
 
-	if err := pm.SetRemainingLength(int32(ml)); err != nil {
+	if err := msg.SetRemainingLength(int32(ml)); err != nil {
 		return 0
 	}
 
-	return pm.header.msgLen() + ml
+	return msg.header.msgLen() + ml
 }
 
 // Decode message
-func (pm *PublishMessage) Decode(src []byte) (int, error) {
+func (msg *PublishMessage) Decode(src []byte) (int, error) {
 	total := 0
 
-	hn, err := pm.header.decode(src[total:])
+	hn, err := msg.header.decode(src[total:])
 	total += hn
 	if err != nil {
 		return total, err
@@ -155,98 +163,146 @@ func (pm *PublishMessage) Decode(src []byte) (int, error) {
 	var n int
 	var buf []byte
 	buf, n, err = readLPBytes(src[total:])
-	pm.topic = string(buf)
+	msg.topic = string(buf)
 	total += n
 	if err != nil {
 		return total, err
 	}
 
-	if !ValidTopic(pm.topic) {
+	if !ValidTopic(msg.topic) {
 		return total, ErrInvalidTopic
 	}
 
 	// The packet identifier field is only present in the PUBLISH packets where the
 	// QoS level is 1 or 2
-	if pm.QoS() != 0 {
-		//pm.packetId = binary.BigEndian.Uint16(src[total:])
-		pm.packetID = src[total : total+2]
+	if msg.QoS() != 0 {
+		//msg.packetId = binary.BigEndian.Uint16(src[total:])
+		msg.packetID = src[total : total+2]
 		total += 2
 	}
 
-	l := int(pm.remLen) - (total - hn)
-	pm.payload = src[total : total+l]
-	total += len(pm.payload)
+	l := int(msg.remLen) - (total - hn)
+	msg.payload = src[total : total+l]
+	total += len(msg.payload)
 
-	pm.dirty = false
+	msg.dirty = false
 
 	return total, nil
 }
 
 // Encode message
-func (pm *PublishMessage) Encode(dst []byte) (int, error) {
-	if !pm.dirty {
-		if len(dst) < len(pm.dBuf) {
-			return 0, ErrInsufficientBufferSize
-		}
-
-		return copy(dst, pm.dBuf), nil
+func (msg *PublishMessage) Encode(dst []byte) (int, error) {
+	expectedSize := msg.Len()
+	if len(dst) < expectedSize {
+		return expectedSize, ErrInsufficientBufferSize
 	}
 
-	if len(pm.topic) == 0 {
-		return 0, ErrInvalidTopic
-	}
-
-	if len(pm.payload) == 0 {
-		return 0, ErrEmptyPayload
-	}
-
-	ml := pm.msgLen()
-
-	if err := pm.SetRemainingLength(int32(ml)); err != nil {
-		return 0, err
-	}
-
-	hl := pm.header.msgLen()
-
-	if len(dst) < hl+ml {
-		return 0, ErrInsufficientBufferSize
-	}
-
+	var err error
 	total := 0
 
-	n, err := pm.header.encode(dst[total:])
-	total += n
-	if err != nil {
-		return total, err
-	}
-
-	n, err = writeLPBytes(dst[total:], []byte(pm.topic))
-	total += n
-	if err != nil {
-		return total, err
-	}
-
-	// The packet identifier field is only present in the PUBLISH packets where the QoS level is 1 or 2
-	if pm.QoS() != 0 {
-		if pm.PacketID() == 0 {
-			pm.SetPacketID(uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff))
-			//this.packetId = uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff)
+	if !msg.dirty {
+		total = copy(dst, msg.dBuf)
+	} else {
+		if len(msg.topic) == 0 {
+			return 0, ErrInvalidTopic
 		}
 
-		n = copy(dst[total:], pm.packetID)
-		//binary.BigEndian.PutUint16(dst[total:], this.packetId)
+		if len(msg.payload) == 0 {
+			return 0, ErrEmptyPayload
+		}
+
+		var n int
+
+		if n, err = msg.header.encode(dst[total:]); err != nil {
+			return total, err
+		}
 		total += n
+
+		if n, err = writeLPBytes(dst[total:], []byte(msg.topic)); err != nil {
+			return total, err
+		}
+		total += n
+
+		// The packet identifier field is only present in the PUBLISH packets where the QoS level is 1 or 2
+		if msg.QoS() == QosAtLeastOnce || msg.QoS() == QosExactlyOnce {
+			if msg.PacketID() == 0 {
+				msg.SetPacketID(uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff))
+			}
+
+			copy(dst[total:], msg.packetID)
+			total += 2
+		}
+
+		total += copy(dst[total:], msg.payload)
 	}
 
-	copy(dst[total:], pm.payload)
-	total += len(pm.payload)
-
-	return total, nil
+	return total, err
 }
 
-func (pm *PublishMessage) msgLen() int {
-	total := 2 + len(pm.topic) + len(pm.payload)
-	if pm.QoS() != 0 {
+// Send encode and send message into ring buffer
+func (msg *PublishMessage) Send(to *buffer.Type) (int, error) {
+	var err error
+	total := 0
+
+	if !msg.dirty {
+		total, err = to.Send(msg.dBuf)
+	} else {
+		if len(msg.topic) == 0 {
+			return 0, ErrInvalidTopic
+		}
+
+		if len(msg.payload) == 0 {
+			return 0, ErrEmptyPayload
+		}
+
+		expectedSize := msg.Len()
+		if len(to.ExternalBuf) < expectedSize {
+			to.ExternalBuf = make([]byte, expectedSize)
+		}
+
+		var n int
+
+		if n, err = msg.header.encode(to.ExternalBuf[total:]); err != nil {
+			return total, err
+		}
+		total += n
+
+		if n, err = writeLPBytes(to.ExternalBuf[total:], []byte(msg.topic)); err != nil {
+			return total, err
+		}
+		total += n
+
+		// The packet identifier field is only present in the PUBLISH packets where the QoS level is 1 or 2
+		if msg.QoS() == QosAtLeastOnce || msg.QoS() == QosExactlyOnce {
+			if msg.PacketID() == 0 {
+				msg.SetPacketID(uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff))
+			}
+
+			copy(to.ExternalBuf[total:total+2], msg.packetID)
+			total += 2
+		}
+
+		if n, err = to.Send(to.ExternalBuf[:total]); err != nil {
+			return 0, err
+		}
+		total = n
+
+		if n, err = to.Send(msg.payload); err != nil {
+			return 0, err
+		}
+
+		total += n
+
+		return total, nil
+
+	}
+
+	return total, err
+}
+
+func (msg *PublishMessage) msgLen() int {
+	total := 2 + len(msg.topic) + len(msg.payload)
+	if msg.QoS() != 0 {
 		total += 2
 	}
 

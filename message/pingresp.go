@@ -14,6 +14,10 @@
 
 package message
 
+import (
+	"github.com/troian/surgemq/buffer"
+)
+
 // PingRespMessage A PINGRESP Packet is sent by the Server to the Client in response to a PINGREQ
 // Packet. It indicates that the Server is alive.
 type PingRespMessage struct {
@@ -31,19 +35,54 @@ func NewPingRespMessage() Provider {
 }
 
 // Decode message
-func (dm *PingRespMessage) Decode(src []byte) (int, error) {
-	return dm.header.decode(src)
+func (msg *PingRespMessage) Decode(src []byte) (int, error) {
+	return msg.header.decode(src)
 }
 
 // Encode message
-func (dm *PingRespMessage) Encode(dst []byte) (int, error) {
-	if !dm.dirty {
-		if len(dst) < len(dm.dBuf) {
-			return 0, ErrInsufficientBufferSize
-		}
-
-		return copy(dst, dm.dBuf), nil
+func (msg *PingRespMessage) Encode(dst []byte) (int, error) {
+	if len(dst) < msg.Len() {
+		return 0, ErrInsufficientBufferSize
 	}
 
-	return dm.header.encode(dst)
+	var err error
+	total := 0
+
+	if !msg.dirty {
+		total = copy(dst, msg.dBuf)
+	} else {
+		var n int
+
+		if n, err = msg.header.encode(dst[total:]); err != nil {
+			return total, err
+		}
+		total += n
+	}
+
+	return total, err
+}
+
+// Send encode and send message into ring buffer
+func (msg *PingRespMessage) Send(to *buffer.Type) (int, error) {
+	var err error
+	total := 0
+
+	if !msg.dirty {
+		total, err = to.Send(msg.dBuf)
+	} else {
+		expectedSize := msg.Len()
+		if len(to.ExternalBuf) < expectedSize {
+			to.ExternalBuf = make([]byte, expectedSize)
+		}
+		var n int
+
+		if n, err = msg.header.encode(to.ExternalBuf); err != nil {
+			return total, err
+		}
+		total += n
+
+		total, err = to.Send(to.ExternalBuf[:total])
+	}
+
+	return total, err
 }

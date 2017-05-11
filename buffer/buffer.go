@@ -72,24 +72,17 @@ func (b *sequence) set(seq int64) {
 
 // Type of buffer
 type Type struct {
-	id int64
-
-	buf []byte
-	tmp []byte
-
-	size int64
-	mask int64
-
-	done int64
-
-	pSeq *sequence
-	cSeq *sequence
-
-	pCond *sync.Cond
-	cCond *sync.Cond
-
-	//cWait int64
-	//pWait int64
+	ExternalBuf []byte
+	id          int64
+	buf         []byte
+	tmp         []byte
+	size        int64
+	mask        int64
+	done        int64
+	pSeq        *sequence
+	cSeq        *sequence
+	pCond       *sync.Cond
+	cCond       *sync.Cond
 }
 
 // New buffer
@@ -111,16 +104,15 @@ func New(size int64) (*Type, error) {
 	}
 
 	return &Type{
-		id:    atomic.AddInt64(&bufCNT, 1),
-		buf:   make([]byte, size),
-		size:  size,
-		mask:  size - 1,
-		pSeq:  newSequence(),
-		cSeq:  newSequence(),
-		pCond: sync.NewCond(new(sync.Mutex)),
-		cCond: sync.NewCond(new(sync.Mutex)),
-		//cWait: 0,
-		//pWait: 0,
+		id:          atomic.AddInt64(&bufCNT, 1),
+		ExternalBuf: make([]byte, size),
+		buf:         make([]byte, size),
+		size:        size,
+		mask:        size - 1,
+		pSeq:        newSequence(),
+		cSeq:        newSequence(),
+		pCond:       sync.NewCond(new(sync.Mutex)),
+		cCond:       sync.NewCond(new(sync.Mutex)),
 	}, nil
 }
 
@@ -149,6 +141,11 @@ func (b *Type) Len() int {
 	cpos := b.cSeq.get()
 	ppos := b.pSeq.get()
 	return int(ppos - cpos)
+}
+
+// Size of buffer
+func (b *Type) Size() int64 {
+	return b.size
 }
 
 // ReadFrom from reader
@@ -190,7 +187,7 @@ func (b *Type) ReadFrom(r io.Reader) (int64, error) {
 
 // WriteTo to writer
 func (b *Type) WriteTo(w io.Writer) (int64, error) {
-	defer b.Close() // nolint: errcheck
+	//defer b.Close() // nolint: errcheck
 
 	total := int64(0)
 
@@ -200,7 +197,6 @@ func (b *Type) WriteTo(w io.Writer) (int64, error) {
 		}
 
 		p, err := b.ReadPeek(DefaultWriteBlockSize)
-
 		// There's some data, let's process it first
 		if len(p) > 0 {
 			var n int
@@ -222,8 +218,10 @@ func (b *Type) WriteTo(w io.Writer) (int64, error) {
 			}
 		}
 
-		if err != ErrBufferInsufficientData && err != nil {
-			return total, err
+		if err != nil {
+			if err != ErrBufferInsufficientData {
+				return total, err
+			}
 		}
 	}
 }
@@ -296,6 +294,7 @@ func (b *Type) Read(p []byte) (int, error) {
 		b.cCond.L.Lock()
 		for ppos = b.pSeq.get(); cpos >= ppos; ppos = b.pSeq.get() {
 			if b.isDone() {
+				b.cCond.L.Unlock()
 				return 0, io.EOF
 			}
 
@@ -353,6 +352,7 @@ func (b *Type) ReadPeek(n int) ([]byte, error) {
 	b.cCond.L.Lock()
 	for ; cpos >= ppos; ppos = b.pSeq.get() {
 		if b.isDone() {
+			b.cCond.L.Unlock()
 			return nil, io.EOF
 		}
 
@@ -417,6 +417,7 @@ func (b *Type) ReadWait(n int) ([]byte, error) {
 	b.cCond.L.Lock()
 	for ; next > ppos; ppos = b.pSeq.get() {
 		if b.isDone() {
+			b.cCond.L.Unlock()
 			return nil, io.EOF
 		}
 
@@ -515,6 +516,29 @@ func (b *Type) WriteCommit(n int) (int, error) {
 	b.cCond.L.Unlock()
 
 	return cnt, nil
+}
+
+// Send to
+func (b *Type) Send(from []byte) (int, error) {
+	var err error
+	remaining := len(from)
+	offset := 0
+	for remaining > 0 {
+		toWrite := remaining
+		if toWrite > int(b.Size()) {
+			toWrite = int(b.Size())
+		}
+
+		var wrote int
+		if wrote, err = b.Write(from[offset : offset+toWrite]); err != nil {
+			return 0, err
+		}
+
+		remaining -= wrote
+		offset += wrote
+	}
+
+	return len(from), err
 }
 
 func (b *Type) waitForWriteSpace(n int) (int64, int, error) {

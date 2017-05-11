@@ -134,8 +134,8 @@ type Type struct {
 	inStat  stat
 	outStat stat
 
-	inTmp  []byte
-	outTmp []byte
+	//inTmp []byte
+	//outTmp []byte
 
 	rmSgs []*message.PublishMessage
 }
@@ -233,9 +233,9 @@ func (s *Type) Start(inStat, outStat int64) error {
 func (s *Type) Stop() bool {
 	defer func() {
 		// Let's recover from panic
-		if r := recover(); r != nil {
-			appLog.Errorf("[%s] recovering from panic: %v", s.CID(), r)
-		}
+		//if r := recover(); r != nil {
+		//	appLog.Errorf("[%s] recovering from panic: %v", s.CID(), r)
+		//}
 	}()
 
 	if !atomic.CompareAndSwapInt64(&s.closed, 0, 1) {
@@ -252,7 +252,7 @@ func (s *Type) Stop() bool {
 
 	// Close the network connection
 	if s.Conn != nil {
-		appLog.Debugf("[%s] closing network connection", s.CID())
+		appLog.Infof("[%s] closing network connection", s.CID())
 		if err := s.Conn.Close(); err != nil {
 			appLog.Errorf("close connection [%s] error: %s", s.CID(), err.Error())
 		}
@@ -283,7 +283,7 @@ func (s *Type) Stop() bool {
 
 		// Publish will message if WillFlag is set
 		if s.sess.Will != nil {
-			appLog.Infof("[%s] service/stop: connection unexpectedly closed. Sending Will.", s.CID())
+			appLog.Infof("[%s] service/stop: connection unexpectedly closed. Sending Will", s.CID())
 			s.onPublish(s.sess.Will) // nolint: errcheck
 		}
 	}
