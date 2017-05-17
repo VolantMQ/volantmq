@@ -4,12 +4,13 @@ import (
 	"errors"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/topics"
+	"github.com/troian/surgemq/types"
 )
 
 // subscription nodes
 type sNode struct {
 	// If this is the end of the topic string, then add subscribers here
-	subs []interface{}
+	subs types.Subscribers
 	qos  []message.QosType
 
 	// Otherwise add the next topic level here
@@ -22,7 +23,7 @@ func newSNode() *sNode {
 	}
 }
 
-func (sn *sNode) insert(topic string, qos message.QosType, sub interface{}) error {
+func (sn *sNode) insert(topic string, qos message.QosType, sub *types.Subscriber) error {
 	// If there's no more topic levels, that means we are at the matching sNode
 	// to insert the subscriber. So let's see if there's such subscriber,
 	// if so, update it. Otherwise insert it.
@@ -66,7 +67,7 @@ func (sn *sNode) insert(topic string, qos message.QosType, sub interface{}) erro
 
 // This remove implementation ignores the QoS, as long as the subscriber
 // matches then it's removed
-func (sn *sNode) remove(topic string, sub interface{}) error {
+func (sn *sNode) remove(topic string, sub *types.Subscriber) error {
 	// If the topic is empty, it means we are at the final matching snode. If so,
 	// let's find the matching subscribers and remove them.
 	if len(topic) == 0 {
@@ -125,11 +126,11 @@ func (sn *sNode) remove(topic string, sub interface{}) error {
 // with no wildcards (publish topic), it returns a list of subscribers that subscribes
 // to the topic. For each of the level names, it's a match
 // - if there are subscribers to '#', then all the subscribers are added to result set
-func (sn *sNode) match(topic string, qos message.QosType, subs *[]interface{}, qoss *[]message.QosType) error {
+func (sn *sNode) match(topic string, qos message.QosType, subs *types.Subscribers) error {
 	// If the topic is empty, it means we are at the final matching snode. If so,
 	// let's find the subscribers that match the qos and append them to the list.
 	if len(topic) == 0 {
-		sn.matchQos(qos, subs, qoss)
+		sn.matchQos(qos, subs)
 		return nil
 	}
 
@@ -144,9 +145,9 @@ func (sn *sNode) match(topic string, qos message.QosType, subs *[]interface{}, q
 	for k, n := range sn.nodes {
 		// If the key is "#", then these subscribers are added to the result set
 		if k == topics.MWC {
-			n.matchQos(qos, subs, qoss)
+			n.matchQos(qos, subs)
 		} else if k == topics.SWC || k == level {
-			if err := n.match(rem, qos, subs, qoss); err != nil {
+			if err := n.match(rem, qos, subs); err != nil {
 				return err
 			}
 		}

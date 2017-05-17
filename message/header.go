@@ -19,30 +19,14 @@ import (
 	"fmt"
 )
 
-var (
-	gPacketID uint64
-)
-
 // Fixed header
 // - 1 byte for control packet type (bits 7-4) and flags (bits 3-0)
 // - up to 4 byte for remaining length
 type header struct {
-	// Header fields
-	// mType  MessageType
-	// flags  byte
-	remLen int32
-
-	// Whether the message has changed since last decode
-	dirty bool
-
+	remLen   int32
+	packetID uint16
 	// mTypeFlags is the first byte of the buffer, 4 bits for mType, 4 bits for flags
 	mTypeFlags []byte
-
-	// Some messages need packet ID, 2 byte uint16
-	packetID []byte
-
-	// Points to the decoding buffer
-	dBuf []byte
 }
 
 // String returns a string representation of the message.
@@ -71,7 +55,6 @@ func (h *header) Type() Type {
 	//return this.mtype
 	if len(h.mTypeFlags) != 1 {
 		h.mTypeFlags = make([]byte, 1)
-		h.dirty = true
 	}
 
 	return Type(h.mTypeFlags[0] >> 4)
@@ -90,7 +73,6 @@ func (h *header) SetType(mType Type) error {
 	// backing buffer anyway.
 	if len(h.mTypeFlags) != 1 {
 		h.mTypeFlags = make([]byte, 1)
-		h.dirty = true
 	}
 
 	h.mTypeFlags[0] = byte(mType)<<4 | (mType.DefaultFlags() & 0xf)
@@ -108,6 +90,10 @@ func (h *header) RemainingLength() int32 {
 	return h.remLen
 }
 
+func (h *header) PacketID() uint16 {
+	return h.packetID
+}
+
 // SetRemainingLength sets the length of the non-fixed-header part of the message.
 // It returns error if the length is greater than 268435455, which is the max
 // message length as defined by the MQTT spec.
@@ -117,43 +103,12 @@ func (h *header) SetRemainingLength(remlen int32) error {
 	}
 
 	h.remLen = remlen
-	h.dirty = true
 
 	return nil
 }
 
 func (h *header) Len() int {
 	return h.msgLen()
-}
-
-// PacketID returns the ID of the packet.
-func (h *header) PacketID() uint16 {
-	if len(h.packetID) == 2 {
-		return binary.BigEndian.Uint16(h.packetID)
-	}
-
-	return 0
-}
-
-// SetPacketID sets the ID of the packet.
-func (h *header) SetPacketID(v uint16) {
-	// If setting to 0, nothing to do, move on
-	if v == 0 {
-		return
-	}
-
-	// If packetId buffer is not 2 bytes (uint16), then we allocate a new one and
-	// make dirty. Then we encode the packet ID into the buffer.
-	if len(h.packetID) != 2 {
-		h.packetID = make([]byte, 2)
-		h.dirty = true
-	}
-
-	// Notice we don't set the message to be dirty when we are not allocating a new
-	// buffer. In this case, it means the buffer is probably a sub-slice of another
-	// slice. If that's the case, then during encoding we would have copied the whole
-	// backing buffer anyway.
-	binary.BigEndian.PutUint16(h.packetID, v)
 }
 
 func (h *header) encode(dst []byte) (int, error) {
@@ -173,7 +128,7 @@ func (h *header) encode(dst []byte) (int, error) {
 		return total, ErrInvalidMessageType
 	}
 
-	dst[total] = h.mTypeFlags[0]
+	copy(dst[total:], h.mTypeFlags)
 	total++
 
 	n := binary.PutUvarint(dst[total:], uint64(h.remLen))
@@ -188,27 +143,30 @@ func (h *header) encode(dst []byte) (int, error) {
 func (h *header) decode(src []byte) (int, error) {
 	total := 0
 
-	h.dBuf = src
-
 	// Decode fixed header
 	mType := h.Type()
 
-	h.mTypeFlags = src[total : total+1]
+	h.mTypeFlags = make([]byte, 1)
+	copy(h.mTypeFlags, src[total:total+1])
+	// [MQTT-2.2.1]
 	if !h.Type().Valid() {
 		return total, ErrInvalidMessageType
 	}
 
+	// This error seems meaningless
 	if mType != h.Type() {
 		return total, ErrInvalidMessageType
 	}
 
 	// [MQTT-2.2.2-1]
-	if h.Type() != PUBLISH && h.Flags() != h.Type().DefaultFlags() {
-		return total, ErrInvalidMessageTypeFlags
-	}
-
-	if h.Type() == PUBLISH && !QosType((h.Flags()&publishFlagQosMask)>>1).IsValid() {
-		return total, ErrInvalidQoS
+	if h.Type() != PUBLISH {
+		if h.Flags() != h.Type().DefaultFlags() {
+			return total, ErrInvalidMessageTypeFlags
+		}
+	} else {
+		if !QosType((h.Flags() & publishFlagQosMask) >> 1).IsValid() {
+			return total, ErrInvalidQoS
+		}
 	}
 
 	total++

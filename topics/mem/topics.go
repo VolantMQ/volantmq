@@ -19,14 +19,16 @@ import (
 	"sync"
 
 	"errors"
+	"github.com/juju/loggo"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/topics"
+	"github.com/troian/surgemq/types"
 )
 
-var (
-	// MaxQosAllowed is the maximum QOS supported by this server
-	MaxQosAllowed = message.QosExactlyOnce
-)
+//var (
+//	// MaxQosAllowed is the maximum QOS supported by this server
+//	MaxQosAllowed = message.QosExactlyOnce
+//)
 
 type provider struct {
 	// Sub/unSub mutex
@@ -44,8 +46,15 @@ type provider struct {
 
 var _ topics.Provider = (*provider)(nil)
 
+var appLog loggo.Logger
+
+func init() {
+}
+
 func init() {
 	topics.Register("mem", NewMemProvider())
+	appLog = loggo.GetLogger("topics.mem")
+	appLog.SetLogLevel(loggo.INFO)
 }
 
 // NewMemProvider returns an new instance of the provider, which is implements the
@@ -59,7 +68,7 @@ func NewMemProvider() topics.Provider {
 	}
 }
 
-func (mT *provider) Subscribe(topic string, qos message.QosType, sub interface{}) (message.QosType, error) {
+func (mT *provider) Subscribe(topic string, qos message.QosType, sub *types.Subscriber) (message.QosType, error) {
 	if !qos.IsValid() {
 		return message.QosFailure, message.ErrInvalidQoS
 	}
@@ -71,9 +80,9 @@ func (mT *provider) Subscribe(topic string, qos message.QosType, sub interface{}
 	mT.smu.Lock()
 	defer mT.smu.Unlock()
 
-	if qos > MaxQosAllowed {
-		qos = MaxQosAllowed
-	}
+	//if qos > MaxQosAllowed {
+	//	qos = MaxQosAllowed
+	//}
 
 	if err := mT.sRoot.insert(topic, qos, sub); err != nil {
 		return message.QosFailure, err
@@ -82,26 +91,35 @@ func (mT *provider) Subscribe(topic string, qos message.QosType, sub interface{}
 	return qos, nil
 }
 
-func (mT *provider) UnSubscribe(topic string, sub interface{}) error {
+func (mT *provider) UnSubscribe(topic string, sub *types.Subscriber) error {
 	mT.smu.Lock()
 	defer mT.smu.Unlock()
 
 	return mT.sRoot.remove(topic, sub)
 }
 
-// Returned values will be invalidated by the next Subscribers call
-func (mT *provider) Subscribers(topic string, qos message.QosType, subs *[]interface{}, qoss *[]message.QosType) error {
-	if !qos.IsValid() {
-		return message.ErrInvalidQoS
+func (mT *provider) Publish(msg *message.PublishMessage) error {
+	mT.smu.RLock()
+
+	var subs types.Subscribers
+
+	if err := mT.sRoot.match(msg.Topic(), msg.QoS(), &subs); err != nil {
+		mT.smu.RUnlock()
+		return err
+	}
+	mT.smu.RUnlock()
+
+	for _, s := range subs {
+		if s != nil {
+			if err := s.Publish(msg); err != nil {
+				appLog.Errorf(err.Error())
+			}
+
+			s.WgWriters.Done()
+		}
 	}
 
-	mT.smu.RLock()
-	defer mT.smu.RUnlock()
-
-	*subs = (*subs)[0:0]
-	*qoss = (*qoss)[0:0]
-
-	return mT.sRoot.match(topic, qos, subs, qoss)
+	return nil
 }
 
 func (mT *provider) Retain(msg *message.PublishMessage) error {
@@ -202,13 +220,13 @@ func nextTopicLevel(topic string) (string, string, error) {
 // due to the QoS granted is lower than the published message QoS. For example,
 // if the client is granted only QoS 0, and the publish message is QoS 1, then this
 // client is not to be send the published message.
-func (sn *sNode) matchQos(qos message.QosType, subs *[]interface{}, qoss *[]message.QosType) {
+func (sn *sNode) matchQos(qos message.QosType, subs *types.Subscribers) {
 	for i, sub := range sn.subs {
 		// If the published QoS is higher than the subscriber QoS, then we skip the
 		// subscriber. Otherwise, add to the list.
 		if qos <= sn.qos[i] {
+			sub.WgWriters.Add(1)
 			*subs = append(*subs, sub)
-			*qoss = append(*qoss, qos)
 		}
 	}
 }

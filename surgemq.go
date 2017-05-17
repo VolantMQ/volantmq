@@ -7,9 +7,9 @@ import (
 
 // Errors
 var (
-	ErrInvalidConnectionType error = errors.New("service: Invalid connection type")
+	ErrInvalidConnectionType error = errors.New("invalid connection type")
 	//ErrInvalidSubscriber      error = errors.New("service: Invalid subscriber")
-	ErrBufferNotReady error = errors.New("service: buffer is not ready")
+	ErrBufferNotReady error = errors.New("buffer is not ready")
 )
 
 // Default configs

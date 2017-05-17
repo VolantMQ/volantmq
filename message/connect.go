@@ -107,8 +107,6 @@ func (msg *ConnectMessage) SetVersion(v byte) error {
 	}
 
 	msg.version = v
-	msg.dirty = true
-
 	return nil
 }
 
@@ -127,8 +125,6 @@ func (msg *ConnectMessage) SetCleanSession(v bool) {
 	} else {
 		msg.connectFlags &= ^connFlagCleanSessionMask // 0xFD // 11111101
 	}
-
-	msg.dirty = true
 }
 
 // WillFlag returns the bit that specifies whether a Will Message should be stored
@@ -147,8 +143,6 @@ func (msg *ConnectMessage) SetWillFlag(v bool) {
 	} else {
 		msg.connectFlags &= ^connFlagWillMask // 0xFB // 11111011
 	}
-
-	msg.dirty = true
 }
 
 // WillQos returns the two bits that specify the QoS level to be used when publishing
@@ -166,7 +160,6 @@ func (msg *ConnectMessage) SetWillQos(qos QosType) error {
 
 	msg.connectFlags &= ^connFlagWillQosMask
 	msg.connectFlags |= byte(qos) << 0x03
-	msg.dirty = true
 
 	return nil
 }
@@ -185,8 +178,6 @@ func (msg *ConnectMessage) SetWillRetain(v bool) {
 	} else {
 		msg.connectFlags &= ^connFlagWillRetainMask // 0xDF // 11011111
 	}
-
-	msg.dirty = true
 }
 
 // UsernameFlag returns the bit that specifies whether a user name is present in the
@@ -203,8 +194,6 @@ func (msg *ConnectMessage) SetUsernameFlag(v bool) {
 	} else {
 		msg.connectFlags &= ^connFlagUsernameMask // 0x7F // 01111111
 	}
-
-	msg.dirty = true
 }
 
 // PasswordFlag returns the bit that specifies whether a password is present in the
@@ -221,8 +210,6 @@ func (msg *ConnectMessage) SetPasswordFlag(v bool) {
 	} else {
 		msg.connectFlags &= ^connFlagPasswordMask // 0xBF // 10111111
 	}
-
-	msg.dirty = true
 }
 
 // KeepAlive returns a time interval measured in seconds. Expressed as a 16-bit word,
@@ -237,8 +224,6 @@ func (msg *ConnectMessage) KeepAlive() uint16 {
 // alive.
 func (msg *ConnectMessage) SetKeepAlive(v uint16) {
 	msg.keepAlive = v
-
-	msg.dirty = true
 }
 
 // ClientID returns an ID that identifies the Client to the Server. Each Client
@@ -256,7 +241,6 @@ func (msg *ConnectMessage) SetClientID(v []byte) error {
 	}
 
 	msg.clientID = v
-	msg.dirty = true
 
 	return nil
 }
@@ -276,8 +260,6 @@ func (msg *ConnectMessage) SetWillTopic(v string) {
 	} else if len(msg.willMessage) == 0 {
 		msg.SetWillFlag(false)
 	}
-
-	msg.dirty = true
 }
 
 // WillMessage returns the Will Message that is to be published to the Will Topic.
@@ -294,8 +276,6 @@ func (msg *ConnectMessage) SetWillMessage(v []byte) {
 	} else if len(msg.willTopic) == 0 {
 		msg.SetWillFlag(false)
 	}
-
-	msg.dirty = true
 }
 
 // Username returns the username from the payload. If the User Name Flag is set to 1,
@@ -314,8 +294,6 @@ func (msg *ConnectMessage) SetUsername(v []byte) {
 	} else {
 		msg.SetUsernameFlag(false)
 	}
-
-	msg.dirty = true
 }
 
 // Password returns the password from the payload. If the Password Flag is set to 1,
@@ -334,16 +312,10 @@ func (msg *ConnectMessage) SetPassword(v []byte) {
 	} else {
 		msg.SetPasswordFlag(false)
 	}
-
-	msg.dirty = true
 }
 
 // Len of message
 func (msg *ConnectMessage) Len() int {
-	if !msg.dirty {
-		return len(msg.dBuf)
-	}
-
 	ml := msg.msgLen()
 
 	if err := msg.SetRemainingLength(int32(ml)); err != nil {
@@ -374,9 +346,38 @@ func (msg *ConnectMessage) Decode(src []byte) (int, error) {
 	}
 	total += n
 
-	msg.dirty = false
-
 	return total, nil
+}
+
+func (msg *ConnectMessage) preEncode(dst []byte) (int, error) {
+	var err error
+	total := 0
+
+	if msg.Type() != CONNECT {
+		return 0, ErrInvalidMessageType
+	}
+
+	if _, ok := SupportedVersions[msg.version]; !ok {
+		return 0, ErrInvalidProtocolVersion
+	}
+
+	if err = msg.SetRemainingLength(int32(msg.msgLen())); err != nil {
+		return 0, err
+	}
+
+	var n int
+
+	if n, err = msg.header.encode(dst[total:]); err != nil {
+		return total, err
+	}
+	total += n
+
+	if n, err = msg.encodeMessage(dst[total:]); err != nil {
+		return total, err
+	}
+	total += n
+
+	return total, err
 }
 
 // Encode message
@@ -386,77 +387,22 @@ func (msg *ConnectMessage) Encode(dst []byte) (int, error) {
 		return expectedSize, ErrInsufficientBufferSize
 	}
 
-	var err error
-	total := 0
-
-	if !msg.dirty {
-		total = copy(dst, msg.dBuf)
-	} else {
-		if msg.Type() != CONNECT {
-			return 0, ErrInvalidMessageType
-		}
-
-		if _, ok := SupportedVersions[msg.version]; !ok {
-			return 0, ErrInvalidProtocolVersion
-		}
-
-		if err = msg.SetRemainingLength(int32(msg.msgLen())); err != nil {
-			return 0, err
-		}
-
-		var n int
-
-		if n, err = msg.header.encode(dst[total:]); err != nil {
-			return total, err
-		}
-		total += n
-
-		if n, err = msg.encodeMessage(dst[total:]); err != nil {
-			return total, err
-		}
-		total += n
-	}
-
-	return total, err
+	return msg.preEncode(dst)
 }
 
 // Send encode and send message into ring buffer
 func (msg *ConnectMessage) Send(to *buffer.Type) (int, error) {
-	var err error
-	total := 0
-
-	if !msg.dirty {
-		total, err = to.Send(msg.dBuf)
-	} else {
-		if msg.Type() != CONNECT {
-			return 0, ErrInvalidMessageType
-		}
-
-		if _, ok := SupportedVersions[msg.version]; !ok {
-			return 0, ErrInvalidProtocolVersion
-		}
-
-		expectedSize := msg.Len()
-		if len(to.ExternalBuf) < expectedSize {
-			to.ExternalBuf = make([]byte, expectedSize)
-		}
-
-		var n int
-
-		if n, err = msg.header.encode(to.ExternalBuf[total:]); err != nil {
-			return total, err
-		}
-		total += n
-
-		if n, err = msg.encodeMessage(to.ExternalBuf[total:]); err != nil {
-			return total, err
-		}
-		total += n
-
-		total, err = to.Send(to.ExternalBuf[:total])
+	expectedSize := msg.Len()
+	if len(to.ExternalBuf) < expectedSize {
+		to.ExternalBuf = make([]byte, expectedSize)
 	}
 
-	return total, err
+	total, err := msg.preEncode(to.ExternalBuf)
+	if err != nil {
+		return 0, err
+	}
+
+	return to.Send([][]byte{to.ExternalBuf[:total]})
 }
 
 func (msg *ConnectMessage) encodeMessage(dst []byte) (int, error) {
@@ -585,19 +531,23 @@ func (msg *ConnectMessage) decodeMessage(src []byte) (int, error) {
 	}
 
 	if msg.WillFlag() {
-		var willBuf []byte
-		willBuf, n, err = readLPBytes(src[total:])
+		var buf []byte
+		buf, n, err = readLPBytes(src[total:])
 		total += n
 		if err != nil {
 			return total, err
 		}
-		msg.willTopic = string(willBuf)
 
-		msg.willMessage, n, err = readLPBytes(src[total:])
+		msg.willTopic = string(buf)
+
+		buf, n, err = readLPBytes(src[total:])
 		total += n
 		if err != nil {
 			return total, err
 		}
+
+		msg.willMessage = make([]byte, len(buf))
+		copy(msg.willMessage, buf)
 	}
 
 	// According to the 3.1 spec, it's possible that the usernameFlag is set,

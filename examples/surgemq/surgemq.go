@@ -15,119 +15,124 @@
 package main
 
 import (
-	"flag"
-	"log"
-	"os"
-	"os/signal"
-	"runtime/pprof"
-
 	"github.com/juju/loggo"
+	"github.com/spf13/viper"
 	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/auth"
 	"github.com/troian/surgemq/server"
+	_ "github.com/troian/surgemq/topics/mem"
+	"net/http"
+	_ "net/http/pprof"
+	"os"
+	"os/signal"
 	"syscall"
 )
 
-var (
-	keepAlive        int
-	connectTimeout   int
-	ackTimeout       int
-	timeoutRetries   int
-	authenticator    string
-	sessionsProvider string
-	topicsProvider   string
-	cpuprofile       string
-	wsAddr           string // HTTPS websocket address eg. :8080
-	wssAddr          string // HTTPS websocket address, eg. :8081
-	wssCertPath      string // path to HTTPS public key
-	wssKeyPath       string // path to HTTPS private key
-)
-
-func init() {
-	flag.IntVar(&keepAlive, "keepalive", surgemq.DefaultAckTimeout, "Keepalive (sec)")
-	flag.IntVar(&connectTimeout, "connecttimeout", surgemq.DefaultConnectTimeout, "Connect Timeout (sec)")
-	flag.IntVar(&ackTimeout, "acktimeout", surgemq.DefaultAckTimeout, "Ack Timeout (sec)")
-	flag.IntVar(&timeoutRetries, "retries", surgemq.DefaultTimeoutRetries, "Timeout Retries")
-	flag.StringVar(&authenticator, "auth", surgemq.DefaultAuthenticator, "Authenticator Type")
-	flag.StringVar(&sessionsProvider, "sessions", surgemq.DefaultSessionsProvider, "Session Provider Type")
-	flag.StringVar(&topicsProvider, "topics", surgemq.DefaultTopicsProvider, "Topics Provider Type")
-	flag.StringVar(&cpuprofile, "cpuprofile", "", "CPU Profile Filename")
-	flag.StringVar(&wsAddr, "wsaddr", "", "HTTP websocket address, eg. ':8080'")
-	flag.StringVar(&wssAddr, "wssaddr", "", "HTTPS websocket address, eg. ':8081'")
-	flag.StringVar(&wssCertPath, "wsscertpath", "", "HTTPS server public key file")
-	flag.StringVar(&wssKeyPath, "wsskeypath", "", "HTTPS server private key file")
-	flag.Parse()
-}
-
 var appLog loggo.Logger
 
+type internalAuth struct {
+	creds map[string]string
+}
+
+func (a internalAuth) Password(user, password string) error {
+	if hash, ok := a.creds[user]; ok {
+		if password == hash {
+			return nil
+		}
+	}
+	return auth.ErrAuthFailure
+}
+
+// nolint: golint
+func (a internalAuth) AclCheck(clientID, user, topic string, access auth.AccessType) error {
+	return auth.ErrAuthFailure
+}
+
+func (a internalAuth) PskKey(hint, identity string, key []byte, maxKeyLen int) error {
+	return auth.ErrAuthFailure
+}
+
 func main() {
-	var f *os.File
-
-	svr, _ := server.New(server.Config{
-		KeepAlive:      keepAlive,
-		ConnectTimeout: connectTimeout,
-		AckTimeout:     ackTimeout,
-		TimeoutRetries: timeoutRetries,
-		TopicsProvider: topicsProvider,
-	})
-
 	var err error
 
-	if cpuprofile != "" {
-		f, err = os.Create(cpuprofile)
-		if err != nil {
-			log.Fatal(err)
-		}
+	appLog.SetLogLevel(loggo.DEBUG)
+	appLog.Infof("Starting application")
 
-		pprof.StartCPUProfile(f) // nolint: errcheck
+	viper.SetConfigName("config")
+	viper.AddConfigPath("conf")
+	viper.SetConfigType("json")
+
+	appLog.Infof("Initializing configs")
+	if err = viper.ReadInConfig(); err != nil {
+		appLog.Errorf("Fatal error config file: %s \n", err)
+		os.Exit(1)
 	}
 
-	sigchan := make(chan os.Signal, 1)
-	signal.Notify(sigchan, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		sig := <-sigchan
-		appLog.Errorf("Existing due to trapped signal; %v", sig)
-
-		if f != nil {
-			appLog.Errorf("Stopping profile")
-			pprof.StopCPUProfile()
-			f.Close() // nolint: errcheck
-		}
-
-		svr.Close() // nolint: errcheck
-
-		os.Exit(0)
-	}()
-
-	if len(wsAddr) > 0 || len(wssAddr) > 0 {
-		addr := "tcp://127.0.0.1:1883"
-		addWebSocketHandler("/mqtt", addr) // nolint: errcheck
-		/* start a plain websocket listener */
-		if len(wsAddr) > 0 {
-			go listenAndServeWebSocket(wsAddr) // nolint: errcheck
-		}
-		/* start a secure websocket listener */
-		if len(wssAddr) > 0 && len(wssCertPath) > 0 && len(wssKeyPath) > 0 {
-			go listenAndServeWebSocketSecure(wssAddr, wssCertPath, wssKeyPath) // nolint: errcheck
-		}
+	ia := internalAuth{
+		creds: make(map[string]string),
 	}
 
-	authMng, err := auth.NewManager("mockSuccess")
+	var internalCreds []struct {
+		User     string `json:"user"`
+		Password string `json:"password"`
+	}
+
+	if err = viper.UnmarshalKey("mqtt.auth.internal", &internalCreds); err != nil {
+		appLog.Errorf("Fatal error config file: %s \n", err)
+		os.Exit(1)
+	}
+
+	for i := range internalCreds {
+		ia.creds[internalCreds[i].User] = internalCreds[i].Password
+	}
+
+	if err = auth.Register("internal", ia); err != nil {
+		appLog.Errorf(err.Error())
+		os.Exit(1)
+	}
+
+	var srv server.Type
+
+	srv, err = server.New(server.Config{
+		KeepAlive:      surgemq.DefaultKeepAlive,
+		AckTimeout:     surgemq.DefaultAckTimeout,
+		ConnectTimeout: 5,
+		TimeoutRetries: surgemq.DefaultTimeoutRetries,
+		TopicsProvider: surgemq.DefaultTopicsProvider,
+		Authenticators: "internal",
+		Anonymous:      true,
+	})
 	if err != nil {
-		appLog.Errorf("Couldn't register *mockSuccess* auth provider: %s", err.Error())
+		appLog.Errorf(err.Error())
+		os.Exit(1)
+	}
+
+	var authMng *auth.Manager
+
+	if authMng, err = auth.NewManager("internal"); err != nil {
+		appLog.Errorf("Couldn't register *amqp* auth provider: %s", err.Error())
 		return
 	}
 
+	go func() {
+		appLog.Errorf(http.ListenAndServe("localhost:6067", nil).Error())
+	}()
+
 	config := &server.Listener{
-		Scheme:      "tcp",
-		Host:        "127.0.0.1",
+		Scheme:      "tcp4",
+		Host:        "",
 		Port:        1883,
 		AuthManager: authMng,
 	}
-	/* create plain MQTT listener */
-	err = svr.ListenAndServe(config)
-	if err != nil {
-		appLog.Errorf("surgemq/main: %v", err)
-	}
+	go func() {
+		if err = srv.ListenAndServe(config); err != nil {
+			appLog.Errorf("%s", err.Error())
+		}
+	}()
+
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+	appLog.Warningf("Received signal: [%s]\n", <-ch)
+
+	appLog.Warningf(srv.Close().Error())
 }

@@ -1,0 +1,12 @@
+{
+	"mqtt" : {
+		"auth" : {
+			"internal" : [
+				{
+					"user" : "testuser",
+					"password" : "testpassword"
+				}
+			]
+		}
+	}
+}

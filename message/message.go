@@ -24,7 +24,7 @@ import (
 const (
 	maxLPString uint16 = 65535
 	//maxFixedHeaderLength int    = 5
-	maxRemainingLength int32 = 268435455 // bytes, or 256 MB
+	maxRemainingLength int32 = (256 * 1024 * 1024) - 1 // 256 MB
 )
 
 // QosType QoS type
@@ -104,8 +104,6 @@ type Provider interface {
 	// of the constants defined for MessageType.
 	Type() Type
 
-	// PacketID returns the packet ID of the Message. The retured value is 0 if
-	// there's no packet ID for this message type. Otherwise non-0.
 	PacketID() uint16
 
 	// Encode writes the message bytes into the byte array from the argument. It
@@ -191,6 +189,8 @@ const (
 	ErrInvalidUnSubAck
 	// ErrPackedIDNotMatched Packet ID does not match
 	ErrPackedIDNotMatched
+	// ErrPackedIDZero cannot be 0
+	ErrPackedIDZero
 	// ErrOnPublishNil Publisher is nil
 	ErrOnPublishNil
 	// ErrInvalidMessageType Invalid message type
@@ -224,6 +224,8 @@ func (e Error) Error() string {
 		return "Invalid UNSUBACK message"
 	case ErrPackedIDNotMatched:
 		return "Packet ID does not match"
+	case ErrPackedIDZero:
+		return "Packet ID cannot be 0"
 	case ErrOnPublishNil:
 		return "Publisher is nil"
 	case ErrInvalidMessageType:

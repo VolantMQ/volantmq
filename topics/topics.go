@@ -26,6 +26,7 @@ import (
 	"fmt"
 
 	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/types"
 )
 
 const (
@@ -58,9 +59,9 @@ var (
 
 // Provider interface
 type Provider interface {
-	Subscribe(topic string, qos message.QosType, subscriber interface{}) (message.QosType, error)
-	UnSubscribe(topic string, subscriber interface{}) error
-	Subscribers(topic string, qos message.QosType, subs *[]interface{}, qoss *[]message.QosType) error
+	Subscribe(topic string, qos message.QosType, subscriber *types.Subscriber) (message.QosType, error)
+	UnSubscribe(topic string, subscriber *types.Subscriber) error
+	Publish(msg *message.PublishMessage) error
 	Retain(msg *message.PublishMessage) error
 	Retained(topic string, msgs *[]*message.PublishMessage) error
 	Close() error
@@ -100,18 +101,18 @@ func NewManager(providerName string) (*Manager, error) {
 }
 
 // Subscribe to topic
-func (m *Manager) Subscribe(topic string, qos message.QosType, subscriber interface{}) (message.QosType, error) {
+func (m *Manager) Subscribe(topic string, qos message.QosType, subscriber *types.Subscriber) (message.QosType, error) {
 	return m.p.Subscribe(topic, qos, subscriber)
 }
 
 // UnSubscribe from topic
-func (m *Manager) UnSubscribe(topic string, subscriber interface{}) error {
+func (m *Manager) UnSubscribe(topic string, subscriber *types.Subscriber) error {
 	return m.p.UnSubscribe(topic, subscriber)
 }
 
-// Subscribers get
-func (m *Manager) Subscribers(topic string, qos message.QosType, subs *[]interface{}, qoss *[]message.QosType) error {
-	return m.p.Subscribers(topic, qos, subs, qoss)
+// Publish message
+func (m *Manager) Publish(msg *message.PublishMessage) error {
+	return m.p.Publish(msg)
 }
 
 // Retain messages

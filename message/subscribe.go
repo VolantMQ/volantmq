@@ -15,10 +15,10 @@
 package message
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"github.com/troian/surgemq/buffer"
-	"sync/atomic"
 )
 
 // SubscribeMessage The SUBSCRIBE Packet is sent from the Client to the Server to create one or more
@@ -46,7 +46,7 @@ func NewSubscribeMessage() *SubscribeMessage {
 }
 
 func (msg *SubscribeMessage) String() string {
-	msgStr := fmt.Sprintf("%s, Packet ID=%d", msg.header, msg.PacketID())
+	msgStr := fmt.Sprintf("%s, Packet ID=%d", msg.header, msg.packetID)
 
 	for t, q := range msg.topics {
 		msgStr = fmt.Sprintf("%s, Topic=%q/%d", msgStr, t, q)
@@ -79,7 +79,6 @@ func (msg *SubscribeMessage) AddTopic(topic string, qos QosType) error {
 	//}
 
 	msg.topics[topic] = qos
-	msg.dirty = true
 
 	return nil
 }
@@ -89,7 +88,6 @@ func (msg *SubscribeMessage) AddTopic(topic string, qos QosType) error {
 func (msg *SubscribeMessage) RemoveTopic(topic string) {
 	if _, ok := msg.topics[topic]; ok {
 		delete(msg.topics, topic)
-		msg.dirty = true
 	}
 }
 
@@ -124,12 +122,13 @@ func (msg *SubscribeMessage) Qos() []QosType {
 	return qos
 }
 
+// SetPacketID sets the ID of the packet.
+func (msg *SubscribeMessage) SetPacketID(v uint16) {
+	msg.packetID = v
+}
+
 // Len of message
 func (msg *SubscribeMessage) Len() int {
-	if !msg.dirty {
-		return len(msg.dBuf)
-	}
-
 	ml := msg.msgLen()
 
 	if err := msg.SetRemainingLength(int32(ml)); err != nil {
@@ -149,8 +148,7 @@ func (msg *SubscribeMessage) Decode(src []byte) (int, error) {
 		return total, err
 	}
 
-	//this.packetId = binary.BigEndian.Uint16(src[total:])
-	msg.packetID = src[total : total+2]
+	msg.packetID = binary.BigEndian.Uint16(src[total:])
 	total += 2
 
 	remlen := int(msg.remLen) - (total - hn)
@@ -171,9 +169,40 @@ func (msg *SubscribeMessage) Decode(src []byte) (int, error) {
 		return 0, errors.New("subscribe/Decode: Empty topic list")
 	}
 
-	msg.dirty = false
-
 	return total, nil
+}
+
+func (msg *SubscribeMessage) preEncode(dst []byte) (int, error) {
+	// [MQTT-2.3.1]
+	if msg.packetID == 0 {
+		return 0, ErrPackedIDZero
+	}
+
+	var err error
+	total := 0
+
+	var n int
+
+	if n, err = msg.header.encode(dst[total:]); err != nil {
+		return total, err
+	}
+	total += n
+
+	binary.BigEndian.PutUint16(dst[total:], msg.packetID)
+	total += 2
+
+	for t, q := range msg.topics {
+		n, err = writeLPBytes(dst[total:], []byte(t))
+		total += n
+		if err != nil {
+			return total, err
+		}
+
+		dst[total] = byte(q)
+		total++
+	}
+
+	return total, err
 }
 
 // Encode message
@@ -183,86 +212,22 @@ func (msg *SubscribeMessage) Encode(dst []byte) (int, error) {
 		return expectedSize, ErrInsufficientBufferSize
 	}
 
-	var err error
-	total := 0
-
-	if !msg.dirty {
-		total = copy(dst, msg.dBuf)
-	} else {
-		var n int
-
-		if n, err = msg.header.encode(dst[total:]); err != nil {
-			return total, err
-		}
-		total += n
-
-		if msg.PacketID() == 0 {
-			msg.SetPacketID(uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff))
-		}
-
-		total += copy(dst[total:], msg.packetID)
-
-		for t, q := range msg.topics {
-			n, err = writeLPBytes(dst[total:], []byte(t))
-			total += n
-			if err != nil {
-				return total, err
-			}
-
-			dst[total] = byte(q)
-			total++
-		}
-	}
-
-	return total, err
+	return msg.preEncode(dst)
 }
 
 // Send encode and send message into ring buffer
 func (msg *SubscribeMessage) Send(to *buffer.Type) (int, error) {
-	var err error
-	total := 0
-
-	if !msg.dirty {
-		total, err = to.Send(msg.dBuf)
-	} else {
-		expectedSize := msg.Len()
-		if len(to.ExternalBuf) < expectedSize {
-			to.ExternalBuf = make([]byte, expectedSize)
-		}
-
-		var n int
-
-		if n, err = msg.header.encode(to.ExternalBuf[total:]); err != nil {
-			return 0, err
-		}
-		total += n
-
-		if msg.PacketID() == 0 {
-			msg.SetPacketID(uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff))
-		}
-
-		if copy(to.ExternalBuf[total:total+2], msg.packetID) != 2 {
-			to.ExternalBuf[total] = 0
-			to.ExternalBuf[total+1] = 0
-		}
-
-		total += 2
-
-		for t, q := range msg.topics {
-			n, err = writeLPBytes(to.ExternalBuf[total:], []byte(t))
-			total += n
-			if err != nil {
-				return 0, err
-			}
-
-			to.ExternalBuf[total] = byte(q)
-			total++
-		}
-
-		total, err = to.Send(to.ExternalBuf[:total])
+	expectedSize := msg.Len()
+	if len(to.ExternalBuf) < expectedSize {
+		to.ExternalBuf = make([]byte, expectedSize)
 	}
 
-	return total, err
+	total, err := msg.preEncode(to.ExternalBuf)
+	if err != nil {
+		return 0, err
+	}
+
+	return to.Send([][]byte{to.ExternalBuf[:total]})
 }
 
 func (msg *SubscribeMessage) msgLen() int {

@@ -37,8 +37,8 @@ const (
 	// ErrNotAuthorized The Client is not authorized to connect
 	ErrNotAuthorized
 
-	// ConnAckCodeReserved
-	//ConnAckCodeReserved
+	// ConnAckCodeReserved border to check either ack code is valid
+	ConnAckCodeReserved
 )
 
 // Value returns the value of the ConnAckCode, which is just the byte representation

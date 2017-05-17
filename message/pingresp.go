@@ -39,50 +39,40 @@ func (msg *PingRespMessage) Decode(src []byte) (int, error) {
 	return msg.header.decode(src)
 }
 
+func (msg *PingRespMessage) preEncode(dst []byte) (int, error) {
+	var err error
+	total := 0
+
+	var n int
+
+	if n, err = msg.header.encode(dst[total:]); err != nil {
+		return total, err
+	}
+	total += n
+
+	return total, err
+}
+
 // Encode message
 func (msg *PingRespMessage) Encode(dst []byte) (int, error) {
 	if len(dst) < msg.Len() {
 		return 0, ErrInsufficientBufferSize
 	}
 
-	var err error
-	total := 0
-
-	if !msg.dirty {
-		total = copy(dst, msg.dBuf)
-	} else {
-		var n int
-
-		if n, err = msg.header.encode(dst[total:]); err != nil {
-			return total, err
-		}
-		total += n
-	}
-
-	return total, err
+	return msg.preEncode(dst)
 }
 
 // Send encode and send message into ring buffer
 func (msg *PingRespMessage) Send(to *buffer.Type) (int, error) {
-	var err error
-	total := 0
-
-	if !msg.dirty {
-		total, err = to.Send(msg.dBuf)
-	} else {
-		expectedSize := msg.Len()
-		if len(to.ExternalBuf) < expectedSize {
-			to.ExternalBuf = make([]byte, expectedSize)
-		}
-		var n int
-
-		if n, err = msg.header.encode(to.ExternalBuf); err != nil {
-			return total, err
-		}
-		total += n
-
-		total, err = to.Send(to.ExternalBuf[:total])
+	expectedSize := msg.Len()
+	if len(to.ExternalBuf) < expectedSize {
+		to.ExternalBuf = make([]byte, expectedSize)
 	}
 
-	return total, err
+	total, err := msg.preEncode(to.ExternalBuf)
+	if err != nil {
+		return 0, err
+	}
+
+	return to.Send([][]byte{to.ExternalBuf[:total]})
 }

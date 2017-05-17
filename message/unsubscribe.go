@@ -15,10 +15,10 @@
 package message
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"github.com/troian/surgemq/buffer"
-	"sync/atomic"
 )
 
 // UnSubscribeMessage An UNSUBSCRIBE Packet is sent by the Client to the Server, to unsubscribe from topics.
@@ -70,7 +70,6 @@ func (msg *UnSubscribeMessage) AddTopic(topic string) {
 	}
 
 	msg.topics[topic] = 0
-	msg.dirty = true
 }
 
 // RemoveTopic removes a single topic from the list of existing ones in the message.
@@ -78,7 +77,6 @@ func (msg *UnSubscribeMessage) AddTopic(topic string) {
 func (msg *UnSubscribeMessage) RemoveTopic(topic string) {
 	if msg.TopicExists(topic) {
 		delete(msg.topics, topic)
-		msg.dirty = true
 	}
 }
 
@@ -91,12 +89,13 @@ func (msg *UnSubscribeMessage) TopicExists(topic string) bool {
 	return false
 }
 
+// SetPacketID sets the ID of the packet.
+func (msg *UnSubscribeMessage) SetPacketID(v uint16) {
+	msg.packetID = v
+}
+
 // Len of message
 func (msg *UnSubscribeMessage) Len() int {
-	if !msg.dirty {
-		return len(msg.dBuf)
-	}
-
 	ml := msg.msgLen()
 
 	if err := msg.SetRemainingLength(int32(ml)); err != nil {
@@ -118,8 +117,7 @@ func (msg *UnSubscribeMessage) Decode(src []byte) (int, error) {
 		return total, err
 	}
 
-	//this.packetId = binary.BigEndian.Uint16(src[total:])
-	msg.packetID = src[total : total+2]
+	msg.packetID = binary.BigEndian.Uint16(src[total:])
 	total += 2
 
 	remlen := int(msg.remLen) - (total - hn)
@@ -138,9 +136,37 @@ func (msg *UnSubscribeMessage) Decode(src []byte) (int, error) {
 		return 0, errors.New("unsubscribe/Decode: Empty topic list")
 	}
 
-	msg.dirty = false
-
 	return total, nil
+}
+
+func (msg *UnSubscribeMessage) preEncode(dst []byte) (int, error) {
+	// [MQTT-2.3.1]
+	if msg.packetID == 0 {
+		return 0, ErrPackedIDZero
+	}
+
+	var err error
+	total := 0
+
+	var n int
+
+	if n, err = msg.header.encode(dst[total:]); err != nil {
+		return total, err
+	}
+	total += n
+
+	binary.BigEndian.PutUint16(dst[total:], msg.packetID)
+	total += 2
+
+	for t := range msg.topics {
+		n, err = writeLPBytes(dst[total:], []byte(t))
+		total += n
+		if err != nil {
+			return total, err
+		}
+	}
+
+	return total, err
 }
 
 // Encode returns an io.Reader in which the encoded bytes can be read. The second
@@ -154,76 +180,22 @@ func (msg *UnSubscribeMessage) Encode(dst []byte) (int, error) {
 		return expectedSize, ErrInsufficientBufferSize
 	}
 
-	var err error
-	total := 0
-
-	if !msg.dirty {
-		total = copy(dst, msg.dBuf)
-	} else {
-		var n int
-
-		if n, err = msg.header.encode(dst[total:]); err != nil {
-			return total, err
-		}
-		total += n
-
-		if msg.PacketID() == 0 {
-			msg.SetPacketID(uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff))
-			//this.packetId = uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff)
-		}
-		total += copy(dst[total:], msg.packetID)
-
-		for t := range msg.topics {
-			n, err = writeLPBytes(dst[total:], []byte(t))
-			total += n
-			if err != nil {
-				return total, err
-			}
-		}
-	}
-
-	return total, err
+	return msg.preEncode(dst)
 }
 
 // Send encode and send message into ring buffer
 func (msg *UnSubscribeMessage) Send(to *buffer.Type) (int, error) {
-	var err error
-	total := 0
-
-	if !msg.dirty {
-		total, err = to.Send(msg.dBuf)
-	} else {
-		expectedSize := msg.Len()
-		if len(to.ExternalBuf) < expectedSize {
-			to.ExternalBuf = make([]byte, expectedSize)
-		}
-
-		var n int
-
-		if n, err = msg.header.encode(to.ExternalBuf[total:]); err != nil {
-			return 0, err
-		}
-		total += n
-
-		if msg.PacketID() == 0 {
-			msg.SetPacketID(uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff))
-		}
-
-		total += copy(to.ExternalBuf[total:total+2], msg.packetID)
-
-		for t := range msg.topics {
-			var n int
-			n, err = writeLPBytes(to.ExternalBuf[total:], []byte(t))
-			total += n
-			if err != nil {
-				return total, err
-			}
-		}
-
-		total, err = to.Send(to.ExternalBuf[:total])
+	expectedSize := msg.Len()
+	if len(to.ExternalBuf) < expectedSize {
+		to.ExternalBuf = make([]byte, expectedSize)
 	}
 
-	return total, err
+	total, err := msg.preEncode(to.ExternalBuf)
+	if err != nil {
+		return 0, err
+	}
+
+	return to.Send([][]byte{to.ExternalBuf[:total]})
 }
 
 func (msg *UnSubscribeMessage) msgLen() int {

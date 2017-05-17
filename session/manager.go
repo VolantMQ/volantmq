@@ -39,7 +39,7 @@ func NewManager() (*Manager, error) {
 }
 
 // New session
-func (m *Manager) New(id string) (*Type, error) {
+func (m *Manager) New(id string, config Config) (*Type, error) {
 	if id == "" {
 		id = m.genSessionID()
 	}
@@ -47,8 +47,14 @@ func (m *Manager) New(id string) (*Type, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.sessions[id] = &Type{id: id}
-	return m.sessions[id], nil
+	s, err := newSession(id, config)
+	if err != nil {
+		return nil, err
+	}
+
+	m.sessions[id] = s
+
+	return s, nil
 }
 
 // Get session
@@ -82,6 +88,14 @@ func (m *Manager) Count() int {
 
 // Shutdown manager
 func (m *Manager) Shutdown() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for id, s := range m.sessions {
+		s.Stop()
+		delete(m.sessions, id)
+	}
+
 	m.sessions = make(map[string]*Type)
 
 	return nil

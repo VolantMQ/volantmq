@@ -15,9 +15,9 @@
 package message
 
 import (
+	"encoding/binary"
 	"fmt"
 	"github.com/troian/surgemq/buffer"
-	"sync/atomic"
 )
 
 const (
@@ -31,8 +31,8 @@ const (
 type PublishMessage struct {
 	header
 
-	topic   string
 	payload []byte
+	topic   string
 }
 
 var _ Provider = (*PublishMessage)(nil)
@@ -119,7 +119,6 @@ func (msg *PublishMessage) SetTopic(v string) error {
 	}
 
 	msg.topic = v
-	msg.dirty = true
 
 	return nil
 }
@@ -131,16 +130,17 @@ func (msg *PublishMessage) Payload() []byte {
 
 // SetPayload sets the application message that's part of the PUBLISH message.
 func (msg *PublishMessage) SetPayload(v []byte) {
+	msg.payload = []byte{}
 	msg.payload = v
-	msg.dirty = true
+}
+
+// SetPacketID sets the ID of the packet.
+func (msg *PublishMessage) SetPacketID(v uint16) {
+	msg.packetID = v
 }
 
 // Len of message
 func (msg *PublishMessage) Len() int {
-	if !msg.dirty {
-		return len(msg.dBuf)
-	}
-
 	ml := msg.msgLen()
 
 	if err := msg.SetRemainingLength(int32(ml)); err != nil {
@@ -163,31 +163,68 @@ func (msg *PublishMessage) Decode(src []byte) (int, error) {
 	var n int
 	var buf []byte
 	buf, n, err = readLPBytes(src[total:])
-	msg.topic = string(buf)
 	total += n
 	if err != nil {
 		return total, err
 	}
 
+	//copy([]byte(msg.topic), len(buf))
+	msg.topic = string(buf)
 	if !ValidTopic(msg.topic) {
 		return total, ErrInvalidTopic
 	}
 
 	// The packet identifier field is only present in the PUBLISH packets where the
 	// QoS level is 1 or 2
-	if msg.QoS() != 0 {
-		//msg.packetId = binary.BigEndian.Uint16(src[total:])
-		msg.packetID = src[total : total+2]
+	if msg.QoS() != QosAtMostOnce {
+		msg.packetID = binary.BigEndian.Uint16(src[total:])
 		total += 2
 	}
 
 	l := int(msg.remLen) - (total - hn)
-	msg.payload = src[total : total+l]
+	msg.payload = make([]byte, len(src[total:total+l]))
+	copy(msg.payload, src[total:total+l])
+
 	total += len(msg.payload)
 
-	msg.dirty = false
-
 	return total, nil
+}
+
+func (msg *PublishMessage) preEncode(dst []byte) (int, error) {
+	var err error
+	total := 0
+
+	if len(msg.topic) == 0 {
+		return 0, ErrInvalidTopic
+	}
+
+	if !msg.QoS().IsValid() {
+		return 0, ErrInvalidQoS
+	}
+
+	// [MQTT-2.3.1]
+	if (msg.QoS() == QosAtLeastOnce || msg.QoS() == QosExactlyOnce) && msg.packetID == 0 {
+		return 0, ErrPackedIDZero
+	}
+
+	var n int
+
+	if n, err = msg.header.encode(dst[total:]); err != nil {
+		return total, err
+	}
+	total += n
+
+	if n, err = writeLPBytes(dst[total:], []byte(msg.topic)); err != nil {
+		return total, err
+	}
+	total += n
+
+	if msg.QoS() == QosAtLeastOnce || msg.QoS() == QosExactlyOnce {
+		binary.BigEndian.PutUint16(dst[total:], msg.packetID)
+		total += 2
+	}
+
+	return total, err
 }
 
 // Encode message
@@ -197,105 +234,34 @@ func (msg *PublishMessage) Encode(dst []byte) (int, error) {
 		return expectedSize, ErrInsufficientBufferSize
 	}
 
-	var err error
-	total := 0
-
-	if !msg.dirty {
-		total = copy(dst, msg.dBuf)
-	} else {
-		if len(msg.topic) == 0 {
-			return 0, ErrInvalidTopic
-		}
-
-		if len(msg.payload) == 0 {
-			return 0, ErrEmptyPayload
-		}
-
-		var n int
-
-		if n, err = msg.header.encode(dst[total:]); err != nil {
-			return total, err
-		}
-		total += n
-
-		if n, err = writeLPBytes(dst[total:], []byte(msg.topic)); err != nil {
-			return total, err
-		}
-		total += n
-
-		// The packet identifier field is only present in the PUBLISH packets where the QoS level is 1 or 2
-		if msg.QoS() == QosAtLeastOnce || msg.QoS() == QosExactlyOnce {
-			if msg.PacketID() == 0 {
-				msg.SetPacketID(uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff))
-			}
-
-			copy(dst[total:], msg.packetID)
-			total += 2
-		}
-
-		total += copy(dst[total:], msg.payload)
+	total, err := msg.preEncode(dst)
+	if err != nil {
+		return 0, err
 	}
+
+	total += copy(dst[total:], msg.payload)
 
 	return total, err
 }
 
 // Send encode and send message into ring buffer
 func (msg *PublishMessage) Send(to *buffer.Type) (int, error) {
-	var err error
-	total := 0
-
-	if !msg.dirty {
-		total, err = to.Send(msg.dBuf)
-	} else {
-		if len(msg.topic) == 0 {
-			return 0, ErrInvalidTopic
-		}
-
-		if len(msg.payload) == 0 {
-			return 0, ErrEmptyPayload
-		}
-
-		expectedSize := msg.Len()
-		if len(to.ExternalBuf) < expectedSize {
-			to.ExternalBuf = make([]byte, expectedSize)
-		}
-
-		var n int
-
-		if n, err = msg.header.encode(to.ExternalBuf[total:]); err != nil {
-			return total, err
-		}
-		total += n
-
-		if n, err = writeLPBytes(to.ExternalBuf[total:], []byte(msg.topic)); err != nil {
-			return total, err
-		}
-		total += n
-
-		// The packet identifier field is only present in the PUBLISH packets where the QoS level is 1 or 2
-		if msg.QoS() == QosAtLeastOnce || msg.QoS() == QosExactlyOnce {
-			if msg.PacketID() == 0 {
-				msg.SetPacketID(uint16(atomic.AddUint64(&gPacketID, 1) & 0xffff))
-			}
-
-			copy(to.ExternalBuf[total:total+2], msg.packetID)
-			total += 2
-		}
-
-		if n, err = to.Send(to.ExternalBuf[:total]); err != nil {
-			return 0, err
-		}
-		total = n
-
-		if n, err = to.Send(msg.payload); err != nil {
-			return 0, err
-		}
-
-		total += n
-
-		return total, nil
-
+	msg.Len()
+	expectedSize := 2 + len(msg.topic)
+	if msg.QoS() != QosAtMostOnce {
+		expectedSize += 2
 	}
+
+	if len(to.ExternalBuf) < expectedSize {
+		to.ExternalBuf = make([]byte, expectedSize)
+	}
+
+	total, err := msg.preEncode(to.ExternalBuf)
+	if err != nil {
+		return 0, err
+	}
+
+	total, err = to.Send([][]byte{to.ExternalBuf[0:total], msg.payload})
 
 	return total, err
 }

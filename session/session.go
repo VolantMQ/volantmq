@@ -17,46 +17,71 @@ package session
 import (
 	"sync"
 
+	"container/list"
 	"errors"
+	//"fmt"
 	"github.com/juju/loggo"
 	"github.com/troian/surgemq/message"
-)
-
-const (
-	// Queue size for the ack queue
-	defaultQueueSize = 16
+	"github.com/troian/surgemq/topics"
+	"github.com/troian/surgemq/types"
+	"io"
+	"sync/atomic"
 )
 
 var (
-	// ErrNotInitialized session not initialized
-	ErrNotInitialized = errors.New("session: not initialized yet")
+// ErrNotInitialized session not initialized
+//ErrNotInitialized = errors.New("session: not initialized yet")
 
-	// ErrAlreadyInitialized session already initialized
-	ErrAlreadyInitialized = errors.New("session: already initialized")
+// ErrAlreadyInitialized session already initialized
+//ErrAlreadyInitialized = errors.New("session: already initialized")
 )
+
+// Config is system wide configuration parameters for every session
+type Config struct {
+	// Topics manager for all the client subscriptions
+	TopicsMgr *topics.Manager
+
+	// The number of seconds to wait for the CONNACK message before disconnecting.
+	// If not set then default to 2 seconds.
+	ConnectTimeout int
+
+	// The number of seconds to wait for any ACK messages before failing.
+	// If not set then default to 20 seconds.
+	AckTimeout int
+
+	// The number of times to retry sending a packet if ACK is not received.
+	// If no set then default to 3 retries.
+	TimeoutRetries int
+
+	OnCleanup func(id string)
+}
+
+type publisher struct {
+	// signal publisher goroutine to exit on channel close
+	quit chan struct{}
+	// make sure writer started before exiting from Start()
+	started sync.WaitGroup
+	// make sure writer has finished before any finalization
+	stopped sync.WaitGroup
+
+	messages *list.List
+	lock     sync.Mutex
+	cond     *sync.Cond
+}
 
 // Type session
 type Type struct {
-	// Pub1ack queue for outgoing PUBLISH QoS 1 messages
-	Pub1ack *AckQueue
+	config Config
 
-	// Pub2in queue for incoming PUBLISH QoS 2 messages
-	Pub2in *AckQueue
+	id string
 
-	// Pub2out queue for outgoing PUBLISH QoS 2 messages
-	Pub2out *AckQueue
+	ack struct {
+		pubIn  *ackQueue
+		pubOut *ackQueue
+	}
 
-	// SubAck queue for outgoing SUBSCRIBE messages
-	SubAck *AckQueue
-
-	// UnSubAck queue for outgoing UNSUBSCRIBE messages
-	UnSubAck *AckQueue
-
-	// PingAck queue for outgoing PINGREQ messages
-	PingAck *AckQueue
-
-	// Will message to publish if connect is closed unexpectedly
-	Will *message.PublishMessage
+	// message to publish if connect is closed unexpectedly
+	will *message.PublishMessage
 
 	// Retained publish message
 	Retained *message.PublishMessage
@@ -64,15 +89,25 @@ type Type struct {
 	// topics stores all the topics for this session/client
 	topics message.TopicsQoS
 
+	conn *connection
+
+	subscriber types.Subscriber
+
 	// Serialize access to this session
 	mu sync.Mutex
 
-	id string
+	wgSessionStarted sync.WaitGroup
+	wgSessionStopped sync.WaitGroup
+
+	publisher publisher
+
+	// Whether this is service is closed or not.
+	running int64
+	closed  int64
 
 	clean bool
 
-	// Initialized?
-	initialized bool
+	packetID uint64
 }
 
 var appLog loggo.Logger
@@ -82,79 +117,358 @@ func init() {
 	appLog.SetLogLevel(loggo.INFO)
 }
 
-// Init session
-func (s *Type) Init(msg *message.ConnectMessage) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.initialized {
-		return ErrAlreadyInitialized
+func newSession(id string, config Config) (*Type, error) {
+	s := Type{
+		id:     id,
+		config: config,
+		topics: make(message.TopicsQoS, 1),
+		publisher: publisher{
+			messages: list.New(),
+		},
 	}
 
-	s.update(msg)
+	s.publisher.cond = sync.NewCond(&s.publisher.lock)
 
-	s.topics = make(message.TopicsQoS, 1)
+	s.ack.pubIn = newAckQueue(s.onAckIn)
+	s.ack.pubOut = newAckQueue(s.onAckOut)
+	s.subscriber.Publish = s.onSubscribedPublish
 
-	s.id = string(msg.ClientID())
-
-	s.Pub1ack = newAckQueue(defaultQueueSize)
-	s.Pub2in = newAckQueue(defaultQueueSize)
-	s.Pub2out = newAckQueue(defaultQueueSize)
-	s.SubAck = newAckQueue(defaultQueueSize)
-	s.UnSubAck = newAckQueue(defaultQueueSize)
-	s.PingAck = newAckQueue(defaultQueueSize)
-
-	s.initialized = true
-
-	return nil
+	return &s, nil
 }
 
-func (s *Type) update(msg *message.ConnectMessage) {
-	if msg.WillFlag() {
-		s.Will = message.NewPublishMessage()
-		s.Will.SetQoS(msg.WillQos())     // nolint: errcheck
-		s.Will.SetTopic(msg.WillTopic()) // nolint: errcheck
-		s.Will.SetPayload(msg.WillMessage())
-		s.Will.SetRetain(msg.WillRetain())
+// Start inform session there is a new connection with matching clientID
+// thus provide necessary info to spin
+func (s *Type) Start(msg *message.ConnectMessage, conn io.Closer) (err error) {
+	defer func() {
+		if err != nil {
+			close(s.publisher.quit)
+			s.conn = nil
+			atomic.StoreInt64(&s.running, 0)
+		}
+		s.wgSessionStarted.Done()
+	}()
+
+	// In case we call start for stored session onClose might not finished
+	// it's work thus lets wait until it completed
+	s.wgSessionStopped.Wait()
+
+	if !atomic.CompareAndSwapInt64(&s.running, 0, 1) {
+		return errors.New("Already running")
 	}
+
+	s.wgSessionStarted.Add(1)
+	s.wgSessionStopped.Add(1)
+
+	if msg.WillFlag() {
+		s.will = message.NewPublishMessage()
+		s.will.SetQoS(msg.WillQos())     // nolint: errcheck
+		s.will.SetTopic(msg.WillTopic()) // nolint: errcheck
+		s.will.SetPayload(msg.WillMessage())
+		s.will.SetRetain(msg.WillRetain())
+	}
+
+	// if we have any topic this is restored session
+	// thus make sure we are subscribed to all of them
+	for t, q := range s.topics {
+		s.config.TopicsMgr.Subscribe(t, q, &s.subscriber) // nolint: errcheck
+	}
+
+	// All of unacknowledged outgoing messages should be send again
+	s.publisher.lock.Lock()
+	for _, m := range s.ack.pubOut.get() {
+		s.publisher.messages.PushBack(m)
+	}
+	s.publisher.lock.Unlock()
+	s.publisher.cond.Signal()
 
 	s.clean = msg.CleanSession()
-}
+	s.publisher.quit = make(chan struct{})
 
-// Update message
-func (s *Type) Update(msg *message.ConnectMessage) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.update(msg)
-
-	return nil
-}
-
-// RetainMessage message
-func (s *Type) RetainMessage(msg *message.PublishMessage) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if !s.initialized {
-		return ErrNotInitialized
+	s.conn, err = newConnection(
+		connConfig{
+			id:        s.id,
+			conn:      conn,
+			keepAlive: int(msg.KeepAlive()),
+			on: onProcess{
+				publish:     s.onPublish,
+				ack:         s.onAck,
+				subscribe:   s.onSubscribe,
+				unSubscribe: s.onUnSubscribe,
+				close:       s.onClose,
+			},
+		})
+	if err != nil {
+		return err
 	}
 
-	rMsg := *msg
+	s.conn.start()
 
-	s.Retained = &rMsg
+	s.publisher.stopped.Add(1)
+	s.publisher.started.Add(1)
+	go s.publishWorker()
+	s.publisher.started.Wait()
 
 	return nil
+}
+
+// Stop session. Function assumed to be invoked once server about to shutdown
+func (s *Type) Stop() {
+	if !atomic.CompareAndSwapInt64(&s.closed, 0, 1) {
+		s.wgSessionStarted.Wait()
+		return
+	}
+
+	// If Stop has been issued by the server handler it looks like
+	// application about to shutdown, thus we try close network connection.
+	// If close successful connection manager invokes onClose method which cleans up writer.
+	// If close error just check writer goroutine has finished it's job
+	var err error
+	if err = s.conn.config.conn.Close(); err != nil {
+		appLog.Errorf("Couldn't close connection [%s]: %s", s.id, err.Error())
+	}
+
+	//	s.publisher.stopped.Wait()
+}
+
+func (s *Type) onClose(will bool) {
+	defer func() {
+		atomic.StoreInt64(&s.running, 0)
+		// if session if clean notify session manager to remove entry
+		if s.clean {
+			s.config.OnCleanup(s.id)
+		}
+
+		s.wgSessionStopped.Done()
+	}()
+
+	// just in case make sure session has been started
+	s.wgSessionStarted.Wait()
+
+	if will && s.will != nil {
+		appLog.Errorf("connection unexpectedly closed [%s]. Sending Will", s.id)
+		s.publishToTopic(s.will) // nolint: errcheck
+	}
+
+	unSub := func(t string, q message.QosType) {
+		appLog.Debugf("[%s]: unsubscribing topic %s", s.id, t)
+		if err := s.config.TopicsMgr.UnSubscribe(t, &s.subscriber); err != nil {
+			appLog.Errorf("[%s]: error unsubscribing topic %q: %v", s.id, t, err)
+		}
+	}
+
+	for t, q := range s.topics {
+		// if this is clean session unsubscribe from all topics
+		if s.clean {
+			unSub(t, q)
+		} else if q == message.QosAtMostOnce {
+			unSub(t, q)
+		}
+	}
+
+	// Make sure all of publishes to subscriber finished before continue
+	s.subscriber.WgWriters.Wait()
+
+	close(s.publisher.quit)
+	s.publisher.cond.Broadcast()
+
+	// Wait writer to finish it's job
+	s.publisher.stopped.Wait()
+
+	s.conn = nil
+}
+
+// onPublish invoked when server receives PUBLISH message from remote
+// On QoS == 0, we should just take the next step, no ack required
+// On QoS == 1, send back PUBACK, then take the next step
+// On QoS == 2, we need to put it in the ack queue, send back PUBREC
+func (s *Type) onPublish(msg *message.PublishMessage) error {
+	// check for topic access
+	var err error
+
+	switch msg.QoS() {
+	case message.QosExactlyOnce:
+		resp := message.NewPubRecMessage()
+		resp.SetPacketID(msg.PacketID())
+
+		if _, err = s.conn.writeMessage(resp); err == nil {
+			s.ack.pubIn.put(msg)
+		}
+	case message.QosAtLeastOnce:
+		resp := message.NewPubAckMessage()
+		resp.SetPacketID(msg.PacketID())
+
+		// We publish QoS even if error during ack happened.
+		// Remote then will send same message with DUP flag set
+		s.conn.writeMessage(resp) // nolint: errcheck
+		fallthrough
+	case message.QosAtMostOnce: // QoS 0
+		err = s.publishToTopic(msg)
+	}
+
+	return err
+}
+
+// onAck server received acknowledgment from remote
+func (s *Type) onAck(msg message.Provider) error {
+	var err error
+
+	switch msg.(type) {
+	case *message.PubAckMessage:
+		// remote acknowledged PUBLISH QoS 1 message sent by this server
+		s.ack.pubOut.ack(msg) // nolint: errcheck
+	case *message.PubRecMessage:
+		// remote received PUBLISH message sent by this server
+		s.ack.pubOut.ack(msg) // nolint: errcheck
+
+		resp := message.NewPubRelMessage()
+		resp.SetPacketID(msg.PacketID())
+
+		// 2. Put PUBREL into ack queue
+		// Do it before writing into network as theoretically response may come
+		// faster than put into queue
+		s.ack.pubOut.put(resp)
+
+		// 2. Try send PUBREL reply
+		if _, err = s.conn.writeMessage(resp); err == nil {
+			// 3. PUBREL delivered to remote. Wait to PUBCOMP
+		} else {
+			appLog.Errorf("[%s] Couldn't deliver PUBREL. Requeue publish", s.id)
+			// Couldn't deliver message. Remove it from ack queue and put into publish queue
+			s.ack.pubOut.ack(resp) // nolint: errcheck
+			s.publisher.lock.Lock()
+			s.publisher.messages.PushBack(resp)
+			s.publisher.lock.Unlock()
+			s.publisher.cond.Signal()
+		}
+	case *message.PubRelMessage:
+		// Message sent by remote has been released
+		// send corresponding PUBCOMP
+		resp := message.NewPubCompMessage()
+		resp.SetPacketID(msg.PacketID())
+
+		if _, err = s.conn.writeMessage(resp); err == nil {
+			s.ack.pubIn.ack(msg) // nolint: errcheck
+		} else {
+			appLog.Errorf("[%s] Couldn't deliver PUBCOMP", s.id)
+		}
+	case *message.PubCompMessage:
+		// PUBREL message has been acknowledged, release from queue
+		s.ack.pubOut.ack(msg) // nolint: errcheck
+	default:
+		appLog.Errorf("[%s] Unsupported ack message type: %s", s.id, msg.Type().String())
+	}
+
+	return err
+}
+
+// onSubscribedPublish is the method that gets added to the topic subscribers list by the
+// processSubscribe() method. When the server finishes the ack cycle for a
+// PUBLISH message, it will call the subscriber, which is this method.
+//
+// For the server, when this method is called, it means there's a message that
+// should be published to the client on the other end of this connection. So we
+// will call publish() to send the message.
+func (s *Type) onSubscribedPublish(msg *message.PublishMessage) error {
+	// If this is Fire and Forget firstly check is client online
+	if msg.QoS() == message.QosAtMostOnce {
+		// By checking writerStop channel we can effectively detect is client is connected or not
+		select {
+		case <-s.publisher.quit:
+			return nil
+		default:
+		}
+	}
+
+	m := message.NewPublishMessage()
+	m.SetQoS(msg.QoS())     // nolint: errcheck
+	m.SetTopic(msg.Topic()) // nolint: errcheck
+	m.SetPayload(msg.Payload())
+	m.SetRetain(msg.Retain())
+
+	if m.PacketID() == 0 && (m.QoS() == message.QosAtLeastOnce || m.QoS() == message.QosExactlyOnce) {
+		m.SetPacketID(s.newPacketID())
+	}
+
+	s.publisher.lock.Lock()
+	s.publisher.messages.PushBack(m)
+	s.publisher.lock.Unlock()
+	s.publisher.cond.Signal()
+
+	return nil
+}
+
+func (s *Type) onSubscribe(msg *message.SubscribeMessage) error {
+	resp := message.NewSubAckMessage()
+	resp.SetPacketID(msg.PacketID())
+
+	// Subscribe to the different topics
+	var retCodes []message.QosType
+
+	topics := msg.Topics()
+
+	var retainedMessages []*message.PublishMessage
+
+	for _, t := range topics {
+		// Let topic manager know we want to listen to given topic
+		qos := msg.TopicQos(t)
+		appLog.Tracef("Subscribing [%s] to [%s:%d]", s.id, t, qos)
+		rQoS, err := s.config.TopicsMgr.Subscribe(t, qos, &s.subscriber)
+		if err != nil {
+			return err
+		}
+		s.addTopic(t, qos) // nolint: errcheck
+
+		retCodes = append(retCodes, rQoS)
+
+		// yeah I am not checking errors here. If there's an error we don't want the
+		// subscription to stop, just let it go.
+		s.config.TopicsMgr.Retained(t, &retainedMessages) // nolint: errcheck
+	}
+
+	if err := resp.AddReturnCodes(retCodes); err != nil {
+		return err
+	}
+
+	if _, err := s.conn.writeMessage(resp); err != nil {
+		return err
+	}
+
+	// Now put retained messages into publish queue
+	for _, rm := range retainedMessages {
+		m := message.NewPublishMessage()
+		m.SetRetain(true)
+		m.SetQoS(rm.QoS()) // nolint: errcheck
+		m.SetPayload(rm.Payload())
+		m.SetTopic(rm.Topic()) // nolint: errcheck
+		if m.PacketID() == 0 && (m.QoS() == message.QosAtLeastOnce || m.QoS() == message.QosExactlyOnce) {
+			m.SetPacketID(s.newPacketID())
+		}
+
+		s.publisher.lock.Lock()
+		s.publisher.messages.PushBack(m)
+		s.publisher.lock.Unlock()
+		s.publisher.cond.Signal()
+	}
+
+	return nil
+}
+
+func (s *Type) onUnSubscribe(msg *message.UnSubscribeMessage) (*message.UnSubAckMessage, error) {
+	for _, t := range msg.Topics() {
+		s.config.TopicsMgr.UnSubscribe(t, &s.subscriber) // nolint: errcheck
+		s.removeTopic(t)                                 // nolint: errcheck
+	}
+
+	resp := message.NewUnSubAckMessage()
+	resp.SetPacketID(msg.PacketID())
+
+	return resp, nil
 }
 
 // AddTopic add topic
-func (s *Type) AddTopic(topic string, qos message.QosType) error {
+func (s *Type) addTopic(topic string, qos message.QosType) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	if !s.initialized {
-		return ErrNotInitialized
-	}
 
 	s.topics[topic] = qos
 
@@ -162,27 +476,23 @@ func (s *Type) AddTopic(topic string, qos message.QosType) error {
 }
 
 // RemoveTopic remove
-func (s *Type) RemoveTopic(topic string) error {
+func (s *Type) removeTopic(topic string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	if !s.initialized {
-		return ErrNotInitialized
-	}
 
 	delete(s.topics, topic)
 
 	return nil
 }
 
+func (s *Type) newPacketID() uint16 {
+	return uint16(atomic.AddUint64(&s.packetID, 1) & 0xFFFF)
+}
+
 // Topics list topics
 func (s *Type) Topics() (*message.TopicsQoS, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	if !s.initialized {
-		return nil, ErrNotInitialized
-	}
 
 	topics := s.topics
 
@@ -200,4 +510,135 @@ func (s *Type) IsClean() bool {
 	defer s.mu.Unlock()
 
 	return s.clean
+}
+
+// forward PUBLISH message to topics manager which takes care about subscribers
+func (s *Type) publishToTopic(msg *message.PublishMessage) error {
+	if msg.Retain() {
+		if err := s.config.TopicsMgr.Retain(msg); err != nil {
+			appLog.Errorf("Error retaining message [%s]: %v", s.id, err)
+		}
+	}
+
+	msg.SetRetain(false)
+
+	if err := s.config.TopicsMgr.Publish(msg); err != nil {
+		appLog.Errorf(" Error retrieving subscribers list [%s]: %v", s.id, err)
+	}
+
+	return nil
+}
+
+// onAckIn ack process for incoming messages
+func (s *Type) onAckIn(msg message.Provider, status error) {
+	switch m := msg.(type) {
+	case *message.PublishMessage:
+		s.publishToTopic(m) // nolint: errcheck
+	}
+}
+
+// onAckComplete process messages that required ack cycle
+// onAckTimeout if publish message has not been acknowledged withing specified ackTimeout
+// server should mark it as a dup and send again
+func (s *Type) onAckOut(msg message.Provider, status error) {
+	//if status == errAckTimedOut {
+	//	appLog.Errorf("[%s] message not acknoweledged: %s", s.id, status.Error())
+	//
+	//	switch m := msg.(type) {
+	//	case *message.PublishMessage:
+	//		// if ack for QoS 1 or 2 has been timed out put this message back to the publish queue
+	//		if m.QoS() == message.QosAtLeastOnce {
+	//			m.SetDup(true)
+	//		}
+	//		s.publisher.lock.Lock()
+	//		s.publisher.messages.PushBack(msg)
+	//		s.publisher.lock.Unlock()
+	//		s.publisher.cond.Signal()
+	//	case *message.PubRelMessage:
+	//	}
+	//}
+}
+
+// publishWorker publish messages coming from subscribed topics
+func (s *Type) publishWorker() {
+	defer func() {
+		s.publisher.lock.Lock()
+		for elem := s.publisher.messages.Front(); elem != nil; elem = elem.Next() {
+			switch m := elem.Value.(type) {
+			case *message.PublishMessage:
+				if m.QoS() == message.QosAtMostOnce {
+					s.publisher.messages.Remove(elem)
+				}
+			}
+		}
+		s.publisher.lock.Unlock()
+		s.publisher.stopped.Done()
+
+		if r := recover(); r != nil {
+			appLog.Errorf("Recover from panic: %v", r)
+		}
+	}()
+
+	s.publisher.started.Done()
+
+	for {
+		if s.publisher.isDone() {
+			return
+		}
+
+		s.publisher.cond.L.Lock()
+		for s.publisher.messages.Len() == 0 {
+			s.publisher.cond.Wait()
+			if s.publisher.isDone() {
+				s.publisher.cond.L.Unlock()
+				return
+			}
+		}
+
+		var msg message.Provider
+
+		elem := s.publisher.messages.Front()
+		msg = elem.Value.(message.Provider)
+		s.publisher.messages.Remove(elem)
+		s.publisher.cond.L.Unlock()
+
+		if msg != nil {
+			switch m := msg.(type) {
+			case *message.PublishMessage:
+				if m.QoS() == message.QosAtLeastOnce || m.QoS() == message.QosExactlyOnce {
+					s.ack.pubOut.put(msg)
+				}
+			case *message.PubRelMessage:
+				s.ack.pubOut.put(msg)
+			}
+
+			_, err := s.conn.writeMessage(msg)
+			if err != nil {
+				switch m := msg.(type) {
+				case *message.PublishMessage:
+					if m.QoS() == message.QosAtLeastOnce || m.QoS() == message.QosExactlyOnce {
+						s.ack.pubOut.ack(msg) // nolint: errcheck
+					}
+				case *message.PubRelMessage:
+					s.ack.pubOut.ack(msg) // nolint: errcheck
+				}
+
+				// We couldn't deliver message to client thus requeue it back
+				s.publisher.cond.L.Lock()
+				s.publisher.messages.PushBack(msg)
+				s.publisher.cond.L.Unlock()
+				return
+			}
+		}
+	}
+}
+
+func (p *publisher) isDone() bool {
+	select {
+	case <-p.quit:
+		return true
+	default:
+	}
+
+	return false
 }

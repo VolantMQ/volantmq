@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package service
+package server
 
 import (
 	"encoding/binary"
@@ -104,7 +104,6 @@ func GetMessageBuffer(c io.Closer) ([]byte, error) {
 		if n == 0 {
 			continue
 		}
-
 		buf = append(buf, b...)
 		l += n
 

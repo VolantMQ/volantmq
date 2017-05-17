@@ -150,7 +150,10 @@ func (b *Type) Size() int64 {
 
 // ReadFrom from reader
 func (b *Type) ReadFrom(r io.Reader) (int64, error) {
-	defer b.Close() // nolint: errcheck
+	//defer func () {
+	//	// nolint: errcheck
+	//	b.Close()
+	//}()
 
 	total := int64(0)
 
@@ -171,7 +174,6 @@ func (b *Type) ReadFrom(r io.Reader) (int64, error) {
 		}
 
 		n, err := r.Read(b.buf[pstart:pend])
-
 		if n > 0 {
 			total += int64(n)
 			if _, err = b.WriteCommit(n); err != nil {
@@ -187,8 +189,6 @@ func (b *Type) ReadFrom(r io.Reader) (int64, error) {
 
 // WriteTo to writer
 func (b *Type) WriteTo(w io.Writer) (int64, error) {
-	//defer b.Close() // nolint: errcheck
-
 	total := int64(0)
 
 	for {
@@ -519,26 +519,38 @@ func (b *Type) WriteCommit(n int) (int, error) {
 }
 
 // Send to
-func (b *Type) Send(from []byte) (int, error) {
-	var err error
-	remaining := len(from)
-	offset := 0
-	for remaining > 0 {
-		toWrite := remaining
-		if toWrite > int(b.Size()) {
-			toWrite = int(b.Size())
+func (b *Type) Send(from [][]byte) (int, error) {
+	defer func() {
+		if int64(len(b.ExternalBuf)) > b.size {
+			b.ExternalBuf = make([]byte, b.size)
 		}
+	}()
 
-		var wrote int
-		if wrote, err = b.Write(from[offset : offset+toWrite]); err != nil {
-			return 0, err
+	var total int
+
+	for _, s := range from {
+		remaining := len(s)
+		offset := 0
+		for remaining > 0 {
+			toWrite := remaining
+			if toWrite > int(b.Size()) {
+				toWrite = int(b.Size())
+			}
+
+			var wrote int
+			var err error
+
+			if wrote, err = b.Write(s[offset : offset+toWrite]); err != nil {
+				return 0, err
+			}
+
+			remaining -= wrote
+			offset += wrote
 		}
-
-		remaining -= wrote
-		offset += wrote
+		total += len(s)
 	}
 
-	return len(from), err
+	return total, nil
 }
 
 func (b *Type) waitForWriteSpace(n int) (int64, int, error) {
