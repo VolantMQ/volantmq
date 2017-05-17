@@ -36,3 +36,5 @@ _testmain.go
 
 *.sublime-project
 *.sublime-workspace
+
+persistence/examples/bolt/test.db
