@@ -21,5 +21,5 @@ func main() {
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	appLog.Warningf("Received signal: [%s]\n", <-ch)
 
-	p.Shutdown() // nolint: errcheck
+	p.Shutdown() // nolint: errcheck, gas
 }
