@@ -26,6 +26,7 @@ import (
 	"fmt"
 
 	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/persistence"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/types"
 )
@@ -61,12 +62,13 @@ var (
 // Provider interface
 type Provider interface {
 	SetStat(stat systree.TopicsStat)
+	Load(p persistence.Retained) error
 	Subscribe(topic string, qos message.QosType, subscriber *types.Subscriber) (message.QosType, error)
 	UnSubscribe(topic string, subscriber *types.Subscriber) error
 	Publish(msg *message.PublishMessage) error
 	Retain(msg *message.PublishMessage) error
 	Retained(topic string, msgs *[]*message.PublishMessage) error
-	Close() error
+	Close(p persistence.Retained) error
 }
 
 // Register topic provider
@@ -129,7 +131,12 @@ func (m *Manager) Retained(topic string, msgs *[]*message.PublishMessage) error 
 	return m.p.Retained(topic, msgs)
 }
 
+// Load retained message from persistent storage
+func (m *Manager) Load(p persistence.Retained) error {
+	return m.p.Load(p)
+}
+
 // Close manager
-func (m *Manager) Close() error {
-	return m.p.Close()
+func (m *Manager) Close(p persistence.Retained) error {
+	return m.p.Close(p)
 }

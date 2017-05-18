@@ -27,6 +27,8 @@ import (
 	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/auth"
 	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/persistence"
+	"github.com/troian/surgemq/persistence/bolt"
 	"github.com/troian/surgemq/session"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics"
@@ -65,6 +67,8 @@ type Config struct {
 
 	// ClientIDFromUser
 	ClientIDFromUser bool
+
+	PersistentFile string
 }
 
 // Listener listener
@@ -103,6 +107,8 @@ type implementation struct {
 
 	// topicsMgr is the topics manager for keeping track of subscriptions
 	topicsMgr *topics.Manager
+
+	persist persistence.Provider
 
 	// The quit channel for the server. If the server detects that this channel
 	// is closed, then it's a signal for it to shutdown as well.
@@ -172,6 +178,16 @@ func New(config Config) (Type, error) {
 	if s.topicsMgr, err = topics.NewManager(s.config.TopicsProvider, s.sysTree.Topics()); err != nil {
 		return nil, err
 	}
+
+	if s.config.PersistentFile != "" {
+		if s.persist, err = bolt.NewBolt(s.config.PersistentFile); err != nil {
+			return nil, err
+		}
+
+		s.topicsMgr.Load(s.persist.Retained()) // nolint: errcheck
+	}
+
+	s.persist.Wipe() // nolint: errcheck
 
 	return s, nil
 }
@@ -264,7 +280,11 @@ func (s *implementation) Close() error {
 	}
 
 	if s.topicsMgr != nil {
-		s.topicsMgr.Close() // nolint: errcheck
+		var p persistence.Retained
+		if s.persist != nil {
+			p = s.persist.Retained()
+		}
+		s.topicsMgr.Close(p) // nolint: errcheck
 	}
 
 	return nil

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"github.com/juju/loggo"
 	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/persistence"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics"
 	"github.com/troian/surgemq/types"
@@ -73,6 +74,25 @@ func NewMemProvider() topics.Provider {
 
 func (mT *provider) SetStat(stat systree.TopicsStat) {
 	mT.stat = stat
+}
+
+func (mT *provider) Load(p persistence.Retained) error {
+	var err error
+
+	var entries []*persistence.Message
+	entries, err = p.Load()
+
+	for _, e := range entries {
+		msg := message.NewPublishMessage()
+		msg.SetRetain(true)
+		msg.SetTopic(*e.Topic)              // nolint: errcheck
+		msg.SetQoS(message.QosType(*e.QoS)) // nolint: errcheck
+		msg.SetPayload(*e.Payload)
+
+		mT.Retain(msg) // nolint: errcheck
+	}
+
+	return err
 }
 
 func (mT *provider) Subscribe(topic string, qos message.QosType, sub *types.Subscriber) (message.QosType, error) {
@@ -150,7 +170,32 @@ func (mT *provider) Retained(topic string, msgs *[]*message.PublishMessage) erro
 	return mT.rRoot.match(topic, msgs)
 }
 
-func (mT *provider) Close() error {
+func (mT *provider) Close(p persistence.Retained) error {
+	if p != nil {
+		var rMsg []*message.PublishMessage
+		mT.Retained("#", &rMsg) // nolint: errcheck
+
+		toStore := []*persistence.Message{}
+
+		for _, m := range rMsg {
+			id := m.PacketID()
+			qos := byte(m.QoS())
+			payload := m.Payload()
+			topic := m.Topic()
+			tm := persistence.Message{
+				ID:      &id,
+				QoS:     &qos,
+				Payload: &payload,
+				Type:    byte(m.Type()),
+				Topic:   &topic,
+			}
+
+			toStore = append(toStore, &tm)
+		}
+
+		p.Store(toStore) // nolint: errcheck
+	}
+
 	mT.sRoot = nil
 	mT.rRoot = nil
 	return nil

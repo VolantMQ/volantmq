@@ -1,5 +1,18 @@
 package persistence
 
+// Retained provider for load/store retained messages
+type Retained interface {
+	Load() ([]*Message, error)
+	Store([]*Message) error
+}
+
+// Session provider for load/store session messages
+type Session interface {
+	New(id string) (StoreEntry, error)
+	Store(entry StoreEntry) error
+	Load() ([]SessionEntry, error)
+}
+
 // StoreEntry interface implemented by backends
 type StoreEntry interface {
 	Add(dir string, msg *Message) error
@@ -7,13 +20,8 @@ type StoreEntry interface {
 
 // Provider interface implemented by different backends
 type Provider interface {
-	SessionNew(id string) (StoreEntry, error)
-	SessionStore(entry StoreEntry) error
-	SessionsLoad() ([]SessionEntry, error)
-
-	RetainedLoad() ([]*Message, error)
-	RetainedStore([]*Message) error
-
+	Session() Session
+	Retained() Retained
 	Wipe() error
 	Shutdown() error
 }

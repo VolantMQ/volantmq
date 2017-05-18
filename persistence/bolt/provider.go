@@ -14,6 +14,9 @@ type impl struct {
 	// transactions that are in progress right now
 	wgTx sync.WaitGroup
 	lock sync.Mutex
+
+	r retained
+	s session
 }
 
 type storeImpl struct {
@@ -21,6 +24,22 @@ type storeImpl struct {
 
 	inBuk  *boltDB.Bucket
 	outBuk *boltDB.Bucket
+}
+
+type session struct {
+	db *boltDB.DB
+
+	// transactions that are in progress right now
+	wgTx *sync.WaitGroup
+	lock *sync.Mutex
+}
+
+type retained struct {
+	db *boltDB.DB
+
+	// transactions that are in progress right now
+	wgTx *sync.WaitGroup
+	lock *sync.Mutex
 }
 
 // NewBolt allocate new persistence provider of boltDB type
@@ -31,8 +50,24 @@ func NewBolt(file string) (p persistence.Provider, err error) {
 		return nil, err
 	}
 
+	pl.r.db = pl.db
+	pl.r.wgTx = &pl.wgTx
+	pl.r.lock = &pl.lock
+
+	pl.s.db = pl.db
+	pl.s.wgTx = &pl.wgTx
+	pl.s.lock = &pl.lock
+
 	p = pl
 	return p, nil
+}
+
+func (p *impl) Session() persistence.Session {
+	return &p.s
+}
+
+func (p *impl) Retained() persistence.Retained {
+	return &p.r
 }
 
 func (p *impl) Wipe() error {
@@ -61,7 +96,7 @@ func (p *impl) Shutdown() error {
 	return err
 }
 
-func (p *impl) RetainedLoad() ([]*persistence.Message, error) {
+func (p *retained) Load() ([]*persistence.Message, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -87,7 +122,7 @@ func (p *impl) RetainedLoad() ([]*persistence.Message, error) {
 	return getFromBucket(bucket)
 }
 
-func (p *impl) RetainedStore(msg []*persistence.Message) (err error) {
+func (p *retained) Store(msg []*persistence.Message) (err error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -123,7 +158,7 @@ func (p *impl) RetainedStore(msg []*persistence.Message) (err error) {
 }
 
 // NewEntry allocate store entry
-func (p *impl) SessionNew(sessionID string) (se persistence.StoreEntry, err error) {
+func (p *session) New(sessionID string) (se persistence.StoreEntry, err error) {
 	defer func() {
 		if err != nil {
 			if pl, ok := se.(*storeImpl); ok && pl != nil {
@@ -160,7 +195,7 @@ func (p *impl) SessionNew(sessionID string) (se persistence.StoreEntry, err erro
 }
 
 // Store commit entry into file
-func (p *impl) SessionStore(entry persistence.StoreEntry) error {
+func (p *session) Store(entry persistence.StoreEntry) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -177,7 +212,7 @@ func (p *impl) SessionStore(entry persistence.StoreEntry) error {
 }
 
 // Load all entries from db
-func (p *impl) SessionsLoad() ([]persistence.SessionEntry, error) {
+func (p *session) Load() ([]persistence.SessionEntry, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 

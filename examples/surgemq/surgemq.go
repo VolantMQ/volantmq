@@ -108,6 +108,7 @@ func main() {
 		TopicsProvider: surgemq.DefaultTopicsProvider,
 		Authenticators: "internal",
 		Anonymous:      true,
+		PersistentFile: "./perist.db",
 	})
 	if err != nil {
 		appLog.Errorf(err.Error())
