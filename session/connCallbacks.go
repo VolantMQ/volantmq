@@ -169,6 +169,7 @@ func (s *Type) onSubscribe(msg *message.SubscribeMessage) error {
 	}
 
 	if _, err := s.conn.writeMessage(resp); err != nil {
+		// TODO: Unsubscribe
 		return err
 	}
 

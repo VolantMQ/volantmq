@@ -92,12 +92,8 @@ func GetMessageBuffer(c io.Closer) ([]byte, error) {
 
 		n, err := conn.Read(b[0:])
 		if err != nil {
-			//if err == io.EOF {
-			//	continue
-			//} else {
 			appLog.Errorf("Read error: %v", err)
 			return nil, err
-			//}
 		}
 
 		// Technically i don't think we will ever get here

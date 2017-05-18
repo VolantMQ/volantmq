@@ -28,7 +28,9 @@ import (
 	"github.com/troian/surgemq/auth"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/session"
+	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics"
+	"github.com/troian/surgemq/types"
 	"strconv"
 )
 
@@ -111,6 +113,8 @@ type implementation struct {
 	lLock       sync.Mutex
 
 	wgConnections sync.WaitGroup
+
+	sysTree systree.Provider
 }
 
 var appLog loggo.Logger
@@ -149,13 +153,15 @@ func New(config Config) (Type, error) {
 	}
 
 	var err error
-	s.authMgr, err = auth.NewManager(s.config.Authenticators)
-	if err != nil {
+	if s.authMgr, err = auth.NewManager(s.config.Authenticators); err != nil {
 		return nil, err
 	}
 
-	s.sessionsMgr, err = session.NewManager()
-	if err != nil {
+	if s.sysTree, err = systree.NewTree(); err != nil {
+		return nil, err
+	}
+
+	if s.sessionsMgr, err = session.NewManager(s.sysTree.Sessions()); err != nil {
 		return nil, err
 	}
 
@@ -163,8 +169,7 @@ func New(config Config) (Type, error) {
 		s.config.TopicsProvider = "mem"
 	}
 
-	s.topicsMgr, err = topics.NewManager(s.config.TopicsProvider)
-	if err != nil {
+	if s.topicsMgr, err = topics.NewManager(s.config.TopicsProvider, s.sysTree.Topics()); err != nil {
 		return nil, err
 	}
 
@@ -323,9 +328,16 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 		}
 	}()
 
-	conn, ok := c.(net.Conn)
+	netConn, ok := c.(net.Conn)
 	if !ok {
 		return surgemq.ErrInvalidConnectionType
+	}
+
+	var conn types.Conn
+
+	if conn, err = types.NewConn(netConn, s.sysTree.Metric().Bytes()); err != nil {
+		appLog.Errorf("Couldn't create connection interface: %s", err.Error())
+		return err
 	}
 
 	// To establish a connection, we must
@@ -388,9 +400,13 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 
 	tmpErr := err
 
+	s.sysTree.Metric().Packets().Received(resp.Type())
+
 	if err = WriteMessage(c, resp); err != nil {
 		return err
 	}
+
+	s.sysTree.Metric().Packets().Sent(resp.Type())
 
 	err = tmpErr
 
@@ -446,6 +462,7 @@ func (s *implementation) getSession(req *message.ConnectMessage, resp *message.C
 			TimeoutRetries: s.config.TimeoutRetries,
 			TopicsMgr:      s.topicsMgr,
 			OnCleanup:      s.onSessionCleanup,
+			PacketsMetric:  s.sysTree.Metric().Packets(),
 		}
 		if ses, err = s.sessionsMgr.New(clientID, config); err != nil {
 			return nil, err

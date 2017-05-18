@@ -10,6 +10,7 @@ import (
 	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/buffer"
 	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/systree"
 	"sync"
 	"sync/atomic"
 )
@@ -43,6 +44,8 @@ type connConfig struct {
 	conn io.Closer
 
 	on onProcess
+
+	packetsMetric systree.PacketsMetric
 }
 
 type connection struct {
@@ -227,7 +230,7 @@ func (s *connection) processIncoming() {
 			return
 		}
 
-		// TODO: statistic here
+		s.config.packetsMetric.Received(msg.Type())
 
 		// 3. Put message for further processing
 		var resp message.Provider
@@ -480,5 +483,14 @@ func (s *connection) writeMessage(msg message.Provider) (int, error) {
 		return 0, surgemq.ErrBufferNotReady
 	}
 
-	return msg.Send(s.out)
+	var total int
+	var err error
+
+	total, err = msg.Send(s.out)
+
+	if err == nil {
+		s.config.packetsMetric.Sent(msg.Type())
+	}
+
+	return total, err
 }
