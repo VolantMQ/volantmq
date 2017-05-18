@@ -1,45 +1,39 @@
 package persistence
 
+// StoreEntry interface implemented by backends
+type StoreEntry interface {
+	Add(dir string, msg *Message) error
+}
+
 // Provider interface implemented by different backends
 type Provider interface {
-	NewEntry(sessionID string) (StoreEntry, error)
-	Load() (LoadEntries, error)
-	Store(entry StoreEntry) error
+	SessionNew(id string) (StoreEntry, error)
+	SessionStore(entry StoreEntry) error
+	SessionsLoad() ([]SessionEntry, error)
+
+	RetainedLoad() ([]*Message, error)
+	RetainedStore([]*Message) error
+
 	Wipe() error
 	Shutdown() error
 }
 
 // Message entry used to load/store messages
 type Message struct {
-	PacketID *uint16
-	Type     byte
-	Topic    *string
-	QoS      *byte
-	Payload  *[]byte
+	ID      *uint16
+	Type    byte
+	Topic   *string
+	QoS     *byte
+	Payload *[]byte
 }
 
-// LoadEntry contains all message for given session
-type LoadEntry struct {
-	SessionID string
-	In        struct {
-		Messages []Message
+// SessionEntry contains all message for given session
+type SessionEntry struct {
+	ID string
+	In struct {
+		Messages []*Message
 	}
 	Out struct {
-		Messages []Message
+		Messages []*Message
 	}
-}
-
-// LoadEntries just slice
-type LoadEntries []LoadEntry
-
-// StoreEntry interface implemented by backends
-type StoreEntry interface {
-	AddPacket(packet *Packet) error
-}
-
-// Packet object containing information how to store message
-type Packet struct {
-	SessionID string
-	Direction string
-	Message
 }
