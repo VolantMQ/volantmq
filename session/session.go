@@ -22,6 +22,7 @@ import (
 	//"fmt"
 	"github.com/juju/loggo"
 	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics"
 	"github.com/troian/surgemq/types"
 	"io"
@@ -54,6 +55,8 @@ type Config struct {
 	TimeoutRetries int
 
 	OnCleanup func(id string)
+
+	PacketsMetric systree.PacketsMetric
 }
 
 type publisher struct {
@@ -196,6 +199,7 @@ func (s *Type) Start(msg *message.ConnectMessage, conn io.Closer) (err error) {
 				unSubscribe: s.onUnSubscribe,
 				close:       s.onClose,
 			},
+			packetsMetric: s.config.PacketsMetric,
 		})
 	if err != nil {
 		return err

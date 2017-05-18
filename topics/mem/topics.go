@@ -21,6 +21,7 @@ import (
 	"errors"
 	"github.com/juju/loggo"
 	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics"
 	"github.com/troian/surgemq/types"
 )
@@ -42,6 +43,8 @@ type provider struct {
 
 	// Retained messages topic tree
 	rRoot *rNode
+
+	stat systree.TopicsStat
 }
 
 var _ topics.Provider = (*provider)(nil)
@@ -66,6 +69,10 @@ func NewMemProvider() topics.Provider {
 		sRoot: newSNode(),
 		rRoot: newRNode(),
 	}
+}
+
+func (mT *provider) SetStat(stat systree.TopicsStat) {
+	mT.stat = stat
 }
 
 func (mT *provider) Subscribe(topic string, qos message.QosType, sub *types.Subscriber) (message.QosType, error) {

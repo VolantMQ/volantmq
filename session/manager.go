@@ -18,6 +18,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"github.com/troian/surgemq/systree"
 	"io"
 	"sync"
 )
@@ -26,6 +27,8 @@ import (
 type Manager struct {
 	sessions map[string]*Type
 	mu       sync.RWMutex
+
+	stat systree.SessionsStat
 }
 
 var (
@@ -34,8 +37,13 @@ var (
 )
 
 // NewManager alloc new
-func NewManager() (*Manager, error) {
-	return &Manager{sessions: make(map[string]*Type)}, nil
+func NewManager(stat systree.SessionsStat) (*Manager, error) {
+	m := &Manager{
+		sessions: make(map[string]*Type),
+		stat:     stat,
+	}
+
+	return m, nil
 }
 
 // New session
@@ -53,6 +61,8 @@ func (m *Manager) New(id string, config Config) (*Type, error) {
 	}
 
 	m.sessions[id] = s
+
+	m.stat.Created()
 
 	return s, nil
 }
@@ -74,6 +84,7 @@ func (m *Manager) Del(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.sessions, id)
+	m.stat.Removed()
 }
 
 // Save session

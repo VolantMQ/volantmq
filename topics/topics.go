@@ -26,6 +26,7 @@ import (
 	"fmt"
 
 	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/types"
 )
 
@@ -59,6 +60,7 @@ var (
 
 // Provider interface
 type Provider interface {
+	SetStat(stat systree.TopicsStat)
 	Subscribe(topic string, qos message.QosType, subscriber *types.Subscriber) (message.QosType, error)
 	UnSubscribe(topic string, subscriber *types.Subscriber) error
 	Publish(msg *message.PublishMessage) error
@@ -91,11 +93,13 @@ type Manager struct {
 }
 
 // NewManager add new manager
-func NewManager(providerName string) (*Manager, error) {
+func NewManager(providerName string, stat systree.TopicsStat) (*Manager, error) {
 	p, ok := providers[providerName]
 	if !ok {
 		return nil, fmt.Errorf("session: unknown provider %q", providerName)
 	}
+
+	p.SetStat(stat)
 
 	return &Manager{p: p}, nil
 }
