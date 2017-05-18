@@ -2,8 +2,8 @@ language: go
 go:
   - 1.8.1
 
-install:
-  - go get -u gopkg.in/alecthomas/gometalinter.v1
+before_script:
+  - go get github.com/alecthomas/gometalinter
   - gometalinter --install
 
 script:
