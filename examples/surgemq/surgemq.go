@@ -25,6 +25,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 )
 
@@ -53,6 +54,12 @@ func (a internalAuth) PskKey(hint, identity string, key []byte, maxKeyLen int) e
 }
 
 func main() {
+	defer func() {
+		if r := recover(); r != nil {
+			appLog.Errorf("Recover from panic: %s", r)
+		}
+	}()
+
 	var err error
 
 	appLog.SetLogLevel(loggo.DEBUG)
@@ -118,13 +125,19 @@ func main() {
 		appLog.Errorf(http.ListenAndServe("localhost:6067", nil).Error())
 	}()
 
-	config := &server.Listener{
-		Scheme:      "tcp4",
-		Host:        "",
-		Port:        1883,
-		AuthManager: authMng,
-	}
+	var wgListener sync.WaitGroup
+
+	wgListener.Add(1)
 	go func() {
+		defer wgListener.Done()
+
+		config := &server.Listener{
+			Scheme:      "tcp4",
+			Host:        "",
+			Port:        1883,
+			AuthManager: authMng,
+		}
+
 		if err = srv.ListenAndServe(config); err != nil {
 			appLog.Errorf("%s", err.Error())
 		}
@@ -134,5 +147,9 @@ func main() {
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	appLog.Warningf("Received signal: [%s]\n", <-ch)
 
-	appLog.Warningf(srv.Close().Error())
+	if err = srv.Close(); err != nil {
+		appLog.Errorf(err.Error())
+	}
+
+	wgListener.Wait()
 }

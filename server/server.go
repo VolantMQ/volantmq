@@ -110,7 +110,6 @@ type implementation struct {
 	wgListeners sync.WaitGroup
 	lLock       sync.Mutex
 
-	wgStopped     sync.WaitGroup
 	wgConnections sync.WaitGroup
 }
 
@@ -229,22 +228,31 @@ func (s *implementation) ListenAndServe(listener *Listener) error {
 // Close terminates the server by shutting down all the client connections and closing
 // the listener. It will, as best it can, clean up after itself.
 func (s *implementation) Close() error {
+	defer func() {
+		if r := recover(); r != nil {
+			appLog.Errorf("Recover from panic: %s", r)
+		}
+	}()
+
 	// By closing the quit channel, we are telling the server to stop accepting new
 	// connection.
 	close(s.quit)
 
 	// We then close all net.Listener, which will force Accept() to return if it's
 	// blocked waiting for new connections.
-	for _, l := range s.listeners {
+	s.lLock.Lock()
+	for port, l := range s.listeners {
 		if err := l.listener.Close(); err != nil {
 			appLog.Errorf(err.Error())
 		}
+		delete(s.listeners, port)
 	}
-
+	s.lLock.Unlock()
+	// Wait all of listeners has finished
 	s.wgListeners.Wait()
-	s.wgConnections.Wait()
 
-	s.wgStopped.Wait()
+	// if there are any new connection in progress lets wait until they are finished
+	s.wgConnections.Wait()
 
 	if s.sessionsMgr != nil {
 		s.sessionsMgr.Shutdown() // nolint: errcheck
