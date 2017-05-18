@@ -2,7 +2,8 @@ language: go
 go:
   - 1.8.1
 
-install_gometalinter_tools: true
+install:
+  - gometalinter --install
 
 script:
   - go build -race -v -gcflags "-N -l" ./...
