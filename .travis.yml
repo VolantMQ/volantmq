@@ -1,0 +1,12 @@
+language: go
+go:
+  - 1.8.1
+
+before_script:
+  - go get github.com/alecthomas/gometalinter
+  - gometalinter --install
+
+script:
+  - go build -race -v -gcflags "-N -l" ./...
+  - exec 5>&1 && output="$(gofmt -l -w "$@" | tee /dev/fd/5)" && [[ -z "$output" ]]
+  - gometalinter --exclude=corefoundation.go --deadline=60s --vendor --cyclo-over=20 --dupl-threshold=100 --disable=gotype ./...
