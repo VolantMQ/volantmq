@@ -25,6 +25,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"sync"
 	"syscall"
 )
@@ -57,6 +58,7 @@ func main() {
 	defer func() {
 		if r := recover(); r != nil {
 			appLog.Errorf("Recover from panic: %s", r)
+			debug.PrintStack()
 		}
 	}()
 
