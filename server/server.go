@@ -276,7 +276,7 @@ func (s *implementation) Close() error {
 	s.wgConnections.Wait()
 
 	if s.sessionsMgr != nil {
-		s.sessionsMgr.Shutdown() // nolint: errcheck
+		s.sessionsMgr.Shutdown() // nolint: errcheck, gas
 	}
 
 	if s.topicsMgr != nil {
@@ -284,7 +284,7 @@ func (s *implementation) Close() error {
 		if s.persist != nil {
 			p = s.persist.Retained()
 		}
-		s.topicsMgr.Close(p) // nolint: errcheck
+		s.topicsMgr.Close(p) // nolint: errcheck, gas
 	}
 
 	return nil
@@ -292,7 +292,7 @@ func (s *implementation) Close() error {
 
 func (s *implementation) serve(l *Listener) error {
 	defer func() {
-		l.listener.Close() // nolint: errcheck
+		l.listener.Close() // nolint: errcheck, gas
 	}()
 
 	var tempDelay time.Duration // how long to sleep on accept failure
@@ -329,7 +329,7 @@ func (s *implementation) serve(l *Listener) error {
 		s.wgConnections.Add(1)
 		go func(cn net.Conn) {
 			defer s.wgConnections.Done()
-			s.handleConnection(cn, l.AuthManager) // nolint: errcheck
+			s.handleConnection(cn, l.AuthManager) // nolint: errcheck, gas
 		}(conn)
 	}
 }
@@ -344,7 +344,7 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 
 	defer func() {
 		if err != nil {
-			c.Close() // nolint: errcheck
+			c.Close() // nolint: errcheck, gas
 		}
 	}()
 
@@ -373,7 +373,7 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 	// a CONNACK error. If it's CONNACK error, send the proper CONNACK error back
 	// to client. Exit regardless of error type.
 
-	conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(s.config.ConnectTimeout))) // nolint: errcheck
+	conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(s.config.ConnectTimeout))) // nolint: errcheck, gas
 
 	resp := message.NewConnAckMessage()
 

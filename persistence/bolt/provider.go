@@ -105,7 +105,7 @@ func (p *retained) Load() ([]*persistence.Message, error) {
 
 	defer func() {
 		if tx != nil {
-			tx.Rollback() // nolint: errcheck
+			tx.Rollback() // nolint: errcheck, gas
 		}
 	}()
 
@@ -142,7 +142,7 @@ func (p *retained) Store(msg []*persistence.Message) (err error) {
 	}
 
 	for _, m := range msg {
-		id, _ := bucket.NextSequence()
+		id, _ := bucket.NextSequence() // nolint: gas
 
 		var pb *boltDB.Bucket
 		if pb, err = bucket.CreateBucket(itob64(id)); err != nil {
@@ -163,7 +163,7 @@ func (p *session) New(sessionID string) (se persistence.StoreEntry, err error) {
 		if err != nil {
 			if pl, ok := se.(*storeImpl); ok && pl != nil {
 				if pl.tx != nil {
-					pl.tx.Rollback() // nolint: errcheck
+					pl.tx.Rollback() // nolint: errcheck, gas
 				}
 			}
 			se = nil
@@ -263,7 +263,7 @@ func (p *storeImpl) Add(dir string, msg *persistence.Message) error {
 
 	// This returns an error only if the Tx is closed or not writeable.
 	// That can't happen in an Update() call so I ignore the error check.
-	id, _ := bucket.NextSequence()
+	id, _ := bucket.NextSequence() // nolint: gas
 
 	if packetBucket, err = bucket.CreateBucket(itob64(id)); err != nil {
 		return err
