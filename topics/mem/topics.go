@@ -153,11 +153,14 @@ func (mT *provider) Retain(msg *message.PublishMessage) error {
 	mT.rmu.Lock()
 	defer mT.rmu.Unlock()
 
-	// So apparently, at least according to the MQTT Conformance/Interoperability
-	// Testing, that a payload of 0 means delete the retain message.
-	// https://eclipse.org/paho/clients/testing/
+	// [MQTT-3.3.1-10]
 	if len(msg.Payload()) == 0 {
 		return mT.rRoot.remove(msg.Topic())
+	}
+
+	// [MQTT-3.3.1-7]
+	if msg.QoS() == message.QosAtMostOnce {
+		mT.rRoot.remove(msg.Topic()) // nolint: errcheck, gas
 	}
 
 	return mT.rRoot.insert(msg.Topic(), msg)
@@ -167,6 +170,7 @@ func (mT *provider) Retained(topic string, msgs *[]*message.PublishMessage) erro
 	mT.rmu.RLock()
 	defer mT.rmu.RUnlock()
 
+	// [MQTT-3.3.1-5]
 	return mT.rRoot.match(topic, msgs)
 }
 

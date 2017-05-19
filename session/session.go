@@ -86,9 +86,6 @@ type Type struct {
 	// message to publish if connect is closed unexpectedly
 	will *message.PublishMessage
 
-	// Retained publish message
-	Retained *message.PublishMessage
-
 	// topics stores all the topics for this session/client
 	topics message.TopicsQoS
 
@@ -103,6 +100,11 @@ type Type struct {
 	wgSessionStopped sync.WaitGroup
 
 	publisher publisher
+
+	retained struct {
+		lock sync.Mutex
+		list []*message.PublishMessage
+	}
 
 	// Whether this is service is closed or not.
 	running int64
@@ -256,7 +258,9 @@ func (s *Type) onSubscribedPublish(msg *message.PublishMessage) error {
 	m.SetQoS(msg.QoS())     // nolint: errcheck
 	m.SetTopic(msg.Topic()) // nolint: errcheck
 	m.SetPayload(msg.Payload())
-	m.SetRetain(msg.Retain())
+
+	// [MQTT-3.3.1-9]
+	m.SetRetain(false)
 	m.SetDup(msg.Dup())
 
 	s.publisher.lock.Lock()
@@ -316,9 +320,21 @@ func (s *Type) IsClean() bool {
 
 // forward PUBLISH message to topics manager which takes care about subscribers
 func (s *Type) publishToTopic(msg *message.PublishMessage) error {
+	// [MQTT-3.3.1.3]
 	if msg.Retain() {
 		if err := s.config.TopicsMgr.Retain(msg); err != nil {
 			appLog.Errorf("Error retaining message [%s]: %v", s.id, err)
+		}
+
+		// [MQTT-3.3.1-7]
+		if msg.QoS() == message.QosAtMostOnce {
+			m := message.NewPublishMessage()
+			m.SetQoS(msg.QoS())     // nolint: errcheck
+			m.SetTopic(msg.Topic()) // nolint: errcheck
+
+			s.retained.lock.Lock()
+			s.retained.list = append(s.retained.list, m)
+			s.retained.lock.Unlock()
 		}
 	}
 
