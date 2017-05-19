@@ -19,6 +19,7 @@ func (s *Type) onClose(will bool) {
 	// just in case make sure session has been started
 	s.wgSessionStarted.Wait()
 
+	// [MQTT-3.1.3.3]
 	if will && s.will != nil {
 		appLog.Errorf("connection unexpectedly closed [%s]. Sending Will", s.id)
 		s.publishToTopic(s.will) // nolint: errcheck
@@ -50,6 +51,14 @@ func (s *Type) onClose(will bool) {
 	s.publisher.stopped.Wait()
 
 	s.conn = nil
+
+	// [MQTT-3.3.1-7]
+	// Discard retained messages with QoS 0
+	s.retained.lock.Lock()
+	for _, m := range s.retained.list {
+		s.config.TopicsMgr.Retain(m) // nolint: errcheck
+	}
+	s.retained.lock.Unlock()
 }
 
 // onPublish invoked when server receives PUBLISH message from remote
@@ -176,6 +185,7 @@ func (s *Type) onSubscribe(msg *message.SubscribeMessage) error {
 	// Now put retained messages into publish queue
 	for _, rm := range retainedMessages {
 		m := message.NewPublishMessage()
+		// [MQTT-3.3.1-8]
 		m.SetRetain(true)
 		m.SetQoS(rm.QoS()) // nolint: errcheck
 		m.SetPayload(rm.Payload())
