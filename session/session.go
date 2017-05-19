@@ -240,48 +240,48 @@ func (s *Type) Stop(p persistence.Session) {
 	// If close successful connection manager invokes onClose method which cleans up writer.
 	// If close error just check writer goroutine has finished it's job
 	var err error
-	if err = s.conn.config.conn.Close(); err != nil {
-		appLog.Errorf("Couldn't close connection [%s]: %s", s.id, err.Error())
+	if s.conn != nil {
+		if err = s.conn.config.conn.Close(); err != nil {
+			appLog.Errorf("Couldn't close connection [%s]: %s", s.id, err.Error())
+		}
 	}
-
 	s.wgSessionStopped.Wait()
 
-	entry, err := p.New(s.id)
-	if err != nil {
+	if entry, err := p.New(s.id); err != nil {
 		appLog.Errorf("Couldn't start session backup: %s", err.Error())
-	}
+	} else {
+		s.publisher.lock.Lock()
+		var next *list.Element
 
-	s.publisher.lock.Lock()
-	var next *list.Element
+		appLog.Debugf("[%s] storing out messages")
+		for elem := s.publisher.messages.Front(); elem != nil; elem = next {
+			next = elem.Next()
 
-	appLog.Debugf("[%s] storing out messages")
-	for elem := s.publisher.messages.Front(); elem != nil; elem = next {
-		next = elem.Next()
+			if m, ok := s.publisher.messages.Remove(elem).(message.Provider); ok {
+				if err = entry.Add("out", m); err != nil {
+					appLog.Errorf("Couldn't persist message: %s", err.Error())
+				}
+			}
+		}
+		s.publisher.lock.Unlock()
 
-		if m, ok := s.publisher.messages.Remove(elem).(message.Provider); ok {
+		appLog.Debugf("[%s] storing not ack out messages")
+		for _, m := range s.ack.pubOut.get() {
 			if err = entry.Add("out", m); err != nil {
 				appLog.Errorf("Couldn't persist message: %s", err.Error())
 			}
 		}
-	}
-	s.publisher.lock.Unlock()
 
-	appLog.Debugf("[%s] storing not ack out messages")
-	for _, m := range s.ack.pubOut.get() {
-		if err = entry.Add("out", m); err != nil {
-			appLog.Errorf("Couldn't persist message: %s", err.Error())
+		appLog.Debugf("[%s] storing not ack in messages")
+		for _, m := range s.ack.pubIn.get() {
+			if err = entry.Add("in", m); err != nil {
+				appLog.Errorf("Couldn't persist message: %s", err.Error())
+			}
 		}
-	}
 
-	appLog.Debugf("[%s] storing not ack in messages")
-	for _, m := range s.ack.pubIn.get() {
-		if err = entry.Add("in", m); err != nil {
-			appLog.Errorf("Couldn't persist message: %s", err.Error())
+		if err = p.Store(entry); err != nil {
+			appLog.Errorf(err.Error())
 		}
-	}
-
-	if err = p.Store(entry); err != nil {
-		appLog.Errorf(err.Error())
 	}
 }
 

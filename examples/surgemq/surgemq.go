@@ -25,6 +25,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"sync"
 	"syscall"
 )
@@ -54,11 +55,12 @@ func (a internalAuth) PskKey(hint, identity string, key []byte, maxKeyLen int) e
 }
 
 func main() {
-	//defer func() {
-	//	if r := recover(); r != nil {
-	//		appLog.Errorf("Recover from panic: %s", r)
-	//	}
-	//}()
+	defer func() {
+		if r := recover(); r != nil {
+			appLog.Errorf("Recover from panic: %s", r)
+			debug.PrintStack()
+		}
+	}()
 
 	var err error
 

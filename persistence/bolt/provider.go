@@ -41,6 +41,8 @@ type retained struct {
 	// transactions that are in progress right now
 	wgTx *sync.WaitGroup
 	lock *sync.Mutex
+
+	tx *boltDB.Tx
 }
 
 // NewBolt allocate new persistence provider of boltDB type
@@ -75,7 +77,7 @@ func (p *impl) Wipe() error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	err := p.db.View(func(tx *boltDB.Tx) error {
+	err := p.db.Update(func(tx *boltDB.Tx) error {
 		return tx.ForEach(func(name []byte, _ *boltDB.Bucket) error {
 			return tx.DeleteBucket(name)
 		})
@@ -101,22 +103,22 @@ func (p *retained) Load() ([]message.Provider, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	var err error
-	var tx *boltDB.Tx
-
 	defer func() {
-		if tx != nil {
-			tx.Rollback() // nolint: errcheck, gas
+		if p.tx != nil {
+			p.tx.Rollback() // nolint: errcheck
+			p.tx = nil
 		}
 	}()
 
-	if tx, err = p.db.Begin(false); err != nil {
+	var err error
+
+	if p.tx, err = p.db.Begin(false); err != nil {
 		return nil, err
 	}
 
 	var bucket *boltDB.Bucket
 
-	if bucket = tx.Bucket([]byte("retained")); bucket == nil {
+	if bucket = p.tx.Bucket([]byte("retained")); bucket == nil {
 		return nil, errors.New("No retained messages")
 	}
 
@@ -127,18 +129,21 @@ func (p *retained) Store(msg []message.Provider) (err error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	var tx *boltDB.Tx
+	defer func() {
+		if p.tx != nil {
+			p.tx.Rollback() // nolint: errcheck
+			p.tx = nil
+		}
+	}()
 
-	defer tx.Rollback() // nolint: errcheck
-
-	tx, err = p.db.Begin(true)
+	p.tx, err = p.db.Begin(true)
 	if err != nil {
 		return err
 	}
 
 	var bucket *boltDB.Bucket
 
-	if bucket, err = tx.CreateBucket([]byte("retained")); err != nil {
+	if bucket, err = p.tx.CreateBucket([]byte("retained")); err != nil {
 		return err
 	}
 
@@ -155,7 +160,7 @@ func (p *retained) Store(msg []message.Provider) (err error) {
 		}
 	}
 
-	return tx.Commit()
+	return p.tx.Commit()
 }
 
 // NewEntry allocate store entry
@@ -168,6 +173,8 @@ func (p *session) New(sessionID string) (se persistence.StoreEntry, err error) {
 				}
 			}
 			se = nil
+		} else {
+			p.wgTx.Add(1)
 		}
 	}()
 

@@ -209,7 +209,9 @@ func New(config Config) (Type, error) {
 		appLog.Infof("Loading retained messages")
 		s.topicsMgr.Load(s.persist.Retained()) // nolint: errcheck
 
-		s.persist.Wipe() // nolint: errcheck
+		if err = s.persist.Wipe(); err != nil {
+			appLog.Errorf("Couldn't wipe persis storage: %s", err.Error())
+		}
 	}
 
 	return s, nil

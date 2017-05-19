@@ -178,7 +178,9 @@ func (mT *provider) Close(p persistence.Retained) error {
 			toStore = append(toStore, m)
 		}
 
-		p.Store(toStore) // nolint: errcheck
+		if len(toStore) > 0 {
+			p.Store(toStore) // nolint: errcheck
+		}
 	}
 
 	mT.sRoot = nil
