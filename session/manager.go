@@ -18,6 +18,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"github.com/troian/surgemq/persistence"
 	"github.com/troian/surgemq/systree"
 	"io"
 	"sync"
@@ -98,12 +99,12 @@ func (m *Manager) Count() int {
 }
 
 // Shutdown manager
-func (m *Manager) Shutdown() error {
+func (m *Manager) Shutdown(p persistence.Session) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	for id, s := range m.sessions {
-		s.Stop()
+		s.Stop(p)
 		delete(m.sessions, id)
 	}
 

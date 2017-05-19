@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	boltDB "github.com/boltdb/bolt"
+	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/persistence"
 	"sync"
 )
@@ -96,7 +97,7 @@ func (p *impl) Shutdown() error {
 	return err
 }
 
-func (p *retained) Load() ([]*persistence.Message, error) {
+func (p *retained) Load() ([]message.Provider, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -115,14 +116,14 @@ func (p *retained) Load() ([]*persistence.Message, error) {
 
 	var bucket *boltDB.Bucket
 
-	if bucket = tx.Bucket([]byte("retained")); bucket != nil {
+	if bucket = tx.Bucket([]byte("retained")); bucket == nil {
 		return nil, errors.New("No retained messages")
 	}
 
 	return getFromBucket(bucket)
 }
 
-func (p *retained) Store(msg []*persistence.Message) (err error) {
+func (p *retained) Store(msg []message.Provider) (err error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -247,7 +248,7 @@ func (p *session) Load() ([]persistence.SessionEntry, error) {
 }
 
 // AddPacket to store entry
-func (p *storeImpl) Add(dir string, msg *persistence.Message) error {
+func (p *storeImpl) Add(dir string, msg message.Provider) error {
 	var bucket *boltDB.Bucket
 
 	if dir == "in" {
@@ -278,71 +279,77 @@ func (p *storeImpl) commit() (err error) {
 	return p.tx.Commit()
 }
 
-func getFromBucket(b *boltDB.Bucket) ([]*persistence.Message, error) {
-	entries := []*persistence.Message{}
+func getFromBucket(b *boltDB.Bucket) ([]message.Provider, error) {
+	entries := []message.Provider{}
 
 	c := b.Cursor()
 	for k, _ := c.First(); k != nil; k, _ = c.Next() {
 		packBuk := b.Bucket(k)
-		err := packBuk.ForEach(func(name []byte, val []byte) error {
-			msg := persistence.Message{}
+		// firstly get id to decide what message type this is
+		tmp := packBuk.Get([]byte("type"))
 
-			switch string(name) {
-			case "id":
-				id := binary.BigEndian.Uint16(val)
-				msg.ID = &id
-			case "type":
-				msg.Type = val[0]
-			case "topic":
-				buf := string(val)
-				msg.Topic = &buf
-			case "payload":
-				buf := make([]byte, len(val))
-				copy(buf, val)
-				msg.Payload = &buf
-			case "qos":
-				tmpVal := val[0]
-				msg.QoS = &tmpVal
+		mT, err := message.Type(tmp[0]).New()
+		if err != nil {
+			return nil, err
+		}
+		err = packBuk.ForEach(func(name []byte, val []byte) error {
+			var e error
+			switch m := mT.(type) {
+			case *message.PublishMessage:
+				switch string(name) {
+				case "id":
+					m.SetPacketID(binary.BigEndian.Uint16(val))
+				case "topic":
+					e = m.SetTopic(string(val))
+				case "payload":
+					buf := make([]byte, len(val))
+					copy(buf, val)
+					m.SetPayload(buf)
+				case "qos":
+					e = m.SetQoS(message.QosType(val[0]))
+				}
 			}
 
-			entries = append(entries, &msg)
-			return nil
+			return e
 		})
 		if err != nil {
 			return nil, err
 		}
+
+		entries = append(entries, mT)
 	}
 
 	return entries, nil
 }
 
-func putIntoBucket(b *boltDB.Bucket, m *persistence.Message) error {
-	if err := b.Put([]byte("type"), []byte{m.Type}); err != nil {
+func putIntoBucket(b *boltDB.Bucket, msg message.Provider) error {
+	if err := b.Put([]byte("type"), []byte{byte(msg.Type())}); err != nil {
 		return err
 	}
 
-	if m.ID != nil {
-		if err := b.Put([]byte("id"), itob16(*m.ID)); err != nil {
+	if msg.PacketID() != 0 {
+		if err := b.Put([]byte("id"), itob16(msg.PacketID())); err != nil {
 			return err
 		}
 	}
 
-	if m.QoS != nil {
-		if err := b.Put([]byte("qos"), []byte{*m.QoS}); err != nil {
+	switch m := msg.(type) {
+	case *message.PublishMessage:
+		if err := b.Put([]byte("qos"), []byte{byte(m.QoS())}); err != nil {
 			return err
 		}
-	}
 
-	if m.Topic != nil {
-		if err := b.Put([]byte("topic"), []byte(*m.Topic)); err != nil {
+		if err := b.Put([]byte("topic"), []byte(m.Topic())); err != nil {
 			return err
 		}
-	}
 
-	if m.Payload != nil {
-		if err := b.Put([]byte("topic"), *m.Payload); err != nil {
-			return err
+		if len(m.Payload()) > 0 {
+			if err := b.Put([]byte("topic"), m.Payload()); err != nil {
+				return err
+			}
 		}
+	case *message.PubRelMessage:
+		// have nothing to do here
 	}
 
 	return nil

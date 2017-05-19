@@ -22,6 +22,7 @@ import (
 	//"fmt"
 	"github.com/juju/loggo"
 	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/persistence"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics"
 	"github.com/troian/surgemq/types"
@@ -57,6 +58,8 @@ type Config struct {
 	OnCleanup func(id string)
 
 	PacketsMetric systree.PacketsMetric
+
+	RestoredMessages persistence.SessionEntry
 }
 
 type publisher struct {
@@ -135,6 +138,14 @@ func newSession(id string, config Config) (*Type, error) {
 	s.ack.pubIn = newAckQueue(s.onAckIn)
 	s.ack.pubOut = newAckQueue(s.onAckOut)
 	s.subscriber.Publish = s.onSubscribedPublish
+
+	for _, m := range s.config.RestoredMessages.In.Messages {
+		s.ack.pubIn.put(m)
+	}
+
+	for _, m := range s.config.RestoredMessages.Out.Messages {
+		s.publisher.messages.PushBack(m)
+	}
 
 	return &s, nil
 }
@@ -216,7 +227,7 @@ func (s *Type) Start(msg *message.ConnectMessage, conn io.Closer) (err error) {
 }
 
 // Stop session. Function assumed to be invoked once server about to shutdown
-func (s *Type) Stop() {
+func (s *Type) Stop(p persistence.Session) {
 	if !atomic.CompareAndSwapInt64(&s.closed, 0, 1) {
 		s.wgSessionStarted.Wait()
 		return
@@ -231,7 +242,45 @@ func (s *Type) Stop() {
 		appLog.Errorf("Couldn't close connection [%s]: %s", s.id, err.Error())
 	}
 
-	//	s.publisher.stopped.Wait()
+	s.wgSessionStopped.Wait()
+
+	entry, err := p.New(s.id)
+	if err != nil {
+		appLog.Errorf("Couldn't start session backup: %s", err.Error())
+	}
+
+	s.publisher.lock.Lock()
+	var next *list.Element
+
+	appLog.Debugf("[%s] storing out messages")
+	for elem := s.publisher.messages.Front(); elem != nil; elem = next {
+		next = elem.Next()
+
+		if m, ok := s.publisher.messages.Remove(elem).(message.Provider); ok {
+			if err = entry.Add("out", m); err != nil {
+				appLog.Errorf("Couldn't persist message: %s", err.Error())
+			}
+		}
+	}
+	s.publisher.lock.Unlock()
+
+	appLog.Debugf("[%s] storing not ack out messages")
+	for _, m := range s.ack.pubOut.get() {
+		if err = entry.Add("out", m); err != nil {
+			appLog.Errorf("Couldn't persist message: %s", err.Error())
+		}
+	}
+
+	appLog.Debugf("[%s] storing not ack in messages")
+	for _, m := range s.ack.pubIn.get() {
+		if err = entry.Add("in", m); err != nil {
+			appLog.Errorf("Couldn't persist message: %s", err.Error())
+		}
+	}
+
+	if err = p.Store(entry); err != nil {
+		appLog.Errorf(err.Error())
+	}
 }
 
 // onSubscribedPublish is the method that gets added to the topic subscribers list by the
@@ -365,7 +414,9 @@ func (s *Type) onAckOut(msg message.Provider, status error) {
 func (s *Type) publishWorker() {
 	defer func() {
 		s.publisher.lock.Lock()
-		for elem := s.publisher.messages.Front(); elem != nil; elem = elem.Next() {
+		var next *list.Element
+		for elem := s.publisher.messages.Front(); elem != nil; elem = next {
+			next = elem.Next()
 			switch m := elem.Value.(type) {
 			case *message.PublishMessage:
 				if m.QoS() == message.QosAtMostOnce {

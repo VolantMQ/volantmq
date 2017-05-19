@@ -167,6 +167,12 @@ func New(config Config) (Type, error) {
 		return nil, err
 	}
 
+	if s.config.PersistentFile != "" {
+		if s.persist, err = bolt.NewBolt(s.config.PersistentFile); err != nil {
+			return nil, err
+		}
+	}
+
 	if s.sessionsMgr, err = session.NewManager(s.sysTree.Sessions()); err != nil {
 		return nil, err
 	}
@@ -179,15 +185,32 @@ func New(config Config) (Type, error) {
 		return nil, err
 	}
 
-	if s.config.PersistentFile != "" {
-		if s.persist, err = bolt.NewBolt(s.config.PersistentFile); err != nil {
-			return nil, err
+	if s.persist != nil {
+		appLog.Infof("Loading sessions")
+
+		if entries, err := s.persist.Session().Load(); err == nil {
+			for _, ses := range entries {
+				config := session.Config{
+					ConnectTimeout:   s.config.ConnectTimeout,
+					AckTimeout:       s.config.AckTimeout,
+					TimeoutRetries:   s.config.TimeoutRetries,
+					TopicsMgr:        s.topicsMgr,
+					OnCleanup:        s.onSessionCleanup,
+					PacketsMetric:    s.sysTree.Metric().Packets(),
+					RestoredMessages: ses,
+				}
+
+				if _, err = s.sessionsMgr.New(ses.ID, config); err != nil {
+					appLog.Errorf("Couldn't restore session [%s]: %s", ses.ID, err.Error())
+				}
+			}
 		}
 
+		appLog.Infof("Loading retained messages")
 		s.topicsMgr.Load(s.persist.Retained()) // nolint: errcheck
-	}
 
-	s.persist.Wipe() // nolint: errcheck
+		s.persist.Wipe() // nolint: errcheck
+	}
 
 	return s, nil
 }
@@ -249,11 +272,11 @@ func (s *implementation) ListenAndServe(listener *Listener) error {
 // Close terminates the server by shutting down all the client connections and closing
 // the listener. It will, as best it can, clean up after itself.
 func (s *implementation) Close() error {
-	defer func() {
-		if r := recover(); r != nil {
-			appLog.Errorf("Recover from panic: %s", r)
-		}
-	}()
+	//defer func() {
+	//	if r := recover(); r != nil {
+	//		appLog.Errorf("Recover from panic: %s", r)
+	//	}
+	//}()
 
 	// By closing the quit channel, we are telling the server to stop accepting new
 	// connection.
@@ -276,7 +299,9 @@ func (s *implementation) Close() error {
 	s.wgConnections.Wait()
 
 	if s.sessionsMgr != nil {
-		s.sessionsMgr.Shutdown() // nolint: errcheck, gas
+		if s.persist != nil {
+			s.sessionsMgr.Shutdown(s.persist.Session()) // nolint: errcheck, gas
+		}
 	}
 
 	if s.topicsMgr != nil {
