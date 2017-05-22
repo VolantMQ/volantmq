@@ -25,7 +25,6 @@ import (
 
 	"github.com/juju/loggo"
 	"github.com/spf13/viper"
-	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/auth"
 	persistType "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/server"
@@ -106,11 +105,11 @@ func main() {
 	var srv server.Type
 
 	srv, err = server.New(server.Config{
-		KeepAlive:      surgemq.DefaultKeepAlive,
-		AckTimeout:     surgemq.DefaultAckTimeout,
+		KeepAlive:      types.DefaultKeepAlive,
+		AckTimeout:     types.DefaultAckTimeout,
 		ConnectTimeout: 5,
-		TimeoutRetries: surgemq.DefaultTimeoutRetries,
-		TopicsProvider: surgemq.DefaultTopicsProvider,
+		TimeoutRetries: types.DefaultTimeoutRetries,
+		TopicsProvider: types.DefaultTopicsProvider,
 		Authenticators: "internal",
 		Anonymous:      true,
 		Persistence: &persistType.BoltDBConfig{

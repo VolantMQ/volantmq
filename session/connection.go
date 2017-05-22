@@ -11,10 +11,10 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/buffer"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/systree"
+	"github.com/troian/surgemq/types"
 )
 
 type onProcess struct {
@@ -330,7 +330,7 @@ func (s *connection) peekMessageSize() (message.Type, int, error) {
 	cnt := 2
 
 	if s.in == nil {
-		err = surgemq.ErrBufferNotReady
+		err = types.ErrBufferNotReady
 		return 0, 0, err
 	}
 
@@ -383,7 +383,7 @@ func (s *connection) peekMessage(mtype message.Type, total int) (message.Provide
 	var msg message.Provider
 
 	if s.in == nil {
-		return nil, 0, surgemq.ErrBufferNotReady
+		return nil, 0, types.ErrBufferNotReady
 	}
 
 	// Peek until we get total bytes
@@ -423,7 +423,7 @@ func (s *connection) readMessage(mType message.Type, total int) (message.Provide
 	var msg message.Provider
 
 	if s.in == nil {
-		err = surgemq.ErrBufferNotReady
+		err = types.ErrBufferNotReady
 		return nil, 0, err
 	}
 
@@ -474,7 +474,7 @@ func (s *connection) writeMessage(msg message.Provider) (int, error) {
 	defer s.wmu.Unlock()
 
 	if s.out == nil {
-		return 0, surgemq.ErrBufferNotReady
+		return 0, types.ErrBufferNotReady
 	}
 
 	var total int

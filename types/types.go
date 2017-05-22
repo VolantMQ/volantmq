@@ -3,6 +3,7 @@ package types
 import (
 	"sync"
 
+	"errors"
 	"github.com/troian/surgemq/message"
 )
 
@@ -10,6 +11,9 @@ import (
 
 // OnPublishFunc on publish
 type OnPublishFunc func(msg *message.PublishMessage) error
+
+// OnCompleteFunc on complete
+type OnCompleteFunc func(msg, ack message.Provider, err error) error
 
 // OnSessionClose session signal on it's close
 //type OnSessionClose func(id uint64)
@@ -32,3 +36,22 @@ type DuplicateConfig struct {
 	// OnAttempt If requested we notify if there is attempt to dup session
 	OnAttempt func(id string, replaced bool)
 }
+
+// Errors
+var (
+	ErrInvalidConnectionType error = errors.New("invalid connection type")
+	//ErrInvalidSubscriber      error = errors.New("service: Invalid subscriber")
+	ErrBufferNotReady error = errors.New("buffer is not ready")
+)
+
+// Default configs
+const (
+	DefaultKeepAlive        = 300 // DefaultKeepAlive default keep
+	DefaultConnectTimeout   = 2   // DefaultConnectTimeout connect timeout
+	DefaultAckTimeout       = 20  // DefaultAckTimeout ack timeout
+	DefaultTimeoutRetries   = 3   // DefaultTimeoutRetries retries
+	MinKeepAlive            = 30
+	DefaultSessionsProvider = "mem"         // DefaultSessionsProvider default session provider
+	DefaultAuthenticator    = "mockSuccess" // DefaultAuthenticator default auth provider
+	DefaultTopicsProvider   = "mem"         // DefaultTopicsProvider default topics provider
+)

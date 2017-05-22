@@ -25,7 +25,6 @@ import (
 	"strconv"
 
 	"github.com/juju/loggo"
-	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/auth"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/persistence"
@@ -33,7 +32,7 @@ import (
 	"github.com/troian/surgemq/session"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics"
-	"github.com/troian/surgemq/types"
+	types "github.com/troian/surgemq/types"
 )
 
 // Config server configuration
@@ -147,19 +146,19 @@ func New(config Config) (Type, error) {
 	s.listeners.list = make(map[int]*Listener)
 
 	if s.config.KeepAlive == 0 {
-		s.config.KeepAlive = surgemq.DefaultAckTimeout
+		s.config.KeepAlive = types.DefaultAckTimeout
 	}
 
 	if s.config.ConnectTimeout == 0 {
-		s.config.ConnectTimeout = surgemq.DefaultConnectTimeout
+		s.config.ConnectTimeout = types.DefaultConnectTimeout
 	}
 
 	if s.config.AckTimeout == 0 {
-		s.config.AckTimeout = surgemq.DefaultAckTimeout
+		s.config.AckTimeout = types.DefaultAckTimeout
 	}
 
 	if s.config.TimeoutRetries == 0 {
-		s.config.TimeoutRetries = surgemq.DefaultTimeoutRetries
+		s.config.TimeoutRetries = types.DefaultTimeoutRetries
 	}
 
 	if s.config.Authenticators == "" {
@@ -358,7 +357,7 @@ func (s *implementation) serve(l *Listener) error {
 // handleConnection is for the broker to handle an incoming connection from a client
 func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) error {
 	if c == nil {
-		return surgemq.ErrInvalidConnectionType
+		return types.ErrInvalidConnectionType
 	}
 
 	var err error
@@ -372,7 +371,7 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 
 	netConn, ok := c.(net.Conn)
 	if !ok {
-		return surgemq.ErrInvalidConnectionType
+		return types.ErrInvalidConnectionType
 	}
 
 	var conn types.Conn

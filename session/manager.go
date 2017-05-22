@@ -22,7 +22,6 @@ import (
 	"net"
 	"sync"
 
-	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/message"
 	persistenceTypes "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/systree"
@@ -451,12 +450,12 @@ func (m *Manager) writeMessage(conn io.Closer, msg message.Provider) error {
 
 func (m *Manager) writeMessageBuffer(c io.Closer, b []byte) error {
 	if c == nil {
-		return surgemq.ErrInvalidConnectionType
+		return types.ErrInvalidConnectionType
 	}
 
 	conn, ok := c.(net.Conn)
 	if !ok {
-		return surgemq.ErrInvalidConnectionType
+		return types.ErrInvalidConnectionType
 	}
 
 	_, err := conn.Write(b)

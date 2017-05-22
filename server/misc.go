@@ -21,8 +21,8 @@ import (
 
 	"errors"
 
-	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/types"
 )
 
 // GetConnectMessage get CONNECT message
@@ -70,12 +70,12 @@ func WriteMessage(conn io.Closer, msg message.Provider) error {
 // GetMessageBuffer from connection
 func GetMessageBuffer(c io.Closer) ([]byte, error) {
 	if c == nil {
-		return nil, surgemq.ErrInvalidConnectionType
+		return nil, types.ErrInvalidConnectionType
 	}
 
 	conn, ok := c.(net.Conn)
 	if !ok {
-		return nil, surgemq.ErrInvalidConnectionType
+		return nil, types.ErrInvalidConnectionType
 	}
 
 	var buf []byte
@@ -129,12 +129,12 @@ func GetMessageBuffer(c io.Closer) ([]byte, error) {
 // WriteMessageBuffer into connection
 func WriteMessageBuffer(c io.Closer, b []byte) error {
 	if c == nil {
-		return surgemq.ErrInvalidConnectionType
+		return types.ErrInvalidConnectionType
 	}
 
 	conn, ok := c.(net.Conn)
 	if !ok {
-		return surgemq.ErrInvalidConnectionType
+		return types.ErrInvalidConnectionType
 	}
 
 	_, err := conn.Write(b)
