@@ -10,3 +10,6 @@ script:
   - go build -race -v -gcflags "-N -l" ./...
   - output=$(goimports -d .) && [[ -z "$output" ]]
   - gometalinter --fast --exclude=corefoundation.go --deadline=360s --enable-gc --sort=path --vendor --cyclo-over=30 --dupl-threshold=100 --disable=gotype ./...
+
+after_success:
+  - bash <(curl -s https://codecov.io/bash)
