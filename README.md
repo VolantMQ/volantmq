@@ -65,6 +65,7 @@ In addition, SurgeMQ has been tested with the following client libraries and it 
 ### License
 
 Copyright (c) 2014 Dataence, LLC. All rights reserved.
+Copyright (c) 2016 Artur Troian. All rights reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
