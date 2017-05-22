@@ -519,7 +519,7 @@ func (msg *ConnectMessage) decodeMessage(src []byte) (int, error) {
 	}
 
 	// If the Client supplies a zero-byte ClientId, the Client MUST also set CleanSession to 1
-	if len(msg.clientID) == 0 && !msg.CleanSession() {
+	if len(msg.clientID) == 0 && msg.CleanSession() {
 		return total, ErrIdentifierRejected
 	}
 

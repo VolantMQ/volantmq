@@ -19,10 +19,9 @@ import (
 
 	"container/list"
 	"errors"
-	//"fmt"
 	"github.com/juju/loggo"
 	"github.com/troian/surgemq/message"
-	"github.com/troian/surgemq/persistence"
+	persistenceTypes "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics"
 	"github.com/troian/surgemq/types"
@@ -30,36 +29,39 @@ import (
 	"sync/atomic"
 )
 
-var (
-// ErrNotInitialized session not initialized
-//ErrNotInitialized = errors.New("session: not initialized yet")
-
-// ErrAlreadyInitialized session already initialized
-//ErrAlreadyInitialized = errors.New("session: already initialized")
-)
+type managerCallbacks struct {
+	onClose      func(id string, s message.TopicsQoS)
+	onDisconnect func(id string, messages *persistenceTypes.SessionMessages, suspend bool)
+	onPublish    func(id string, msg *message.PublishMessage)
+}
 
 // Config is system wide configuration parameters for every session
-type Config struct {
+type config struct {
 	// Topics manager for all the client subscriptions
-	TopicsMgr *topics.Manager
+	topicsMgr *topics.Manager
 
 	// The number of seconds to wait for the CONNACK message before disconnecting.
 	// If not set then default to 2 seconds.
-	ConnectTimeout int
+	connectTimeout int
 
 	// The number of seconds to wait for any ACK messages before failing.
 	// If not set then default to 20 seconds.
-	AckTimeout int
+	ackTimeout int
 
 	// The number of times to retry sending a packet if ACK is not received.
 	// If no set then default to 3 retries.
-	TimeoutRetries int
+	timeoutRetries int
 
-	OnCleanup func(id string)
+	metric struct {
+		packets systree.PacketsMetric
+		session systree.SessionStat
+	}
 
-	PacketsMetric systree.PacketsMetric
+	subscriptions message.TopicsQoS
 
-	RestoredMessages persistence.SessionEntry
+	callbacks managerCallbacks
+
+	id string
 }
 
 type publisher struct {
@@ -77,9 +79,7 @@ type publisher struct {
 
 // Type session
 type Type struct {
-	config Config
-
-	id string
+	config config
 
 	ack struct {
 		pubIn  *ackQueue
@@ -88,9 +88,6 @@ type Type struct {
 
 	// message to publish if connect is closed unexpectedly
 	will *message.PublishMessage
-
-	// topics stores all the topics for this session/client
-	topics message.TopicsQoS
 
 	conn *connection
 
@@ -125,11 +122,9 @@ func init() {
 	appLog.SetLogLevel(loggo.INFO)
 }
 
-func newSession(id string, config Config) (*Type, error) {
+func newSession(config config) (*Type, error) {
 	s := Type{
-		id:     id,
 		config: config,
-		topics: make(message.TopicsQoS, 1),
 		publisher: publisher{
 			messages: list.New(),
 		},
@@ -141,20 +136,35 @@ func newSession(id string, config Config) (*Type, error) {
 	s.ack.pubOut = newAckQueue(s.onAckOut)
 	s.subscriber.Publish = s.onSubscribedPublish
 
-	for _, m := range s.config.RestoredMessages.In.Messages {
-		s.ack.pubIn.put(m)
-	}
-
-	for _, m := range s.config.RestoredMessages.Out.Messages {
-		s.publisher.messages.PushBack(m)
+	// restore subscriptions if any
+	for t, q := range s.config.subscriptions {
+		if _, err := s.config.topicsMgr.Subscribe(t, q, &s.subscriber); err != nil {
+			appLog.Errorf("Couldn't subscribe [%s] to [%s/%d]: %s", s.config.id, t, q, err.Error())
+		}
 	}
 
 	return &s, nil
 }
 
+// restore messages if any
+func (s *Type) restore(messages *persistenceTypes.SessionMessages) {
+	if messages != nil {
+		s.publisher.lock.Lock()
+		for _, m := range messages.Out.Messages {
+			s.publisher.messages.PushBack(m)
+		}
+
+		for _, m := range messages.In.Messages {
+			s.ack.pubIn.put(m)
+		}
+		s.publisher.lock.Unlock()
+		s.publisher.cond.Signal()
+	}
+}
+
 // Start inform session there is a new connection with matching clientID
 // thus provide necessary info to spin
-func (s *Type) Start(msg *message.ConnectMessage, conn io.Closer) (err error) {
+func (s *Type) start(msg *message.ConnectMessage, conn io.Closer) (err error) {
 	defer func() {
 		if err != nil {
 			close(s.publisher.quit)
@@ -183,26 +193,12 @@ func (s *Type) Start(msg *message.ConnectMessage, conn io.Closer) (err error) {
 		s.will.SetRetain(msg.WillRetain())
 	}
 
-	// if we have any topic this is restored session
-	// thus make sure we are subscribed to all of them
-	for t, q := range s.topics {
-		s.config.TopicsMgr.Subscribe(t, q, &s.subscriber) // nolint: errcheck
-	}
-
-	// All of unacknowledged outgoing messages should be send again
-	s.publisher.lock.Lock()
-	for _, m := range s.ack.pubOut.get() {
-		s.publisher.messages.PushBack(m)
-	}
-	s.publisher.lock.Unlock()
-	s.publisher.cond.Signal()
-
 	s.clean = msg.CleanSession()
 	s.publisher.quit = make(chan struct{})
 
 	s.conn, err = newConnection(
 		connConfig{
-			id:        s.id,
+			id:        s.config.id,
 			conn:      conn,
 			keepAlive: int(msg.KeepAlive()),
 			on: onProcess{
@@ -212,7 +208,7 @@ func (s *Type) Start(msg *message.ConnectMessage, conn io.Closer) (err error) {
 				unSubscribe: s.onUnSubscribe,
 				close:       s.onClose,
 			},
-			packetsMetric: s.config.PacketsMetric,
+			packetsMetric: s.config.metric.packets,
 		})
 	if err != nil {
 		return err
@@ -228,8 +224,8 @@ func (s *Type) Start(msg *message.ConnectMessage, conn io.Closer) (err error) {
 	return nil
 }
 
-// Stop session. Function assumed to be invoked once server about to shutdown
-func (s *Type) Stop(p persistence.Session) {
+// stop session. Function assumed to be invoked once server about to shutdown
+func (s *Type) stop() {
 	if !atomic.CompareAndSwapInt64(&s.closed, 0, 1) {
 		s.wgSessionStarted.Wait()
 		return
@@ -242,46 +238,13 @@ func (s *Type) Stop(p persistence.Session) {
 	var err error
 	if s.conn != nil {
 		if err = s.conn.config.conn.Close(); err != nil {
-			appLog.Errorf("Couldn't close connection [%s]: %s", s.id, err.Error())
+			appLog.Errorf("Couldn't close connection [%s]: %s", s.config.id, err.Error())
 		}
 	}
 	s.wgSessionStopped.Wait()
 
-	if entry, err := p.New(s.id); err != nil {
-		appLog.Errorf("Couldn't start session backup: %s", err.Error())
-	} else {
-		s.publisher.lock.Lock()
-		var next *list.Element
-
-		appLog.Debugf("[%s] storing out messages")
-		for elem := s.publisher.messages.Front(); elem != nil; elem = next {
-			next = elem.Next()
-
-			if m, ok := s.publisher.messages.Remove(elem).(message.Provider); ok {
-				if err = entry.Add("out", m); err != nil {
-					appLog.Errorf("Couldn't persist message: %s", err.Error())
-				}
-			}
-		}
-		s.publisher.lock.Unlock()
-
-		appLog.Debugf("[%s] storing not ack out messages")
-		for _, m := range s.ack.pubOut.get() {
-			if err = entry.Add("out", m); err != nil {
-				appLog.Errorf("Couldn't persist message: %s", err.Error())
-			}
-		}
-
-		appLog.Debugf("[%s] storing not ack in messages")
-		for _, m := range s.ack.pubIn.get() {
-			if err = entry.Add("in", m); err != nil {
-				appLog.Errorf("Couldn't persist message: %s", err.Error())
-			}
-		}
-
-		if err = p.Store(entry); err != nil {
-			appLog.Errorf(err.Error())
-		}
+	if !s.clean {
+		s.config.callbacks.onClose(s.config.id, s.config.subscriptions)
 	}
 }
 
@@ -293,16 +256,6 @@ func (s *Type) Stop(p persistence.Session) {
 // should be published to the client on the other end of this connection. So we
 // will call publish() to send the message.
 func (s *Type) onSubscribedPublish(msg *message.PublishMessage) error {
-	// If this is Fire and Forget firstly check is client online
-	if msg.QoS() == message.QosAtMostOnce {
-		// By checking writerStop channel we can effectively detect is client is connected or not
-		select {
-		case <-s.publisher.quit:
-			return nil
-		default:
-		}
-	}
-
 	m := message.NewPublishMessage()
 	m.SetQoS(msg.QoS())     // nolint: errcheck
 	m.SetTopic(msg.Topic()) // nolint: errcheck
@@ -310,7 +263,22 @@ func (s *Type) onSubscribedPublish(msg *message.PublishMessage) error {
 
 	// [MQTT-3.3.1-9]
 	m.SetRetain(false)
-	m.SetDup(msg.Dup())
+
+	// [MQTT-3.3.1-3]
+	m.SetDup(false)
+
+	// If this is Fire and Forget firstly check is client online
+	if msg.QoS() == message.QosAtMostOnce {
+		// By checking s.publisher.quit channel we can effectively detect is client is connected or not
+		select {
+		case <-s.publisher.quit:
+			s.publisher.lock.Lock()
+			s.config.callbacks.onPublish(s.config.id, m)
+			s.publisher.lock.Unlock()
+			return nil
+		default:
+		}
+	}
 
 	s.publisher.lock.Lock()
 	s.publisher.messages.PushBack(m)
@@ -325,7 +293,7 @@ func (s *Type) addTopic(topic string, qos message.QosType) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.topics[topic] = qos
+	s.config.subscriptions[topic] = qos
 
 	return nil
 }
@@ -335,7 +303,7 @@ func (s *Type) removeTopic(topic string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	delete(s.topics, topic)
+	delete(s.config.subscriptions, topic)
 
 	return nil
 }
@@ -344,35 +312,12 @@ func (s *Type) newPacketID() uint16 {
 	return uint16(atomic.AddUint64(&s.packetID, 1) & 0xFFFF)
 }
 
-// Topics list topics
-func (s *Type) Topics() (*message.TopicsQoS, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	topics := s.topics
-
-	return &topics, nil
-}
-
-// ID session id
-func (s *Type) ID() string {
-	return s.id
-}
-
-// IsClean is session clean or not
-func (s *Type) IsClean() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	return s.clean
-}
-
 // forward PUBLISH message to topics manager which takes care about subscribers
 func (s *Type) publishToTopic(msg *message.PublishMessage) error {
 	// [MQTT-3.3.1.3]
 	if msg.Retain() {
-		if err := s.config.TopicsMgr.Retain(msg); err != nil {
-			appLog.Errorf("Error retaining message [%s]: %v", s.id, err)
+		if err := s.config.topicsMgr.Retain(msg); err != nil {
+			appLog.Errorf("Error retaining message [%s]: %v", s.config.id, err)
 		}
 
 		// [MQTT-3.3.1-7]
@@ -389,8 +334,8 @@ func (s *Type) publishToTopic(msg *message.PublishMessage) error {
 
 	msg.SetRetain(false)
 
-	if err := s.config.TopicsMgr.Publish(msg); err != nil {
-		appLog.Errorf(" Error retrieving subscribers list [%s]: %v", s.id, err)
+	if err := s.config.topicsMgr.Publish(msg); err != nil {
+		appLog.Errorf(" Error retrieving subscribers list [%s]: %v", s.config.id, err)
 	}
 
 	return nil
@@ -496,6 +441,7 @@ func (s *Type) publishWorker() {
 					case message.QosAtLeastOnce:
 						fallthrough
 					case message.QosExactlyOnce:
+						m.SetDup(true)
 						s.ack.pubOut.ack(msg) // nolint: errcheck
 					}
 				}

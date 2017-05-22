@@ -18,97 +18,244 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
-	"github.com/troian/surgemq/persistence"
+	"github.com/troian/surgemq"
+	"github.com/troian/surgemq/message"
+	persistenceTypes "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/systree"
+	"github.com/troian/surgemq/topics"
+	"github.com/troian/surgemq/types"
 	"io"
+	"net"
 	"sync"
 )
 
-// Manager interface
-type Manager struct {
-	sessions map[string]*Type
-	mu       sync.RWMutex
-
-	stat systree.SessionsStat
-}
-
 var (
-	// ErrNoSuchSession given session does not exist
-	ErrNoSuchSession = errors.New("given session does not exist")
+	// ErrNotAccepted new connection does not meet requirements
+	ErrNotAccepted = errors.New("Connection not accepted")
+
+	// ErrDupNotAllowed case when new client with existing ID connected
+	ErrDupNotAllowed = errors.New("duplicate not allowed")
 )
 
+// Config manager configuration
+type Config struct {
+	// Topics manager for all the client subscriptions
+	TopicsMgr *topics.Manager
+
+	// The number of seconds to wait for the CONNACK message before disconnecting.
+	// If not set then default to 2 seconds.
+	ConnectTimeout int
+
+	// The number of seconds to wait for any ACK messages before failing.
+	// If not set then default to 20 seconds.
+	AckTimeout int
+
+	// The number of times to retry sending a packet if ACK is not received.
+	// If no set then default to 3 retries.
+	TimeoutRetries int
+
+	Metric struct {
+		Packets  systree.PacketsMetric
+		Sessions systree.SessionsStat
+		Session  systree.SessionStat
+	}
+
+	OnDup types.DuplicateConfig
+
+	Persist persistenceTypes.Sessions
+}
+
+type sessionsList struct {
+	list  map[string]*Type
+	lock  sync.RWMutex
+	count sync.WaitGroup
+}
+
+// Manager interface
+type Manager struct {
+	config   Config
+	sessions struct {
+		active    sessionsList
+		suspended sessionsList
+	}
+	lock sync.Mutex
+	quit chan struct{}
+}
+
 // NewManager alloc new
-func NewManager(stat systree.SessionsStat) (*Manager, error) {
+func NewManager(cfg Config) (*Manager, error) {
+	//if config.Stat == nil {
+	//	return nil, errors.New("No stat provider")
+	//}
+
+	if cfg.Persist == nil {
+		return nil, errors.New("No persist provider")
+	}
+
 	m := &Manager{
-		sessions: make(map[string]*Type),
-		stat:     stat,
+		config: cfg,
+		quit:   make(chan struct{}),
+	}
+
+	m.sessions.active.list = make(map[string]*Type)
+	m.sessions.suspended.list = make(map[string]*Type)
+
+	// 1. load persisted sessions
+	persistedSessions, err := m.config.Persist.GetAll()
+	if err == nil {
+		for _, s := range persistedSessions {
+			// 2. restore only those having persisted subscriptions
+			if subscriptions, err := s.Subscriptions().Get(); err == nil && len(subscriptions) > 0 {
+				sCfg := config{
+					topicsMgr:      m.config.TopicsMgr,
+					connectTimeout: m.config.ConnectTimeout,
+					ackTimeout:     m.config.AckTimeout,
+					timeoutRetries: m.config.TimeoutRetries,
+					subscriptions:  subscriptions,
+					id:             s.ID(),
+					callbacks: managerCallbacks{
+						onDisconnect: m.onDisconnect,
+						onClose:      m.onClose,
+						onPublish:    m.onPublish,
+					},
+				}
+
+				sCfg.metric.session = m.config.Metric.Session
+				sCfg.metric.packets = m.config.Metric.Packets
+
+				if ses, err := newSession(sCfg); err != nil {
+					appLog.Errorf("Couldn't start persisted session [%s]: %s", s.ID(), err.Error())
+				} else {
+					m.sessions.suspended.list[s.ID()] = ses
+					m.sessions.suspended.count.Add(1)
+					if err = s.Subscriptions().Delete(); err != nil {
+						appLog.Errorf("Couldn't wipe subscriptions after restore [%s]: %s", s.ID(), err.Error())
+					}
+				}
+			}
+		}
 	}
 
 	return m, nil
 }
 
-// New session
-func (m *Manager) New(id string, config Config) (*Type, error) {
-	if id == "" {
+// Start try start new session
+func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessage, conn io.Closer) error {
+	var err error
+	var ses *Type
+	present := false
+
+	defer func() {
+		resp.SetSessionPresent(present)
+
+		if err = m.writeMessage(conn, resp); err != nil {
+			appLog.Errorf("Couldn't write CONNACK: %s", err.Error())
+		}
+		if err == nil {
+			if ses != nil {
+				// try start session
+				if err = ses.start(msg, conn); err != nil {
+					// should never get into this section.
+					// if so this code does not work as expected :)
+					appLog.Errorf("Something really bad happened: %s", err.Error())
+				}
+			}
+		}
+	}()
+
+	select {
+	case <-m.quit:
+		resp.SetReturnCode(message.ErrServerUnavailable)
+		return errors.New("Not running")
+	default:
+	}
+
+	if resp.ReturnCode() != message.ConnectionAccepted {
+		return ErrNotAccepted
+	}
+
+	// serialize access to multiple starts
+	defer m.lock.Unlock()
+	m.lock.Lock()
+
+	id := string(msg.ClientID())
+	if len(id) == 0 {
 		id = m.genSessionID()
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.sessions.active.lock.Lock()
+	ses = m.sessions.active.list[id]
 
-	s, err := newSession(id, config)
-	if err != nil {
-		return nil, err
+	// there is no such active session
+	// proceed to either persisted or new one
+	if ses == nil {
+		ses, present, err = m.allocSession(id, msg, resp)
+	} else {
+		replaced := true
+		// session already exists thus duplicate case happened
+		if !m.config.OnDup.Replace {
+			// duplicate prohibited. send identifier rejected
+			resp.SetReturnCode(message.ErrIdentifierRejected)
+			err = ErrDupNotAllowed
+			replaced = false
+		} else {
+			// duplicate allowed stop current session
+			m.sessions.active.lock.Unlock()
+			ses.stop()
+			m.sessions.active.lock.Lock()
+
+			// previous session stopped
+			// lets create new one
+			ses, present, err = m.allocSession(id, msg, resp)
+		}
+
+		// notify subscriber about dup attempt
+		if m.config.OnDup.OnAttempt != nil {
+			m.config.OnDup.OnAttempt(id, replaced)
+		}
 	}
 
-	m.sessions[id] = s
+	m.sessions.active.lock.Unlock()
 
-	m.stat.Created()
-
-	return s, nil
-}
-
-// Get session
-func (m *Manager) Get(id string) (*Type, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	if s, ok := m.sessions[id]; ok {
-		return s, nil
-	}
-
-	return nil, ErrNoSuchSession
-}
-
-// Del session
-func (m *Manager) Del(id string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.sessions, id)
-	m.stat.Removed()
-}
-
-// Save session
-func (m *Manager) Save(id string) error {
 	return nil
 }
 
-// Count sessions
-func (m *Manager) Count() int {
-	return len(m.sessions)
-}
-
 // Shutdown manager
-func (m *Manager) Shutdown(p persistence.Session) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (m *Manager) Shutdown() error {
+	defer m.lock.Unlock()
+	m.lock.Lock()
 
-	for id, s := range m.sessions {
-		s.Stop(p)
-		delete(m.sessions, id)
+	select {
+	case <-m.quit:
+		return errors.New("already stopped")
+	default:
 	}
 
-	m.sessions = make(map[string]*Type)
+	close(m.quit)
+
+	// 1. Now signal all active sessions to finish
+	m.sessions.active.lock.Lock()
+	for _, s := range m.sessions.active.list {
+		s.stop()
+	}
+	m.sessions.active.lock.Unlock()
+
+	// 2. Wait until all active sessions stopped
+	m.sessions.active.count.Wait()
+
+	// 3. wipe list
+	m.sessions.active.list = make(map[string]*Type)
+
+	// 4. Signal suspended sessions to exit
+	for _, s := range m.sessions.suspended.list {
+		s.stop()
+	}
+
+	// 2. Wait until suspended sessions stopped
+	m.sessions.suspended.count.Wait()
+
+	// 4. wipe list
+	m.sessions.suspended.list = make(map[string]*Type)
 
 	return nil
 }
@@ -120,4 +267,194 @@ func (m *Manager) genSessionID() string {
 	}
 
 	return base64.URLEncoding.EncodeToString(b)
+}
+
+func (m *Manager) allocSession(id string, msg *message.ConnectMessage, resp *message.ConnAckMessage) (*Type, bool, error) {
+	var ses *Type
+	present := false
+	var err error
+
+	sConfig := config{
+		topicsMgr:      m.config.TopicsMgr,
+		connectTimeout: m.config.ConnectTimeout,
+		ackTimeout:     m.config.AckTimeout,
+		timeoutRetries: m.config.TimeoutRetries,
+		subscriptions:  make(message.TopicsQoS),
+		id:             id,
+		callbacks: managerCallbacks{
+			onDisconnect: m.onDisconnect,
+			onClose:      m.onClose,
+			onPublish:    m.onPublish,
+		},
+	}
+
+	sConfig.metric.session = m.config.Metric.Session
+	sConfig.metric.packets = m.config.Metric.Packets
+
+	var pSes persistenceTypes.Session
+
+	// if session is non-clean look for persistence
+	if !msg.CleanSession() {
+		// 1. search over suspended sessions with active subscriptions
+		m.sessions.suspended.lock.Lock()
+		if s, ok := m.sessions.suspended.list[id]; ok {
+			// session exists. acquire it
+			delete(m.sessions.suspended.list, id)
+			m.sessions.suspended.count.Done()
+
+			ses = s
+			present = true
+
+			// do not check error here.
+			// if session has not been found there is no any persisted messages for it
+			pSes, _ = m.config.Persist.Get(id)
+		} else {
+			// no such session in persisted list. It might be shutdown
+			if pSes, err = m.config.Persist.Get(id); err != nil {
+				// No such session exists at all. Just create new
+				appLog.Debugf("Create new persist entry for [%s]", id)
+				if _, err = m.config.Persist.New(id); err != nil {
+					appLog.Errorf("Couldn't create persis object for session [%s]: %s", id, err.Error())
+				}
+			} else {
+				// Session exists and is in shutdown state
+				appLog.Debugf("Restore session [%s] from shutdown", id)
+				present = true
+			}
+		}
+
+		m.sessions.suspended.lock.Unlock()
+	} else {
+		// Session might change from non-clean to clean state
+		// if so make sure it does not exists in persistence db
+		// check if it was suspended
+		m.sessions.suspended.lock.Lock()
+		if suspended, ok := m.sessions.suspended.list[id]; ok {
+			suspended.stop()
+			delete(m.sessions.suspended.list, id)
+		}
+		m.sessions.suspended.lock.Unlock()
+		if err = m.config.Persist.Delete(id); err != nil {
+			appLog.Tracef("Couldn't wipe session after restore [%s]: %s", id, err.Error())
+		}
+	}
+
+	if ses == nil {
+		if ses, err = newSession(sConfig); err != nil {
+			ses = nil
+			resp.SetReturnCode(message.ErrServerUnavailable)
+			if !msg.CleanSession() {
+				if err = m.config.Persist.Delete(id); err != nil {
+					appLog.Errorf("Couldn't wipe session after restore [%s]: %s", id, err.Error())
+				}
+			}
+		}
+	}
+
+	if ses != nil {
+		// restore messages if it was shutdown non-clean session
+		if pSes != nil {
+			if msg, err := pSes.Messages().Load(); err == nil {
+				ses.restore(&msg)
+				if err = pSes.Messages().Delete(); err != nil {
+					appLog.Errorf("Couldn't wipe messages after restore [%s]: %s", id, err.Error())
+				}
+			}
+		}
+
+		m.sessions.active.list[id] = ses
+		m.sessions.active.count.Add(1)
+	}
+
+	return ses, present, err
+}
+
+// close is only invoked for non-clean session
+func (m *Manager) onClose(id string, s message.TopicsQoS) {
+	defer m.sessions.suspended.count.Done()
+
+	ses, err := m.config.Persist.Get(id)
+	if err != nil {
+		appLog.Errorf("Trying to persist session that has not been initiated for persistence [%s]: %s", id, err.Error())
+	} else {
+		if err = ses.Subscriptions().Add(s); err != nil {
+			appLog.Errorf("Couldn't persist subscriptions [%s]: %s", id, err.Error())
+		}
+	}
+}
+
+func (m *Manager) onPublish(id string, msg *message.PublishMessage) {
+	if ses, err := m.config.Persist.Get(id); err == nil {
+		if err = ses.Messages().Store("out", []message.Provider{msg}); err != nil {
+			appLog.Errorf("Couldn't store messages [%s]: %s", id, err.Error())
+		}
+	} else {
+		appLog.Errorf("Couldn't persist message for shutdown session [%s]: %s", id, err.Error())
+	}
+}
+
+func (m *Manager) onDisconnect(id string, messages *persistenceTypes.SessionMessages, shutdown bool) {
+	defer m.sessions.active.count.Done()
+
+	if messages != nil {
+		if ses, err := m.config.Persist.Get(id); err != nil {
+			appLog.Errorf("Trying to persist session that has not been initiated for persistence [%s]: %s", id, err.Error())
+		} else {
+			if len(messages.Out.Messages) > 0 {
+				if err = ses.Messages().Store("out", messages.Out.Messages); err != nil {
+					appLog.Errorf("Couldn't persist messages [%s]: %s", id, err.Error())
+				}
+			}
+
+			if len(messages.In.Messages) > 0 {
+				if err = ses.Messages().Store("in", messages.In.Messages); err != nil {
+					appLog.Errorf("Couldn't persist messages [%s]: %s", id, err.Error())
+				}
+			}
+		}
+
+		if !shutdown {
+			// copy session to persisted list
+			m.sessions.suspended.lock.Lock()
+			m.sessions.suspended.list[id] = m.sessions.active.list[id]
+			m.sessions.suspended.lock.Unlock()
+			m.sessions.suspended.count.Add(1)
+		}
+	}
+
+	select {
+	case <-m.quit:
+		// if manager is about to shutdown do nothing
+	default:
+		m.sessions.active.lock.Lock()
+		delete(m.sessions.active.list, id)
+		m.sessions.active.lock.Unlock()
+	}
+}
+
+// WriteMessage into connection
+func (m *Manager) writeMessage(conn io.Closer, msg message.Provider) error {
+	buf := make([]byte, msg.Len())
+	_, err := msg.Encode(buf)
+	if err != nil {
+		appLog.Debugf("Write error: %v", err)
+		return err
+	}
+	appLog.Debugf("Writing: %s", msg)
+
+	return m.writeMessageBuffer(conn, buf)
+}
+
+func (m *Manager) writeMessageBuffer(c io.Closer, b []byte) error {
+	if c == nil {
+		return surgemq.ErrInvalidConnectionType
+	}
+
+	conn, ok := c.(net.Conn)
+	if !ok {
+		return surgemq.ErrInvalidConnectionType
+	}
+
+	_, err := conn.Write(b)
+	return err
 }

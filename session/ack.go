@@ -58,3 +58,10 @@ func (a *ackQueue) ack(msg message.Provider) error {
 func (a *ackQueue) get() map[uint16]message.Provider {
 	return a.messages
 }
+
+func (a *ackQueue) wipe() {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	a.messages = make(map[uint16]message.Provider)
+}
