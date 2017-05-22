@@ -15,6 +15,14 @@
 package main
 
 import (
+	"net/http"
+	_ "net/http/pprof"
+	"os"
+	"os/signal"
+	"runtime/debug"
+	"sync"
+	"syscall"
+
 	"github.com/juju/loggo"
 	"github.com/spf13/viper"
 	"github.com/troian/surgemq"
@@ -23,13 +31,6 @@ import (
 	"github.com/troian/surgemq/server"
 	_ "github.com/troian/surgemq/topics/mem"
 	"github.com/troian/surgemq/types"
-	"net/http"
-	_ "net/http/pprof"
-	"os"
-	"os/signal"
-	"runtime/debug"
-	"sync"
-	"syscall"
 )
 
 var appLog loggo.Logger

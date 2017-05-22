@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"strconv"
+
 	"github.com/juju/loggo"
 	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/auth"
@@ -32,7 +34,6 @@ import (
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics"
 	"github.com/troian/surgemq/types"
-	"strconv"
 )
 
 // Config server configuration

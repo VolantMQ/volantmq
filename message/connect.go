@@ -18,8 +18,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/troian/surgemq/buffer"
 	"regexp"
+
+	"github.com/troian/surgemq/buffer"
 )
 
 var clientIDRegexp *regexp.Regexp

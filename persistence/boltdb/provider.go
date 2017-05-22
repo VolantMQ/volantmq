@@ -2,10 +2,11 @@ package boltdb
 
 import (
 	"encoding/binary"
+	"sync"
+
 	"github.com/boltdb/bolt"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/persistence/types"
-	"sync"
 )
 
 const (

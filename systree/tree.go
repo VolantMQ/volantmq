@@ -1,9 +1,10 @@
 package systree
 
 import (
-	"github.com/troian/surgemq/message"
 	"math"
 	"sync/atomic"
+
+	"github.com/troian/surgemq/message"
 )
 
 // Provider systree provider

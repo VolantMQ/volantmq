@@ -7,13 +7,14 @@ import (
 	"time"
 
 	"errors"
+	"runtime/debug"
+	"sync"
+	"sync/atomic"
+
 	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/buffer"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/systree"
-	"runtime/debug"
-	"sync"
-	"sync/atomic"
 )
 
 type onProcess struct {

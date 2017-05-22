@@ -20,6 +20,7 @@ import (
 	"net"
 
 	"errors"
+
 	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/message"
 )

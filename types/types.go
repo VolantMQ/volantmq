@@ -1,8 +1,9 @@
 package types
 
 import (
-	"github.com/troian/surgemq/message"
 	"sync"
+
+	"github.com/troian/surgemq/message"
 )
 
 //type OnCompleteFunc func(msg, ack message.Provider, err error) error

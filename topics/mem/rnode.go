@@ -2,6 +2,7 @@ package mem
 
 import (
 	"errors"
+
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/topics"
 )

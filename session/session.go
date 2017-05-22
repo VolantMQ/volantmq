@@ -19,14 +19,15 @@ import (
 
 	"container/list"
 	"errors"
+	"io"
+	"sync/atomic"
+
 	"github.com/juju/loggo"
 	"github.com/troian/surgemq/message"
 	persistenceTypes "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics"
 	"github.com/troian/surgemq/types"
-	"io"
-	"sync/atomic"
 )
 
 type managerCallbacks struct {

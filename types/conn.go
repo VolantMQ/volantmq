@@ -1,9 +1,10 @@
 package types
 
 import (
-	"github.com/troian/surgemq/systree"
 	"net"
 	"time"
+
+	"github.com/troian/surgemq/systree"
 )
 
 // Conn is wrapper to net.Conn

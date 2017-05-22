@@ -2,9 +2,10 @@ package session
 
 import (
 	"container/list"
+	"sync/atomic"
+
 	"github.com/troian/surgemq/message"
 	persistTypes "github.com/troian/surgemq/persistence/types"
-	"sync/atomic"
 )
 
 func (s *Type) onClose(will bool) {

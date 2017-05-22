@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	"errors"
+
 	"github.com/juju/loggo"
 	"github.com/troian/surgemq/message"
 	persistenceTypes "github.com/troian/surgemq/persistence/types"

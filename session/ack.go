@@ -2,8 +2,9 @@ package session
 
 import (
 	"errors"
-	"github.com/troian/surgemq/message"
 	"sync"
+
+	"github.com/troian/surgemq/message"
 )
 
 var (

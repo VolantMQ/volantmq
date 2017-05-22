@@ -18,6 +18,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+
 	"github.com/troian/surgemq/buffer"
 )
 

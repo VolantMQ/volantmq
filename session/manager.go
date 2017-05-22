@@ -18,15 +18,16 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"io"
+	"net"
+	"sync"
+
 	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/message"
 	persistenceTypes "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics"
 	"github.com/troian/surgemq/types"
-	"io"
-	"net"
-	"sync"
 )
 
 var (

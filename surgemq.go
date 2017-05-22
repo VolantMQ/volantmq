@@ -2,6 +2,7 @@ package surgemq
 
 import (
 	"errors"
+
 	"github.com/troian/surgemq/message"
 )
 

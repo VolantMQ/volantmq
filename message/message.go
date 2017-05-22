@@ -17,8 +17,9 @@ package message
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/troian/surgemq/buffer"
 	"strings"
+
+	"github.com/troian/surgemq/buffer"
 )
 
 const (

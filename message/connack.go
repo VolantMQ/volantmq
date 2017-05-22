@@ -17,6 +17,7 @@ package message
 import (
 	"errors"
 	"fmt"
+
 	"github.com/troian/surgemq/buffer"
 )
 
