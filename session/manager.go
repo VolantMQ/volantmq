@@ -416,7 +416,9 @@ func (m *Manager) onDisconnect(id string, messages *persistenceTypes.SessionMess
 		if !shutdown {
 			// copy session to persisted list
 			m.sessions.suspended.lock.Lock()
+			m.sessions.active.lock.Lock()
 			m.sessions.suspended.list[id] = m.sessions.active.list[id]
+			m.sessions.active.lock.Unlock()
 			m.sessions.suspended.lock.Unlock()
 			m.sessions.suspended.count.Add(1)
 		}
