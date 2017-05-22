@@ -11,6 +11,7 @@ import (
 	"github.com/troian/surgemq/buffer"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/systree"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 )
@@ -137,6 +138,7 @@ func (s *connection) stop() (ret bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			appLog.Errorf("Recover from panic: %s", r)
+			debug.PrintStack()
 		}
 	}()
 
@@ -325,6 +327,7 @@ func (s *connection) onRoutineReturn() {
 
 	if r := recover(); r != nil {
 		appLog.Errorf("Recover from panic: %s", r)
+		debug.PrintStack()
 	}
 }
 

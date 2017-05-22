@@ -19,8 +19,10 @@ import (
 	"github.com/spf13/viper"
 	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/auth"
+	persistType "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/server"
 	_ "github.com/troian/surgemq/topics/mem"
+	"github.com/troian/surgemq/types"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -110,7 +112,13 @@ func main() {
 		TopicsProvider: surgemq.DefaultTopicsProvider,
 		Authenticators: "internal",
 		Anonymous:      true,
-		PersistentFile: "./perist.db",
+		Persistence: &persistType.BoltDBConfig{
+			File: "./persist.db",
+		},
+		DupConfig: types.DuplicateConfig{
+			Replace:   true,
+			OnAttempt: nil,
+		},
 	})
 	if err != nil {
 		appLog.Errorf(err.Error())

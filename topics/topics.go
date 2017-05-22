@@ -26,7 +26,7 @@ import (
 	"fmt"
 
 	"github.com/troian/surgemq/message"
-	"github.com/troian/surgemq/persistence"
+	persistenceTypes "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/types"
 )
@@ -61,14 +61,13 @@ var (
 
 // Provider interface
 type Provider interface {
-	SetStat(stat systree.TopicsStat)
-	Load(p persistence.Retained) error
+	Configure(stat systree.TopicsStat, persist persistenceTypes.Retained) error
 	Subscribe(topic string, qos message.QosType, subscriber *types.Subscriber) (message.QosType, error)
 	UnSubscribe(topic string, subscriber *types.Subscriber) error
 	Publish(msg *message.PublishMessage) error
 	Retain(msg *message.PublishMessage) error
 	Retained(topic string, msgs *[]*message.PublishMessage) error
-	Close(p persistence.Retained) error
+	Close() error
 }
 
 // Register topic provider
@@ -89,19 +88,29 @@ func UnRegister(name string) {
 	delete(providers, name)
 }
 
+// Config of topics manager
+type Config struct {
+	Name    string
+	Stat    systree.TopicsStat
+	Persist persistenceTypes.Retained
+}
+
 // Manager of topics
 type Manager struct {
+	//config *Config
 	p Provider
 }
 
 // NewManager add new manager
-func NewManager(providerName string, stat systree.TopicsStat) (*Manager, error) {
-	p, ok := providers[providerName]
+func NewManager(config Config) (*Manager, error) {
+	p, ok := providers[config.Name]
 	if !ok {
-		return nil, fmt.Errorf("session: unknown provider %q", providerName)
+		return nil, fmt.Errorf("session: unknown provider %q", config.Name)
 	}
 
-	p.SetStat(stat)
+	if err := p.Configure(config.Stat, config.Persist); err != nil {
+		return nil, err
+	}
 
 	return &Manager{p: p}, nil
 }
@@ -131,12 +140,7 @@ func (m *Manager) Retained(topic string, msgs *[]*message.PublishMessage) error 
 	return m.p.Retained(topic, msgs)
 }
 
-// Load retained message from persistent storage
-func (m *Manager) Load(p persistence.Retained) error {
-	return m.p.Load(p)
-}
-
 // Close manager
-func (m *Manager) Close(p persistence.Retained) error {
-	return m.p.Close(p)
+func (m *Manager) Close() error {
+	return m.p.Close()
 }

@@ -23,12 +23,11 @@ import (
 	"time"
 
 	"github.com/juju/loggo"
-	"github.com/pborman/uuid"
 	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/auth"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/persistence"
-	"github.com/troian/surgemq/persistence/bolt"
+	persistTypes "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/session"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics"
@@ -68,7 +67,11 @@ type Config struct {
 	// ClientIDFromUser
 	ClientIDFromUser bool
 
-	PersistentFile string
+	// Persistence config of persistence provider
+	Persistence persistTypes.ProviderConfig
+
+	// DupConfig behaviour of server when client with existing ID tries connect
+	DupConfig types.DuplicateConfig
 }
 
 // Listener listener
@@ -81,6 +84,7 @@ type Listener struct {
 	AuthManager *auth.Manager
 	listener    net.Listener
 	tlsConfig   *tls.Config
+
 	// The quit channel for the server. If the server detects that this channel
 	// is closed, then it's a signal for it to shutdown as well.
 	quit chan struct{}
@@ -108,15 +112,17 @@ type implementation struct {
 	// topicsMgr is the topics manager for keeping track of subscriptions
 	topicsMgr *topics.Manager
 
-	persist persistence.Provider
+	persist persistTypes.Provider
 
 	// The quit channel for the server. If the server detects that this channel
 	// is closed, then it's a signal for it to shutdown as well.
 	quit chan struct{}
 
-	listeners   map[int]*Listener
-	wgListeners sync.WaitGroup
-	lLock       sync.Mutex
+	listeners struct {
+		list map[int]*Listener
+		wg   sync.WaitGroup
+		lock sync.Mutex
+	}
 
 	wgConnections sync.WaitGroup
 
@@ -133,10 +139,11 @@ func init() {
 // New new server
 func New(config Config) (Type, error) {
 	s := &implementation{
-		config:    config,
-		quit:      make(chan struct{}),
-		listeners: make(map[int]*Listener),
+		config: config,
+		quit:   make(chan struct{}),
 	}
+
+	s.listeners.list = make(map[int]*Listener)
 
 	if s.config.KeepAlive == 0 {
 		s.config.KeepAlive = surgemq.DefaultAckTimeout
@@ -167,51 +174,41 @@ func New(config Config) (Type, error) {
 		return nil, err
 	}
 
-	if s.config.PersistentFile != "" {
-		if s.persist, err = bolt.NewBolt(s.config.PersistentFile); err != nil {
-			return nil, err
-		}
+	if s.config.Persistence == nil {
+		return nil, errors.New("Persistence provider cannot be nil")
 	}
 
-	if s.sessionsMgr, err = session.NewManager(s.sysTree.Sessions()); err != nil {
+	if s.persist, err = persistence.New(s.config.Persistence); err != nil {
+		return nil, err
+	}
+
+	tConfig := topics.Config{
+		Name:    s.config.TopicsProvider,
+		Stat:    s.sysTree.Topics(),
+		Persist: s.persist.Retained(),
+	}
+	if s.topicsMgr, err = topics.NewManager(tConfig); err != nil {
+		return nil, err
+	}
+
+	mConfig := session.Config{
+		TopicsMgr:      s.topicsMgr,
+		ConnectTimeout: s.config.ConnectTimeout,
+		AckTimeout:     s.config.AckTimeout,
+		TimeoutRetries: s.config.TimeoutRetries,
+		Persist:        s.persist.Sessions(),
+		OnDup:          s.config.DupConfig,
+	}
+	mConfig.Metric.Packets = s.sysTree.Metric().Packets()
+	mConfig.Metric.Session = s.sysTree.Session()
+	mConfig.Metric.Sessions = s.sysTree.Sessions()
+
+	if s.sessionsMgr, err = session.NewManager(mConfig); err != nil {
 		return nil, err
 	}
 
 	if s.config.TopicsProvider == "" {
 		s.config.TopicsProvider = "mem"
-	}
-
-	if s.topicsMgr, err = topics.NewManager(s.config.TopicsProvider, s.sysTree.Topics()); err != nil {
-		return nil, err
-	}
-
-	if s.persist != nil {
-		appLog.Infof("Loading sessions")
-
-		if entries, err := s.persist.Session().Load(); err == nil {
-			for _, ses := range entries {
-				config := session.Config{
-					ConnectTimeout:   s.config.ConnectTimeout,
-					AckTimeout:       s.config.AckTimeout,
-					TimeoutRetries:   s.config.TimeoutRetries,
-					TopicsMgr:        s.topicsMgr,
-					OnCleanup:        s.onSessionCleanup,
-					PacketsMetric:    s.sysTree.Metric().Packets(),
-					RestoredMessages: ses,
-				}
-
-				if _, err = s.sessionsMgr.New(ses.ID, config); err != nil {
-					appLog.Errorf("Couldn't restore session [%s]: %s", ses.ID, err.Error())
-				}
-			}
-		}
-
-		appLog.Infof("Loading retained messages")
-		s.topicsMgr.Load(s.persist.Retained()) // nolint: errcheck
-
-		if err = s.persist.Wipe(); err != nil {
-			appLog.Errorf("Couldn't wipe persis storage: %s", err.Error())
-		}
 	}
 
 	return s, nil
@@ -249,14 +246,14 @@ func (s *implementation) ListenAndServe(listener *Listener) error {
 		listener.listener = ln
 	}
 
-	s.lLock.Lock()
-	if _, ok := s.listeners[listener.Port]; !ok {
+	s.listeners.lock.Lock()
+	if _, ok := s.listeners.list[listener.Port]; !ok {
 		listener.quit = s.quit
-		s.listeners[listener.Port] = listener
-		s.lLock.Unlock()
+		s.listeners.list[listener.Port] = listener
+		s.listeners.lock.Unlock()
 
-		s.wgListeners.Add(1)
-		defer s.wgListeners.Done()
+		s.listeners.wg.Add(1)
+		defer s.listeners.wg.Done()
 
 		appLog.Infof("mqtt server on [%s://%s:%d] is ready...", listener.Scheme, listener.Host, listener.Port)
 
@@ -264,7 +261,7 @@ func (s *implementation) ListenAndServe(listener *Listener) error {
 
 		appLog.Infof("mqtt server on [%s://%s:%d] stopped", listener.Scheme, listener.Host, listener.Port)
 	} else {
-		s.lLock.Unlock()
+		s.listeners.lock.Unlock()
 		err = errors.New("Listener already exists")
 	}
 
@@ -286,32 +283,28 @@ func (s *implementation) Close() error {
 
 	// We then close all net.Listener, which will force Accept() to return if it's
 	// blocked waiting for new connections.
-	s.lLock.Lock()
-	for port, l := range s.listeners {
+	s.listeners.lock.Lock()
+	for port, l := range s.listeners.list {
 		if err := l.listener.Close(); err != nil {
 			appLog.Errorf(err.Error())
 		}
-		delete(s.listeners, port)
+		delete(s.listeners.list, port)
 	}
-	s.lLock.Unlock()
+	s.listeners.lock.Unlock()
 	// Wait all of listeners has finished
-	s.wgListeners.Wait()
+	s.listeners.wg.Wait()
 
 	// if there are any new connection in progress lets wait until they are finished
 	s.wgConnections.Wait()
 
 	if s.sessionsMgr != nil {
 		if s.persist != nil {
-			s.sessionsMgr.Shutdown(s.persist.Session()) // nolint: errcheck, gas
+			s.sessionsMgr.Shutdown() // nolint: errcheck, gas
 		}
 	}
 
 	if s.topicsMgr != nil {
-		var p persistence.Retained
-		if s.persist != nil {
-			p = s.persist.Retained()
-		}
-		s.topicsMgr.Close(p) // nolint: errcheck, gas
+		s.topicsMgr.Close() // nolint: errcheck, gas
 	}
 
 	return nil
@@ -372,6 +365,7 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 	defer func() {
 		if err != nil {
 			c.Close() // nolint: errcheck, gas
+			c = nil
 		}
 	}()
 
@@ -404,12 +398,19 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 
 	resp := message.NewConnAckMessage()
 
-	var ses *session.Type
 	var req *message.ConnectMessage
 
+	// This part is ugly
+	// Take some time to analyse and improve
 	if req, err = GetConnectMessage(conn); err != nil {
 		if code, ok := message.ValidConnAckError(err); ok {
+			s.sysTree.Metric().Packets().Received(resp.Type())
 			resp.SetReturnCode(code)
+
+			if err = WriteMessage(c, resp); err != nil {
+				return err
+			}
+			s.sysTree.Metric().Packets().Sent(resp.Type())
 		} else {
 			appLog.Warningf("Couldn't read connect message: %s", err.Error())
 			return err
@@ -429,106 +430,12 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 			}
 		}
 
-		if resp.ReturnCode() == message.ConnectionAccepted {
-			if req.KeepAlive() == 0 {
-				req.SetKeepAlive(surgemq.MinKeepAlive)
-			}
-
-			if ses, err = s.getSession(req, resp); err != nil {
-				resp.SetReturnCode(message.ErrServerUnavailable)
-				appLog.Errorf("server/handleConnection: session error: %s", err.Error())
+		if err = s.sessionsMgr.Start(req, resp, conn); err != nil {
+			if err != session.ErrNotAccepted {
+				appLog.Errorf("Couldn't start session: %s", err.Error())
 			}
 		}
-
-		if resp.ReturnCode() != message.ConnectionAccepted {
-			resp.SetSessionPresent(false)
-		}
-	}
-
-	tmpErr := err
-
-	s.sysTree.Metric().Packets().Received(resp.Type())
-
-	if err = WriteMessage(c, resp); err != nil {
-		return err
-	}
-
-	s.sysTree.Metric().Packets().Sent(resp.Type())
-
-	err = tmpErr
-
-	if resp.ReturnCode() == message.ConnectionAccepted {
-		if err = ses.Start(req, conn); err != nil {
-			appLog.Errorf("Couldn't start session: %s", err.Error())
-		}
-
-		return nil
 	}
 
 	return err
-}
-
-func (s *implementation) getSession(req *message.ConnectMessage, resp *message.ConnAckMessage) (*session.Type, error) {
-	// If CleanSession is set to 0, the server MUST resume communications with the
-	// client based on state from the current session, as identified by the client
-	// identifier. If there is no session associated with the client identifier the
-	// server must create a new session.
-	//
-	// If CleanSession is set to 1, the client and server must discard any previous
-	// session and start a new one. This session lasts as long as the network
-	// connection. State data associated with this session must not be reused in any
-	// subsequent session.
-
-	var err error
-
-	// Check to see if the client supplied an ID, if not, generate one and set
-	// clean session.
-	if len(req.ClientID()) == 0 {
-		req.SetClientID([]byte(uuid.New())) // nolint: errcheck
-		req.SetCleanSession(true)
-	}
-
-	if s.config.ClientIDFromUser {
-		req.SetClientID(req.Username()) // nolint: errcheck
-	}
-
-	clientID := string(req.ClientID())
-
-	var ses *session.Type
-	// If CleanSession is NOT set, check the session store for existing session.
-	// If found, return it.
-	if !req.CleanSession() {
-		ses, _ = s.sessionsMgr.Get(clientID)
-	}
-
-	// If CleanSession, or no existing session found, then create a new one
-	if ses == nil {
-		config := session.Config{
-			ConnectTimeout: s.config.ConnectTimeout,
-			AckTimeout:     s.config.AckTimeout,
-			TimeoutRetries: s.config.TimeoutRetries,
-			TopicsMgr:      s.topicsMgr,
-			OnCleanup:      s.onSessionCleanup,
-			PacketsMetric:  s.sysTree.Metric().Packets(),
-		}
-		if ses, err = s.sessionsMgr.New(clientID, config); err != nil {
-			return nil, err
-		}
-
-		resp.SetSessionPresent(false)
-	} else {
-		resp.SetSessionPresent(true)
-	}
-
-	return ses, nil
-}
-
-func (s *implementation) onSessionCleanup(id string) {
-	select {
-	case <-s.quit:
-		return
-	default:
-	}
-
-	s.sessionsMgr.Del(id)
 }

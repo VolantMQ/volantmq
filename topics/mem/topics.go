@@ -21,7 +21,7 @@ import (
 	"errors"
 	"github.com/juju/loggo"
 	"github.com/troian/surgemq/message"
-	"github.com/troian/surgemq/persistence"
+	persistenceTypes "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics"
 	"github.com/troian/surgemq/types"
@@ -46,6 +46,8 @@ type provider struct {
 	rRoot *rNode
 
 	stat systree.TopicsStat
+
+	persist persistenceTypes.Retained
 }
 
 var _ topics.Provider = (*provider)(nil)
@@ -72,20 +74,28 @@ func NewMemProvider() topics.Provider {
 	}
 }
 
-func (mT *provider) SetStat(stat systree.TopicsStat) {
+func (mT *provider) Configure(stat systree.TopicsStat, persist persistenceTypes.Retained) error {
 	mT.stat = stat
-}
+	mT.persist = persist
 
-func (mT *provider) Load(p persistence.Retained) error {
-	entries, err := p.Load()
+	entries, err := persist.Load()
+	if err != nil && err != persistenceTypes.ErrNotFound {
+		return err
+	}
 
 	for _, msg := range entries {
+		// Loading retained messages
 		if m, ok := msg.(*message.PublishMessage); ok {
+			appLog.Errorf("Loading retained message Qos %d, Topic: %s", m.QoS(), m.Topic())
 			mT.Retain(m) // nolint: errcheck
 		}
 	}
 
-	return err
+	if err := persist.Delete(); err != nil {
+		appLog.Errorf("%s", err.Error())
+	}
+
+	return nil
 }
 
 func (mT *provider) Subscribe(topic string, qos message.QosType, sub *types.Subscriber) (message.QosType, error) {
@@ -167,20 +177,19 @@ func (mT *provider) Retained(topic string, msgs *[]*message.PublishMessage) erro
 	return mT.rRoot.match(topic, msgs)
 }
 
-func (mT *provider) Close(p persistence.Retained) error {
-	if p != nil {
-		var rMsg []*message.PublishMessage
-		mT.Retained("#", &rMsg) // nolint: errcheck
+func (mT *provider) Close() error {
+	var rMsg []*message.PublishMessage
+	mT.Retained("#", &rMsg) // nolint: errcheck
 
-		toStore := []message.Provider{}
+	toStore := []message.Provider{}
 
-		for _, m := range rMsg {
-			toStore = append(toStore, m)
-		}
+	for _, m := range rMsg {
+		toStore = append(toStore, m)
+	}
 
-		if len(toStore) > 0 {
-			p.Store(toStore) // nolint: errcheck
-		}
+	if len(toStore) > 0 {
+		appLog.Errorf("Storing %d retained messages", len(toStore))
+		mT.persist.Store(toStore) // nolint: errcheck
 	}
 
 	mT.sRoot = nil
