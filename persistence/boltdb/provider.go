@@ -253,7 +253,7 @@ func (s *subscriptions) Add(subs message.TopicsQoS) error {
 			return err
 		}
 		for t, q := range subs {
-			id, _ := bucket.NextSequence()
+			id, _ := bucket.NextSequence() // nolint: gas
 
 			var pb *bolt.Bucket
 			if pb, err = bucket.CreateBucket(itob64(id)); err != nil {
@@ -371,7 +371,7 @@ func (m *messages) Store(dir string, msg []message.Provider) error {
 		}
 
 		for _, m := range msg {
-			id, _ := dirBuck.NextSequence()
+			id, _ := dirBuck.NextSequence() // nolint: gas
 			var pb *bolt.Bucket
 			if pb, err = dirBuck.CreateBucket(itob64(id)); err != nil {
 				return err
@@ -408,11 +408,11 @@ func (m *messages) Load() (types.SessionMessages, error) {
 		}
 
 		if dirBuck := msgBuck.Bucket([]byte("in")); dirBuck != nil {
-			msg.In.Messages, _ = getMsgs(dirBuck)
+			msg.In.Messages, _ = getMsgs(dirBuck) // nolint: gas
 		}
 
 		if dirBuck := msgBuck.Bucket([]byte("out")); dirBuck != nil {
-			msg.Out.Messages, _ = getMsgs(dirBuck)
+			msg.Out.Messages, _ = getMsgs(dirBuck) // nolint: gas
 		}
 
 		return nil
@@ -465,7 +465,7 @@ func (r *retained) Store(msg []message.Provider) error {
 		}
 
 		for _, m := range msg {
-			id, _ := bucket.NextSequence()
+			id, _ := bucket.NextSequence() // nolint: gas
 			var pb *bolt.Bucket
 			if pb, err = bucket.CreateBucket(itob64(id)); err != nil {
 				return err
