@@ -59,12 +59,8 @@ In addition, SurgeMQ has been tested with the following client libraries and it 
 
 * libmosquitto 1.3.5 (in C)
   * Tested with the bundled test programs msgsps_pub and msgsps_sub
-* Paho MQTT Conformance/Interoperability Testing Suite (in Python). Tested with all 10 test cases, 3 did not pass. They are 
-  1. "offline messages queueing test" which is not supported by SurgeMQ
-  2. "redelivery on reconnect test" which is not yet implemented by SurgeMQ
-  3. "run subscribe failure test" which is not a valid test
-* Paho Go Client Library (in Go)
-  * Tested with one of the tests in the library, in fact, that tests is now part of the tests for SurgeMQ
+* Paho MQTT Conformance/Interoperability Testing Suite (in Python)
+  * Tested with all 10 test cases. Publish results TBD
 * Paho C Client library (in C)
   * Tested with all of the test cases. Publish results TBD
 
