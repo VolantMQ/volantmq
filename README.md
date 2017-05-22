@@ -4,6 +4,7 @@ SurgeMQ
 [![Build Status](https://travis-ci.org/troian/surgemq.svg?branch=master)](https://travis-ci.org/troian/surgemq)
 [![Codacy Badge](https://api.codacy.com/project/badge/Grade/1a43f2f6e0534fd180d0a1b0b8c93614)](https://www.codacy.com/app/troian/surgemq?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=troian/surgemq&amp;utm_campaign=Badge_Grade)
 [![codecov.io](https://codecov.io/gh/troian/surgemq/coverage.svg?branch=master)](https://codecov.io/gh/troian/surgemq?branch=master)
+[![Apache-2.0 License][license-badge]](LICENSE.md)
 
 This implementation might not be compatible with original.
 Original has not been updated since 2014 thus I forked to improve
