@@ -354,8 +354,9 @@ func (m *Manager) allocSession(id string, msg *message.ConnectMessage, resp *mes
 	if ses != nil {
 		// restore messages if it was shutdown non-clean session
 		if pSes != nil {
-			if msg, err := pSes.Messages().Load(); err == nil {
-				ses.restore(&msg)
+			var storedMessages persistenceTypes.SessionMessages
+			if storedMessages, err = pSes.Messages().Load(); err == nil {
+				ses.restore(&storedMessages)
 				if err = pSes.Messages().Delete(); err != nil {
 					appLog.Errorf("Couldn't wipe messages after restore [%s]: %s", id, err.Error())
 				}
