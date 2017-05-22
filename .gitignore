@@ -38,4 +38,4 @@ _testmain.go
 *.sublime-workspace
 
 persistence/examples/bolt/test.db
-examples/surgemq/perist.db
+examples/surgemq/persist.db

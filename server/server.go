@@ -430,6 +430,9 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 			}
 		}
 
+		if req.KeepAlive() == 0 {
+			req.SetKeepAlive(uint16(s.config.KeepAlive))
+		}
 		if err = s.sessionsMgr.Start(req, resp, conn); err != nil {
 			if err != session.ErrNotAccepted {
 				appLog.Errorf("Couldn't start session: %s", err.Error())
