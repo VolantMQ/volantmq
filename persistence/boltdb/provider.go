@@ -16,8 +16,13 @@ const (
 	bucketSubscriptions = "subscriptions"
 )
 
+type dbStatus struct {
+	db   *bolt.DB
+	done chan struct{}
+}
+
 type impl struct {
-	db *bolt.DB
+	db dbStatus
 
 	// transactions that are in progress right now
 	wgTx sync.WaitGroup
@@ -28,7 +33,7 @@ type impl struct {
 }
 
 type sessions struct {
-	db *bolt.DB
+	db *dbStatus
 
 	// transactions that are in progress right now
 	wgTx *sync.WaitGroup
@@ -36,7 +41,8 @@ type sessions struct {
 }
 
 type session struct {
-	db *bolt.DB
+	db *dbStatus
+
 	id string
 
 	s subscriptions
@@ -44,17 +50,19 @@ type session struct {
 }
 
 type subscriptions struct {
-	db *bolt.DB
+	db *dbStatus
+
 	id string
 }
 
 type messages struct {
-	db *bolt.DB
+	db *dbStatus
+
 	id string
 }
 
 type retained struct {
-	db *bolt.DB
+	db *dbStatus
 
 	// transactions that are in progress right now
 	wgTx *sync.WaitGroup
@@ -65,20 +73,24 @@ type retained struct {
 
 // NewBoltDB allocate new persistence provider of boltDB type
 func NewBoltDB(config *types.BoltDBConfig) (p types.Provider, err error) {
-	pl := &impl{}
+	pl := &impl{
+		db: dbStatus{
+			done: make(chan struct{}),
+		},
+	}
 
-	if pl.db, err = bolt.Open(config.File, 0600, nil); err != nil {
+	if pl.db.db, err = bolt.Open(config.File, 0600, nil); err != nil {
 		return nil, err
 	}
 
 	pl.r = retained{
-		db:   pl.db,
+		db:   &pl.db,
 		wgTx: &pl.wgTx,
 		lock: &pl.lock,
 	}
 
 	pl.s = sessions{
-		db:   pl.db,
+		db:   &pl.db,
 		wgTx: &pl.wgTx,
 		lock: &pl.lock,
 	}
@@ -89,13 +101,25 @@ func NewBoltDB(config *types.BoltDBConfig) (p types.Provider, err error) {
 }
 
 // Sessions
-func (p *impl) Sessions() types.Sessions {
-	return &p.s
+func (p *impl) Sessions() (types.Sessions, error) {
+	select {
+	case <-p.db.done:
+		return nil, types.ErrNotOpen
+	default:
+	}
+
+	return &p.s, nil
 }
 
 // Retained
-func (p *impl) Retained() types.Retained {
-	return &p.r
+func (p *impl) Retained() (types.Retained, error) {
+	select {
+	case <-p.db.done:
+		return nil, types.ErrNotOpen
+	default:
+	}
+
+	return &p.r, nil
 }
 
 // Shutdown provider
@@ -103,19 +127,33 @@ func (p *impl) Shutdown() error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
+	select {
+	case <-p.db.done:
+		return types.ErrNotOpen
+	default:
+	}
+
+	close(p.db.done)
+
 	p.wgTx.Wait()
 
-	err := p.db.Close()
-	p.db = nil
+	err := p.db.db.Close()
+	p.db.db = nil
 
 	return err
 }
 
 // New
 func (s *sessions) New(id string) (types.Session, error) {
+	select {
+	case <-s.db.done:
+		return nil, types.ErrNotOpen
+	default:
+	}
+
 	ses := newSession(s.db, id)
 
-	err := s.db.Update(func(tx *bolt.Tx) error {
+	err := s.db.db.Update(func(tx *bolt.Tx) error {
 		sesBucket, err := tx.CreateBucketIfNotExists([]byte(bucketSessions))
 		if err != nil {
 			return err
@@ -137,7 +175,13 @@ func (s *sessions) New(id string) (types.Session, error) {
 
 // Get
 func (s *sessions) Get(id string) (types.Session, error) {
-	err := s.db.View(func(tx *bolt.Tx) error {
+	select {
+	case <-s.db.done:
+		return nil, types.ErrNotOpen
+	default:
+	}
+
+	err := s.db.db.View(func(tx *bolt.Tx) error {
 		sesBucket := tx.Bucket([]byte(bucketSessions))
 		if sesBucket == nil {
 			return types.ErrNotFound
@@ -159,9 +203,15 @@ func (s *sessions) Get(id string) (types.Session, error) {
 }
 
 func (s *sessions) GetAll() ([]types.Session, error) {
+	select {
+	case <-s.db.done:
+		return nil, types.ErrNotOpen
+	default:
+	}
+
 	res := []types.Session{}
 
-	err := s.db.View(func(tx *bolt.Tx) error {
+	err := s.db.db.View(func(tx *bolt.Tx) error {
 		sesBucket := tx.Bucket([]byte(bucketSessions))
 		if sesBucket == nil {
 			return types.ErrNotFound
@@ -185,7 +235,13 @@ func (s *sessions) GetAll() ([]types.Session, error) {
 
 // Delete
 func (s *sessions) Delete(id string) error {
-	err := s.db.Update(func(tx *bolt.Tx) error {
+	select {
+	case <-s.db.done:
+		return types.ErrNotOpen
+	default:
+	}
+
+	err := s.db.db.Update(func(tx *bolt.Tx) error {
 		// get sessions bucket
 		sesBucket := tx.Bucket([]byte(bucketSessions))
 		if sesBucket == nil {
@@ -202,7 +258,7 @@ func (s *sessions) Delete(id string) error {
 	return nil
 }
 
-func newSession(db *bolt.DB, id string) session {
+func newSession(db *dbStatus, id string) session {
 	ses := session{
 		db: db,
 		id: id,
@@ -222,21 +278,45 @@ func newSession(db *bolt.DB, id string) session {
 }
 
 // Subscriptions
-func (s *session) Subscriptions() types.Subscriptions {
-	return &s.s
+func (s *session) Subscriptions() (types.Subscriptions, error) {
+	select {
+	case <-s.db.done:
+		return nil, types.ErrNotOpen
+	default:
+	}
+
+	return &s.s, nil
 }
 
 // Messages
-func (s *session) Messages() types.Messages {
-	return &s.m
+func (s *session) Messages() (types.Messages, error) {
+	select {
+	case <-s.db.done:
+		return nil, types.ErrNotOpen
+	default:
+	}
+
+	return &s.m, nil
 }
 
-func (s *session) ID() string {
-	return s.id
+func (s *session) ID() (string, error) {
+	select {
+	case <-s.db.done:
+		return "", types.ErrNotOpen
+	default:
+	}
+
+	return s.id, nil
 }
 
 func (s *subscriptions) Add(subs message.TopicsQoS) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	select {
+	case <-s.db.done:
+		return types.ErrNotOpen
+	default:
+	}
+
+	return s.db.db.Update(func(tx *bolt.Tx) error {
 		// get sessions bucket
 		sesBucket := tx.Bucket([]byte(bucketSessions))
 		if sesBucket == nil {
@@ -273,8 +353,14 @@ func (s *subscriptions) Add(subs message.TopicsQoS) error {
 }
 
 func (s *subscriptions) Get() (message.TopicsQoS, error) {
+	select {
+	case <-s.db.done:
+		return nil, types.ErrNotOpen
+	default:
+	}
+
 	res := make(message.TopicsQoS)
-	err := s.db.View(func(tx *bolt.Tx) error {
+	err := s.db.db.View(func(tx *bolt.Tx) error {
 		// get sessions bucket
 		sesBucket := tx.Bucket([]byte(bucketSessions))
 		if sesBucket == nil {
@@ -328,7 +414,13 @@ func (s *subscriptions) Get() (message.TopicsQoS, error) {
 }
 
 func (s *subscriptions) Delete() error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	select {
+	case <-s.db.done:
+		return types.ErrNotOpen
+	default:
+	}
+
+	return s.db.db.Update(func(tx *bolt.Tx) error {
 		// get sessions bucket
 		sesBucket := tx.Bucket([]byte(bucketSessions))
 		if sesBucket == nil {
@@ -347,7 +439,13 @@ func (s *subscriptions) Delete() error {
 
 // Store
 func (m *messages) Store(dir string, msg []message.Provider) error {
-	return m.db.Update(func(tx *bolt.Tx) error {
+	select {
+	case <-m.db.done:
+		return types.ErrNotOpen
+	default:
+	}
+
+	return m.db.db.Update(func(tx *bolt.Tx) error {
 		// get sessions bucket
 		sesBucket := tx.Bucket([]byte(bucketSessions))
 		if sesBucket == nil {
@@ -387,9 +485,15 @@ func (m *messages) Store(dir string, msg []message.Provider) error {
 }
 
 // Load
-func (m *messages) Load() (types.SessionMessages, error) {
+func (m *messages) Load() (*types.SessionMessages, error) {
+	select {
+	case <-m.db.done:
+		return nil, types.ErrNotOpen
+	default:
+	}
+
 	msg := types.SessionMessages{}
-	err := m.db.View(func(tx *bolt.Tx) error {
+	err := m.db.db.View(func(tx *bolt.Tx) error {
 		// get sessions bucket
 		sesBucket := tx.Bucket([]byte(bucketSessions))
 		if sesBucket == nil {
@@ -418,12 +522,18 @@ func (m *messages) Load() (types.SessionMessages, error) {
 		return nil
 	})
 
-	return msg, err
+	return &msg, err
 }
 
 // Delete
 func (m *messages) Delete() error {
-	return m.db.Update(func(tx *bolt.Tx) error {
+	select {
+	case <-m.db.done:
+		return types.ErrNotOpen
+	default:
+	}
+
+	return m.db.db.Update(func(tx *bolt.Tx) error {
 		// get sessions bucket
 		sesBucket := tx.Bucket([]byte(bucketSessions))
 		if sesBucket == nil {
@@ -442,8 +552,14 @@ func (m *messages) Delete() error {
 
 // Load
 func (r *retained) Load() ([]message.Provider, error) {
+	select {
+	case <-r.db.done:
+		return nil, types.ErrNotOpen
+	default:
+	}
+
 	msg := []message.Provider{}
-	err := r.db.View(func(tx *bolt.Tx) error {
+	err := r.db.db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucketRetained))
 		if bucket == nil {
 			return types.ErrNotFound
@@ -458,7 +574,13 @@ func (r *retained) Load() ([]message.Provider, error) {
 
 // Store
 func (r *retained) Store(msg []message.Provider) error {
-	return r.db.Update(func(tx *bolt.Tx) error {
+	select {
+	case <-r.db.done:
+		return types.ErrNotOpen
+	default:
+	}
+
+	return r.db.db.Update(func(tx *bolt.Tx) error {
 		bucket, err := tx.CreateBucketIfNotExists([]byte(bucketRetained))
 		if err != nil {
 			return err
@@ -482,7 +604,13 @@ func (r *retained) Store(msg []message.Provider) error {
 
 // Delete
 func (r *retained) Delete() error {
-	return r.db.Update(func(tx *bolt.Tx) error {
+	select {
+	case <-r.db.done:
+		return types.ErrNotOpen
+	default:
+	}
+
+	return r.db.db.Update(func(tx *bolt.Tx) error {
 		return tx.DeleteBucket([]byte(bucketRetained))
 	})
 }

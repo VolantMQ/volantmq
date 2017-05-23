@@ -15,6 +15,9 @@ var (
 
 	// ErrNotFound object not found
 	ErrNotFound = errors.New("Not found")
+
+	// ErrNotOpen storage is not open
+	ErrNotOpen = errors.New("not open")
 )
 
 // Retained provider for load/store retained messages
@@ -44,15 +47,15 @@ type SessionMessages struct {
 // Messages interface within session
 type Messages interface {
 	Store(dir string, msg []message.Provider) error
-	Load() (SessionMessages, error)
+	Load() (*SessionMessages, error)
 	Delete() error
 }
 
 // Session object inside backend
 type Session interface {
-	Subscriptions() Subscriptions
-	Messages() Messages
-	ID() string
+	Subscriptions() (Subscriptions, error)
+	Messages() (Messages, error)
+	ID() (string, error)
 }
 
 // Sessions interface allows operating with sessions inside backend
@@ -65,8 +68,8 @@ type Sessions interface {
 
 // Provider interface implemented by different backends
 type Provider interface {
-	Sessions() Sessions
-	Retained() Retained
+	Sessions() (Sessions, error)
+	Retained() (Retained, error)
 	Shutdown() error
 }
 

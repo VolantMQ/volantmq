@@ -182,21 +182,29 @@ func New(config Config) (Type, error) {
 		return nil, err
 	}
 
+	var persisRetained persistTypes.Retained
+
+	persisRetained, _ = s.persist.Retained()
+
 	tConfig := topics.Config{
 		Name:    s.config.TopicsProvider,
 		Stat:    s.sysTree.Topics(),
-		Persist: s.persist.Retained(),
+		Persist: persisRetained,
 	}
 	if s.topicsMgr, err = topics.NewManager(tConfig); err != nil {
 		return nil, err
 	}
+
+	var persisSession persistTypes.Sessions
+
+	persisSession, _ = s.persist.Sessions()
 
 	mConfig := session.Config{
 		TopicsMgr:      s.topicsMgr,
 		ConnectTimeout: s.config.ConnectTimeout,
 		AckTimeout:     s.config.AckTimeout,
 		TimeoutRetries: s.config.TimeoutRetries,
-		Persist:        s.persist.Sessions(),
+		Persist:        persisSession,
 		OnDup:          s.config.DupConfig,
 	}
 	mConfig.Metric.Packets = s.sysTree.Metric().Packets()

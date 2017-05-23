@@ -105,33 +105,42 @@ func NewManager(cfg Config) (*Manager, error) {
 	if err == nil {
 		for _, s := range persistedSessions {
 			// 2. restore only those having persisted subscriptions
-			if subscriptions, err := s.Subscriptions().Get(); err == nil && len(subscriptions) > 0 {
-				sCfg := config{
-					topicsMgr:      m.config.TopicsMgr,
-					connectTimeout: m.config.ConnectTimeout,
-					ackTimeout:     m.config.AckTimeout,
-					timeoutRetries: m.config.TimeoutRetries,
-					subscriptions:  subscriptions,
-					id:             s.ID(),
-					callbacks: managerCallbacks{
-						onDisconnect: m.onDisconnect,
-						onClose:      m.onClose,
-						onPublish:    m.onPublish,
-					},
-				}
+			if persistedSubs, err := s.Subscriptions(); err == nil {
+				if subscriptions, err := persistedSubs.Get(); err == nil && len(subscriptions) > 0 {
+					var sID string
+					if sID, err = s.ID(); err != nil {
+						appLog.Errorf("Couldn't get persisted session ID: %s", err.Error())
+					} else {
+						sCfg := config{
+							topicsMgr:      m.config.TopicsMgr,
+							connectTimeout: m.config.ConnectTimeout,
+							ackTimeout:     m.config.AckTimeout,
+							timeoutRetries: m.config.TimeoutRetries,
+							subscriptions:  subscriptions,
+							id:             sID,
+							callbacks: managerCallbacks{
+								onDisconnect: m.onDisconnect,
+								onClose:      m.onClose,
+								onPublish:    m.onPublish,
+							},
+						}
 
-				sCfg.metric.session = m.config.Metric.Session
-				sCfg.metric.packets = m.config.Metric.Packets
+						sCfg.metric.session = m.config.Metric.Session
+						sCfg.metric.packets = m.config.Metric.Packets
 
-				if ses, err := newSession(sCfg); err != nil {
-					appLog.Errorf("Couldn't start persisted session [%s]: %s", s.ID(), err.Error())
-				} else {
-					m.sessions.suspended.list[s.ID()] = ses
-					m.sessions.suspended.count.Add(1)
-					if err = s.Subscriptions().Delete(); err != nil {
-						appLog.Errorf("Couldn't wipe subscriptions after restore [%s]: %s", s.ID(), err.Error())
+						if ses, err := newSession(sCfg); err != nil {
+							appLog.Errorf("Couldn't start persisted session [%s]: %s", sID, err.Error())
+						} else {
+							m.sessions.suspended.list[sID] = ses
+							m.sessions.suspended.count.Add(1)
+							if err = persistedSubs.Delete(); err != nil {
+								appLog.Errorf("Couldn't wipe subscriptions after restore [%s]: %s", sID, err.Error())
+							}
+						}
 					}
 				}
+			} else {
+				appLog.Errorf(err.Error())
 			}
 		}
 	}
@@ -354,11 +363,14 @@ func (m *Manager) allocSession(id string, msg *message.ConnectMessage, resp *mes
 	if ses != nil {
 		// restore messages if it was shutdown non-clean session
 		if pSes != nil {
-			var storedMessages persistenceTypes.SessionMessages
-			if storedMessages, err = pSes.Messages().Load(); err == nil {
-				ses.restore(&storedMessages)
-				if err = pSes.Messages().Delete(); err != nil {
-					appLog.Errorf("Couldn't wipe messages after restore [%s]: %s", id, err.Error())
+			var sesMessages persistenceTypes.Messages
+			if sesMessages, err = pSes.Messages(); err == nil {
+				var storedMessages *persistenceTypes.SessionMessages
+				if storedMessages, err = sesMessages.Load(); err == nil {
+					ses.restore(storedMessages)
+					if err = sesMessages.Delete(); err != nil {
+						appLog.Errorf("Couldn't wipe messages after restore [%s]: %s", id, err.Error())
+					}
 				}
 			}
 		}
@@ -378,15 +390,25 @@ func (m *Manager) onClose(id string, s message.TopicsQoS) {
 	if err != nil {
 		appLog.Errorf("Trying to persist session that has not been initiated for persistence [%s]: %s", id, err.Error())
 	} else {
-		if err = ses.Subscriptions().Add(s); err != nil {
-			appLog.Errorf("Couldn't persist subscriptions [%s]: %s", id, err.Error())
+		var sesSubs persistenceTypes.Subscriptions
+		if sesSubs, err = ses.Subscriptions(); err == nil {
+			if err = sesSubs.Add(s); err != nil {
+				appLog.Errorf("Couldn't persist subscriptions [%s]: %s", id, err.Error())
+			}
+		} else {
+			appLog.Errorf(err.Error())
 		}
 	}
 }
 
 func (m *Manager) onPublish(id string, msg *message.PublishMessage) {
 	if ses, err := m.config.Persist.Get(id); err == nil {
-		if err = ses.Messages().Store("out", []message.Provider{msg}); err != nil {
+		var sesMsg persistenceTypes.Messages
+		if sesMsg, err = ses.Messages(); err == nil {
+			if err = sesMsg.Store("out", []message.Provider{msg}); err != nil {
+				appLog.Errorf("Couldn't store messages [%s]: %s", id, err.Error())
+			}
+		} else {
 			appLog.Errorf("Couldn't store messages [%s]: %s", id, err.Error())
 		}
 	} else {
@@ -401,16 +423,22 @@ func (m *Manager) onDisconnect(id string, messages *persistenceTypes.SessionMess
 		if ses, err := m.config.Persist.Get(id); err != nil {
 			appLog.Errorf("Trying to persist session that has not been initiated for persistence [%s]: %s", id, err.Error())
 		} else {
-			if len(messages.Out.Messages) > 0 {
-				if err = ses.Messages().Store("out", messages.Out.Messages); err != nil {
-					appLog.Errorf("Couldn't persist messages [%s]: %s", id, err.Error())
-				}
-			}
+			var sesMsg persistenceTypes.Messages
+			if sesMsg, err = ses.Messages(); err == nil {
+				if len(messages.Out.Messages) > 0 {
 
-			if len(messages.In.Messages) > 0 {
-				if err = ses.Messages().Store("in", messages.In.Messages); err != nil {
-					appLog.Errorf("Couldn't persist messages [%s]: %s", id, err.Error())
+					if err = sesMsg.Store("out", messages.Out.Messages); err != nil {
+						appLog.Errorf("Couldn't persist messages [%s]: %s", id, err.Error())
+					}
 				}
+
+				if len(messages.In.Messages) > 0 {
+					if err = sesMsg.Store("in", messages.In.Messages); err != nil {
+						appLog.Errorf("Couldn't persist messages [%s]: %s", id, err.Error())
+					}
+				}
+			} else {
+				appLog.Errorf("Couldn't persist messages [%s]: %s", id, err.Error())
 			}
 		}
 
