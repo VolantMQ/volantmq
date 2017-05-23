@@ -146,11 +146,10 @@ func TestSubscriptions(t *testing.T) {
 			subscriptions, err = session.Subscriptions()
 			require.NoError(t, err)
 
-			var subsList message.TopicsQoS
-			subsList, err = subscriptions.Get()
+			_, err = subscriptions.Get()
 			require.EqualError(t, err, types.ErrNotFound.Error())
 
-			subsList = make(message.TopicsQoS)
+			subsList := make(message.TopicsQoS)
 			subsList["topic1"] = message.QosAtLeastOnce
 			subsList["topic2"] = message.QosAtLeastOnce
 			subsList["topic3"] = message.QosExactlyOnce
@@ -191,6 +190,99 @@ func TestSubscriptions(t *testing.T) {
 			for topic, q := range subsList {
 				require.Equal(t, q, subsList1[topic])
 			}
+
+			err = pr.Shutdown()
+			require.NoError(t, err)
+
+			err = p.wrap.cleanup()
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestRetained(t *testing.T) {
+	for _, p := range testProviders {
+		t.Run(p.name, func(t *testing.T) {
+			pr, err := New(p.wrap.config)
+			require.NoError(t, err)
+
+			err = pr.Shutdown()
+			require.NoError(t, err)
+
+			err = p.wrap.cleanup()
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestMessages(t *testing.T) {
+	for _, p := range testProviders {
+		t.Run(p.name, func(t *testing.T) {
+			pr, err := New(p.wrap.config)
+			require.NoError(t, err)
+
+			err = pr.Shutdown()
+			require.NoError(t, err)
+
+			err = p.wrap.cleanup()
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestMessagesAndRetained(t *testing.T) {
+	for _, p := range testProviders {
+		t.Run(p.name, func(t *testing.T) {
+			pr, err := New(p.wrap.config)
+			require.NoError(t, err)
+
+			err = pr.Shutdown()
+			require.NoError(t, err)
+
+			err = p.wrap.cleanup()
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestMessagesAndSubscriptions(t *testing.T) {
+	for _, p := range testProviders {
+		t.Run(p.name, func(t *testing.T) {
+			pr, err := New(p.wrap.config)
+			require.NoError(t, err)
+
+			err = pr.Shutdown()
+			require.NoError(t, err)
+
+			err = p.wrap.cleanup()
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestRetainedAndSubscriptions(t *testing.T) {
+	for _, p := range testProviders {
+		t.Run(p.name, func(t *testing.T) {
+			pr, err := New(p.wrap.config)
+			require.NoError(t, err)
+
+			err = pr.Shutdown()
+			require.NoError(t, err)
+
+			err = p.wrap.cleanup()
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestComplete(t *testing.T) {
+	for _, p := range testProviders {
+		t.Run(p.name, func(t *testing.T) {
+			pr, err := New(p.wrap.config)
+			require.NoError(t, err)
+
+			err = pr.Shutdown()
+			require.NoError(t, err)
 
 			err = p.wrap.cleanup()
 			require.NoError(t, err)
