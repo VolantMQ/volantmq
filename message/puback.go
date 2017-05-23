@@ -67,7 +67,7 @@ func (msg *PubAckMessage) Decode(src []byte) (int, error) {
 		return total, err
 	}
 
-	msg.packetID = binary.LittleEndian.Uint16(src[total:])
+	msg.packetID = binary.BigEndian.Uint16(src[total:])
 	total += 2
 
 	return total, nil

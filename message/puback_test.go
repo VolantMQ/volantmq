@@ -40,9 +40,9 @@ func TestPubAckMessageDecode(t *testing.T) {
 	n, err := msg.Decode(msgBytes)
 
 	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n, "Error decoding message.")
-	require.Equal(t, PUBACK, msg.Type(), "Error decoding message.")
-	require.Equal(t, 7, int(msg.PacketID()), "Error decoding message.")
+	require.Equal(t, len(msgBytes), n, "Decode length does not match")
+	require.Equal(t, PUBACK, msg.Type(), "Message type does not match")
+	require.Equal(t, 7, int(msg.PacketID()), "PacketID does not match")
 }
 
 // test insufficient bytes

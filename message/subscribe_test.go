@@ -165,18 +165,32 @@ func TestSubscribeDecodeEncodeEquiv(t *testing.T) {
 	msg := NewSubscribeMessage()
 	n, err := msg.Decode(msgBytes)
 
-	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n, "Error decoding message.")
+	require.NoError(t, err, "Error decoding message")
+	require.Equal(t, len(msgBytes), n, "Raw message length does not match")
 
 	dst := make([]byte, 100)
 	n2, err := msg.Encode(dst)
 
-	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n2, "Error decoding message.")
-	require.Equal(t, msgBytes, dst[:n2], "Error decoding message.")
+	require.NoError(t, err, "Error encoding message")
+	require.Equal(t, len(msgBytes), n2, "Raw message length does not match")
+
+	exists := msg.TopicExists("surgemq")
+	require.Equal(t, true, exists, "Required topic does not exist")
+	qos := msg.TopicQos("surgemq")
+	require.Equal(t, QosType(0), qos, "Invalid QoS for topic")
+
+	exists = msg.TopicExists("/a/b/#/c")
+	require.Equal(t, true, exists, "Required topic does not exist")
+	qos = msg.TopicQos("/a/b/#/c")
+	require.Equal(t, QosType(1), qos, "Invalid QoS for topic")
+
+	exists = msg.TopicExists("/a/b/#/cdd")
+	require.Equal(t, true, exists, "Required topic does not exist")
+	qos = msg.TopicQos("/a/b/#/cdd")
+	require.Equal(t, QosType(2), qos, "Invalid QoS for topic")
 
 	n3, err := msg.Decode(dst)
 
-	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n3, "Error decoding message.")
+	require.NoError(t, err, "Error decoding message")
+	require.Equal(t, len(msgBytes), n3, "Raw message length does not match")
 }

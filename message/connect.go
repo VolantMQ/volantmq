@@ -337,15 +337,16 @@ func (msg *ConnectMessage) Decode(src []byte) (int, error) {
 	total := 0
 
 	n, err := msg.header.decode(src[total:])
+	total += n
+	if err != nil {
+		return total, err
+	}
+
+	n, err = msg.decodeMessage(src[total:])
+	total += n
 	if err != nil {
 		return total + n, err
 	}
-	total += n
-
-	if n, err = msg.decodeMessage(src[total:]); err != nil {
-		return total + n, err
-	}
-	total += n
 
 	return total, nil
 }
@@ -520,7 +521,7 @@ func (msg *ConnectMessage) decodeMessage(src []byte) (int, error) {
 	}
 
 	// If the Client supplies a zero-byte ClientId, the Client MUST also set CleanSession to 1
-	if len(msg.clientID) == 0 && msg.CleanSession() {
+	if len(msg.clientID) == 0 && !msg.CleanSession() {
 		return total, ErrIdentifierRejected
 	}
 

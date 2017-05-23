@@ -98,9 +98,9 @@ func TestSubAckMessageEncode(t *testing.T) {
 	dst := make([]byte, 10)
 	n, err := msg.Encode(dst)
 
-	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n, "Error decoding message.")
-	require.Equal(t, msgBytes, dst[:n], "Error decoding message.")
+	require.NoError(t, err, "Error encoding message.")
+	require.Equal(t, len(msgBytes), n, "Encoded length does not match")
+	require.Equal(t, msgBytes, dst[:n], "Raw message does not match")
 }
 
 // test to ensure encoding and decoding are the same

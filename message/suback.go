@@ -131,15 +131,16 @@ func (msg *SubAckMessage) preEncode(dst []byte) (int, error) {
 
 	var n int
 
-	if n, err = msg.header.encode(dst[total:]); err != nil {
+	n, err = msg.header.encode(dst[total:])
+	total += n
+	if err != nil {
 		return total, err
 	}
-	total += n
 
 	binary.BigEndian.PutUint16(dst[total:], msg.packetID)
 	total += 2
-	for i, q := range msg.returnCodes {
-		dst[total+i] = byte(q)
+	for _, q := range msg.returnCodes {
+		dst[total] = byte(q)
 		total++
 	}
 

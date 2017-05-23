@@ -157,18 +157,29 @@ func TestUnSubscribeDecodeEncodeEquiv(t *testing.T) {
 	msg := NewUnSubscribeMessage()
 	n, err := msg.Decode(msgBytes)
 
-	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n, "Error decoding message.")
+	require.NoError(t, err, "Error decoding message")
+	require.Equal(t, len(msgBytes), n, "Raw message length does not match")
 
 	dst := make([]byte, 100)
 	n2, err := msg.Encode(dst)
 
 	require.NoError(t, err, "Error encoding message.")
-	require.Equal(t, len(msgBytes), n2, "Error encoding message.")
-	require.Equal(t, msgBytes, dst[:n2], "Error encoding message.")
+	require.Equal(t, len(msgBytes), n2, "Raw message length does not match")
+
+	exists := msg.TopicExists("surgemq")
+	require.Equal(t, true, exists, "Topic does not exist")
+
+	exists = msg.TopicExists("/a/b/#/c")
+	require.Equal(t, true, exists, "Topic does not exist")
+
+	exists = msg.TopicExists("/a/b/#/cdd")
+	require.Equal(t, true, exists, "Topic does not exist")
+
+	topics := msg.Topics()
+	require.Equal(t, 3, len(topics), "Topics count does not match")
 
 	n3, err := msg.Decode(dst)
 
-	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n3, "Error decoding message.")
+	require.NoError(t, err, "Error decoding message")
+	require.Equal(t, len(msgBytes), n3, "Raw message length does not match")
 }
