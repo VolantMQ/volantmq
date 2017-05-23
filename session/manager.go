@@ -129,7 +129,8 @@ func NewManager(cfg Config) (*Manager, error) {
 						sCfg.metric.session = m.config.Metric.Session
 						sCfg.metric.packets = m.config.Metric.Packets
 
-						if ses, err := newSession(sCfg); err != nil {
+						var ses *Type
+						if ses, err = newSession(sCfg); err != nil {
 							appLog.Errorf("Couldn't start persisted session [%s]: %s", sID, err.Error())
 						} else {
 							m.sessions.suspended.list[sID] = ses
