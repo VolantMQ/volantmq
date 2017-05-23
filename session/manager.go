@@ -106,7 +106,8 @@ func NewManager(cfg Config) (*Manager, error) {
 		for _, s := range persistedSessions {
 			// 2. restore only those having persisted subscriptions
 			if persistedSubs, err := s.Subscriptions(); err == nil {
-				if subscriptions, err := persistedSubs.Get(); err == nil && len(subscriptions) > 0 {
+				var subscriptions message.TopicsQoS
+				if subscriptions, err = persistedSubs.Get(); err == nil && len(subscriptions) > 0 {
 					var sID string
 					if sID, err = s.ID(); err != nil {
 						appLog.Errorf("Couldn't get persisted session ID: %s", err.Error())
