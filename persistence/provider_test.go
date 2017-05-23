@@ -4,10 +4,11 @@ import (
 	"os"
 	"testing"
 
+	"strconv"
+
 	"github.com/stretchr/testify/require"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/persistence/types"
-	"strconv"
 )
 
 type configWrap struct {
