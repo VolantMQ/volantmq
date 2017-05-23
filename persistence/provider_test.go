@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/persistence/types"
+	"strconv"
 )
 
 type configWrap struct {
@@ -205,6 +206,58 @@ func TestRetained(t *testing.T) {
 		t.Run(p.name, func(t *testing.T) {
 			pr, err := New(p.wrap.config)
 			require.NoError(t, err)
+
+			retained, err := pr.Retained()
+			require.NoError(t, err)
+
+			_, err = retained.Load()
+			require.EqualError(t, err, types.ErrNotFound.Error())
+
+			var messages []message.Provider
+			for i := 1; i != 100; i++ {
+				msg := message.NewPublishMessage()
+				msg.SetPacketID(uint16(i))
+				msg.SetRetain(true)
+				msg.SetTopic("Topic:" + strconv.Itoa(i))
+				if (i % 10) != 0 {
+					msg.SetQoS(message.QosExactlyOnce)
+				} else {
+					msg.SetQoS(message.QosAtLeastOnce)
+				}
+			}
+
+			err = retained.Store(messages)
+			require.NoError(t, err)
+
+			var messages1 []message.Provider
+			retained, err = pr.Retained()
+			require.NoError(t, err)
+
+			messages1, err = retained.Load()
+			require.NoError(t, err)
+			require.Equal(t, len(messages), len(messages1))
+
+			err = pr.Shutdown()
+			require.NoError(t, err)
+
+			pr, err = New(p.wrap.config)
+			require.NoError(t, err)
+
+			retained, err = pr.Retained()
+			require.NoError(t, err)
+
+			messages1, err = retained.Load()
+			require.NoError(t, err)
+			require.Equal(t, len(messages), len(messages1))
+
+			err = retained.Delete()
+			require.NoError(t, err)
+
+			_, err = retained.Load()
+			require.EqualError(t, err, types.ErrNotFound.Error())
+
+			err = retained.Delete()
+			require.EqualError(t, err, types.ErrNotFound.Error())
 
 			err = pr.Shutdown()
 			require.NoError(t, err)
