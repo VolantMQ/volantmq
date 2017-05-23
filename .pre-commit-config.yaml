@@ -1,7 +1,7 @@
 -   repo: https://github.com/troian/pre-commit-golang
-    sha: 6ad9c21a4965f664ddf5c8524173104ccf401035
+    sha: c43dbbf0704e4c722e2b64672aaee689145e17a6
     hooks:
-    -   id: go-fmt
+    -   id: go-imports
     -   id: go-build
     -   id: go-metalinter
         args:
