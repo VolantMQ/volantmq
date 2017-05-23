@@ -610,9 +610,17 @@ func (r *retained) Delete() error {
 	default:
 	}
 
-	return r.db.db.Update(func(tx *bolt.Tx) error {
+	err := r.db.db.Update(func(tx *bolt.Tx) error {
 		return tx.DeleteBucket([]byte(bucketRetained))
 	})
+
+	if err != nil {
+		if err == bolt.ErrBucketNotFound {
+			err = types.ErrNotFound
+		}
+	}
+
+	return err
 }
 
 func getMsgs(b *bolt.Bucket) ([]message.Provider, error) {
