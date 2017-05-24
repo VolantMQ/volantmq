@@ -7,6 +7,10 @@ import (
 
 // New persistence provider
 func New(config types.ProviderConfig) (types.Provider, error) {
+	if config == nil {
+		return nil, types.ErrInvalidArgs
+	}
+
 	switch cfg := config.(type) {
 	case *types.BoltDBConfig:
 		return boltdb.NewBoltDB(cfg)

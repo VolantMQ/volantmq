@@ -29,6 +29,10 @@ type providerTest struct {
 	wrap configWrap
 }
 
+type dummyProvider struct{}
+
+var _ types.ProviderConfig = (*dummyProvider)(nil)
+
 var testProviders []*providerTest
 
 func init() {
@@ -40,6 +44,20 @@ func init() {
 			},
 		},
 	})
+}
+
+func TestProvider(t *testing.T) {
+	var config types.ProviderConfig
+
+	//var pr types.Provider
+
+	_, err := New(config)
+	require.EqualError(t, err, types.ErrInvalidArgs.Error())
+
+	config = &dummyProvider{}
+
+	_, err = New(config)
+	require.EqualError(t, err, types.ErrUnknownProvider.Error())
 }
 
 func TestOpenClose(t *testing.T) {
