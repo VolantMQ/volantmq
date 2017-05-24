@@ -26,6 +26,7 @@ import (
 	"github.com/juju/loggo"
 	"github.com/spf13/viper"
 	"github.com/troian/surgemq/auth"
+	authTypes "github.com/troian/surgemq/auth/types"
 	persistType "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/server"
 	_ "github.com/troian/surgemq/topics/mem"
@@ -48,7 +49,7 @@ func (a internalAuth) Password(user, password string) error {
 }
 
 // nolint: golint
-func (a internalAuth) AclCheck(clientID, user, topic string, access auth.AccessType) error {
+func (a internalAuth) AclCheck(clientID, user, topic string, access authTypes.AccessType) error {
 	return auth.ErrAuthFailure
 }
 
