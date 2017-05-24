@@ -7,6 +7,9 @@ import (
 )
 
 var (
+	// ErrInvalidArgs invalid arguments provided
+	ErrInvalidArgs = errors.New("invalid arguments")
+
 	// ErrUnknownProvider if provider is unknown
 	ErrUnknownProvider = errors.New("Unknown provider")
 
