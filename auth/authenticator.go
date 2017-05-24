@@ -18,6 +18,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	authTypes "github.com/troian/surgemq/auth/types"
 )
 
 // Auth errors
@@ -28,20 +30,10 @@ var (
 	providers = make(map[string]Provider)
 )
 
-// AccessType acl type
-type AccessType int
-
-const (
-	// AuthAccessTypeRead read access
-	AuthAccessTypeRead AccessType = 1
-	// AuthAccessTypeWrite write access
-	AuthAccessTypeWrite = 2
-)
-
 // Provider interface
 type Provider interface {
 	Password(user, password string) error
-	AclCheck(clientID, user, topic string, access AccessType) error
+	AclCheck(clientID, user, topic string, access authTypes.AccessType) error
 	PskKey(hint, identity string, key []byte, maxKeyLen int) error
 }
 
@@ -100,7 +92,7 @@ func (m *Manager) Password(user, password string) error {
 
 // AclCheck check permissions
 // nolint: golint
-func (m *Manager) AclCheck(clientID, user, topic string, access AccessType) error {
+func (m *Manager) AclCheck(clientID, user, topic string, access authTypes.AccessType) error {
 	for _, p := range m.p {
 		if err := p.AclCheck(clientID, user, topic, access); err == nil {
 			return nil
