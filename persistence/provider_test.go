@@ -275,65 +275,97 @@ func TestMessages(t *testing.T) {
 			pr, err := New(p.wrap.config)
 			require.NoError(t, err)
 
+			var sessions types.Sessions
+
+			sessions, err = pr.Sessions()
+			require.NoError(t, err)
+
+			var session types.Session
+
+			session, err = sessions.New("test1")
+			require.NoError(t, err)
+
+			var messages types.Messages
+			messages, err = session.Messages()
+			require.NoError(t, err)
+
+			_, err = messages.Load()
+			require.EqualError(t, err, types.ErrNotFound.Error())
+
+			var rawMessages []message.Provider
+
+			for i := 0; i < 100; i++ {
+				m := message.NewPublishMessage()
+
+				if (i % 10) != 0 {
+					m.SetPacketID(uint16(i))
+				}
+
+				if (i % 2) != 0 {
+					m.SetQoS(message.QosAtLeastOnce)
+				} else {
+					m.SetQoS(message.QosExactlyOnce)
+				}
+
+				m.SetTopic("test topic: " + strconv.Itoa(i))
+
+				m.SetPayload([]byte("test payload: " + strconv.Itoa(i)))
+
+				rawMessages = append(rawMessages, m)
+			}
+
+			err = messages.Store("out", rawMessages)
+			require.NoError(t, err)
+
+			var rawMessages1 *types.SessionMessages
+			rawMessages1, err = messages.Load()
+			require.NoError(t, err)
+
+			require.Equal(t, len(rawMessages), len(rawMessages1.Out.Messages))
+			require.Equal(t, 0, len(rawMessages1.In.Messages))
+
+			verifyMessages := func() {
+				for i, m := range rawMessages {
+					switch mT := m.(type) {
+					case *message.PublishMessage:
+						mT1 := rawMessages1.Out.Messages[i].(*message.PublishMessage)
+						require.Equal(t, mT.PacketID(), mT1.PacketID())
+						require.Equal(t, mT.QoS(), mT1.QoS())
+						require.Equal(t, mT.Topic(), mT1.Topic())
+						require.Equal(t, mT.Payload(), mT1.Payload())
+					default:
+						require.Fail(t, "Expected message type *message.PublishMessage. Received %v", mT)
+					}
+				}
+			}
+
+			verifyMessages()
+
 			err = pr.Shutdown()
 			require.NoError(t, err)
 
-			err = p.wrap.cleanup()
-			require.NoError(t, err)
-		})
-	}
-}
-
-func TestMessagesAndRetained(t *testing.T) {
-	for _, p := range testProviders {
-		t.Run(p.name, func(t *testing.T) {
-			pr, err := New(p.wrap.config)
+			pr, err = New(p.wrap.config)
 			require.NoError(t, err)
 
-			err = pr.Shutdown()
+			sessions, err = pr.Sessions()
 			require.NoError(t, err)
 
-			err = p.wrap.cleanup()
-			require.NoError(t, err)
-		})
-	}
-}
+			_, err = sessions.New("test1")
+			require.EqualError(t, err, types.ErrAlreadyExists.Error())
 
-func TestMessagesAndSubscriptions(t *testing.T) {
-	for _, p := range testProviders {
-		t.Run(p.name, func(t *testing.T) {
-			pr, err := New(p.wrap.config)
+			session, err = sessions.Get("test1")
 			require.NoError(t, err)
 
-			err = pr.Shutdown()
+			messages, err = session.Messages()
 			require.NoError(t, err)
 
-			err = p.wrap.cleanup()
-			require.NoError(t, err)
-		})
-	}
-}
-
-func TestRetainedAndSubscriptions(t *testing.T) {
-	for _, p := range testProviders {
-		t.Run(p.name, func(t *testing.T) {
-			pr, err := New(p.wrap.config)
+			rawMessages1, err = messages.Load()
 			require.NoError(t, err)
 
-			err = pr.Shutdown()
-			require.NoError(t, err)
+			require.Equal(t, len(rawMessages), len(rawMessages1.Out.Messages))
+			require.Equal(t, 0, len(rawMessages1.In.Messages))
 
-			err = p.wrap.cleanup()
-			require.NoError(t, err)
-		})
-	}
-}
-
-func TestComplete(t *testing.T) {
-	for _, p := range testProviders {
-		t.Run(p.name, func(t *testing.T) {
-			pr, err := New(p.wrap.config)
-			require.NoError(t, err)
+			verifyMessages()
 
 			err = pr.Shutdown()
 			require.NoError(t, err)
