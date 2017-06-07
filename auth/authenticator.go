@@ -26,9 +26,9 @@ import (
 var (
 	ErrAuthFailure = errors.New("auth: Authentication failure")
 	//	ErrAuthProviderNotFound = errors.New("auth: Authentication provider not found")
-
-	providers = make(map[string]Provider)
 )
+
+var providers = make(map[string]Provider)
 
 // Provider interface
 type Provider interface {

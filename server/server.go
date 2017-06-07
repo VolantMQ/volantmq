@@ -410,12 +410,12 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 
 	// This part is ugly
 	// Take some time to analyse and improve
-	if req, err = GetConnectMessage(conn); err != nil {
+	if req, err = getConnectMessage(conn); err != nil {
 		if code, ok := message.ValidConnAckError(err); ok {
 			s.sysTree.Metric().Packets().Received(resp.Type())
 			resp.SetReturnCode(code)
 
-			if err = WriteMessage(c, resp); err != nil {
+			if err = writeMessage(c, resp); err != nil {
 				return err
 			}
 			s.sysTree.Metric().Packets().Sent(resp.Type())
