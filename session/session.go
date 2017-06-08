@@ -225,6 +225,21 @@ func (s *Type) start(msg *message.ConnectMessage, conn io.Closer) (err error) {
 	return nil
 }
 
+func (s *Type) disconnect() {
+	if !atomic.CompareAndSwapInt64(&s.closed, 0, 1) {
+		s.wgSessionStarted.Wait()
+		return
+	}
+
+	// If Stop has been issued by the server handler it looks like
+	// application about to shutdown, thus we try close network connection.
+	// If close successful connection manager invokes onClose method which cleans up writer.
+	// If close error just check writer goroutine has finished it's job
+	if s.conn != nil {
+		s.conn.config.conn.Close() // nolint: errcheck
+	}
+}
+
 // stop session. Function assumed to be invoked once server about to shutdown
 func (s *Type) stop() {
 	if !atomic.CompareAndSwapInt64(&s.closed, 0, 1) {

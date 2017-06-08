@@ -247,7 +247,7 @@ func (m *Manager) Shutdown() error {
 	// 1. Now signal all active sessions to finish
 	m.sessions.active.lock.Lock()
 	for _, s := range m.sessions.active.list {
-		s.stop()
+		s.disconnect()
 	}
 	m.sessions.active.lock.Unlock()
 
@@ -450,8 +450,8 @@ func (m *Manager) onDisconnect(id string, messages *persistenceTypes.SessionMess
 			m.sessions.active.lock.Lock()
 			m.sessions.suspended.list[id] = m.sessions.active.list[id]
 			m.sessions.active.lock.Unlock()
-			m.sessions.suspended.lock.Unlock()
 			m.sessions.suspended.count.Add(1)
+			m.sessions.suspended.lock.Unlock()
 		}
 	}
 
