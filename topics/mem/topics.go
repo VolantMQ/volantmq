@@ -92,9 +92,7 @@ func (mT *provider) Configure(stat systree.TopicsStat, persist persistenceTypes.
 		}
 	}
 
-	if err := persist.Delete(); err != nil {
-		appLog.Errorf("%s", err.Error())
-	}
+	persist.Delete() // nolint: errcheck
 
 	return nil
 }
