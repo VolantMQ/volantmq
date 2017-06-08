@@ -20,7 +20,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
-	"sync"
 	"syscall"
 
 	"github.com/juju/loggo"
@@ -137,12 +136,7 @@ func main() {
 		appLog.Errorf(http.ListenAndServe("localhost:6067", nil).Error())
 	}()
 
-	var wgListener sync.WaitGroup
-
-	wgListener.Add(1)
 	go func() {
-		defer wgListener.Done()
-
 		config := &server.Listener{
 			Scheme:      "tcp4",
 			Host:        "",
@@ -162,6 +156,4 @@ func main() {
 	if err = srv.Close(); err != nil {
 		appLog.Errorf(err.Error())
 	}
-
-	wgListener.Wait()
 }
