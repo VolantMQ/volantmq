@@ -449,6 +449,28 @@ func ValidConnAckError(err error) (ConnAckCode, bool) {
 	//	err == ErrServerUnavailable || err == ErrBadUsernameOrPassword || err == ErrNotAuthorized
 }
 
+// Decode buf into message and return Provider type
+func Decode(buf []byte) (Provider, int, error) {
+	if len(buf) < 1 {
+		return nil, 0, ErrInvalidLength
+	}
+
+	// [MQTT-2.2]
+	mType := Type(buf[0] >> 4)
+	msg, err := mType.New()
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var total int
+
+	if total, err = msg.Decode(buf); err != nil {
+		return nil, 0, err
+	}
+
+	return msg, total, nil
+}
+
 // Read length prefixed bytes
 func readLPBytes(buf []byte) ([]byte, int, error) {
 	if len(buf) < 2 {
