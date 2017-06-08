@@ -6,6 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 //
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -25,8 +26,8 @@ import (
 	"github.com/troian/surgemq/types"
 )
 
-func getConnectMessage(conn io.Closer) (*message.ConnectMessage, error) {
-	buf, err := getMessageBuffer(conn)
+func GetConnectMessage(conn io.Closer) (*message.ConnectMessage, error) {
+	buf, err := GetMessageBuffer(conn)
 	if err != nil {
 		appLog.Errorf("Receive error: %v", err)
 		return nil, err
@@ -38,8 +39,8 @@ func getConnectMessage(conn io.Closer) (*message.ConnectMessage, error) {
 	return msg, err
 }
 
-func getConnAckMessage(conn io.Closer) (*message.ConnAckMessage, error) {
-	buf, err := getMessageBuffer(conn)
+func GetConnAckMessage(conn io.Closer) (*message.ConnAckMessage, error) {
+	buf, err := GetMessageBuffer(conn)
 	if err != nil {
 		appLog.Debugf("Receive error: %v", err)
 		return nil, err
@@ -52,7 +53,7 @@ func getConnAckMessage(conn io.Closer) (*message.ConnAckMessage, error) {
 	return msg, err
 }
 
-func writeMessage(conn io.Closer, msg message.Provider) error {
+func WriteMessage(conn io.Closer, msg message.Provider) error {
 	buf := make([]byte, msg.Len())
 	_, err := msg.Encode(buf)
 	if err != nil {
@@ -61,10 +62,10 @@ func writeMessage(conn io.Closer, msg message.Provider) error {
 	}
 	appLog.Debugf("Writing: %s", msg)
 
-	return writeMessageBuffer(conn, buf)
+	return WriteMessageBuffer(conn, buf)
 }
 
-func getMessageBuffer(c io.Closer) ([]byte, error) {
+func GetMessageBuffer(c io.Closer) ([]byte, error) {
 	if c == nil {
 		return nil, types.ErrInvalidConnectionType
 	}
@@ -122,7 +123,7 @@ func getMessageBuffer(c io.Closer) ([]byte, error) {
 	return buf, nil
 }
 
-func writeMessageBuffer(c io.Closer, b []byte) error {
+func WriteMessageBuffer(c io.Closer, b []byte) error {
 	if c == nil {
 		return types.ErrInvalidConnectionType
 	}

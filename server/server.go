@@ -262,12 +262,7 @@ func (s *implementation) ListenAndServe(listener *Listener) error {
 
 		s.listeners.wg.Add(1)
 		defer s.listeners.wg.Done()
-
-		appLog.Infof("mqtt server on [%s://%s:%d] is ready...", listener.Scheme, listener.Host, listener.Port)
-
 		err = s.serve(listener)
-
-		appLog.Infof("mqtt server on [%s://%s:%d] stopped", listener.Scheme, listener.Host, listener.Port)
 	} else {
 		s.listeners.lock.Unlock()
 		err = errors.New("Listener already exists")
@@ -410,12 +405,12 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 
 	// This part is ugly
 	// Take some time to analyse and improve
-	if req, err = getConnectMessage(conn); err != nil {
+	if req, err = GetConnectMessage(conn); err != nil {
 		if code, ok := message.ValidConnAckError(err); ok {
 			s.sysTree.Metric().Packets().Received(resp.Type())
 			resp.SetReturnCode(code)
 
-			if err = writeMessage(c, resp); err != nil {
+			if err = WriteMessage(c, resp); err != nil {
 				return err
 			}
 			s.sysTree.Metric().Packets().Sent(resp.Type())
