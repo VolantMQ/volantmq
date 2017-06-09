@@ -144,7 +144,7 @@ func (s *connection) stop() (ret bool) {
 
 	// Close the network connection
 	// we do not check for error here as connection might be already closed by session
-	s.config.conn.Close() // nolint: goling, errcheck
+	s.config.conn.Close() // nolint: goling, errcheck, gas
 
 	if err := s.in.Close(); err != nil {
 		appLog.Errorf("close input buffer error [%s]: %s", s.config.id, err.Error())
@@ -156,9 +156,6 @@ func (s *connection) stop() (ret bool) {
 
 	// Wait for all the connection goroutines are finished
 	s.wg.routines.stopped.Wait()
-
-	s.in = nil
-	s.out = nil
 
 	s.wg.conn.stopped.Done()
 

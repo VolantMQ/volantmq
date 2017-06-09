@@ -97,6 +97,8 @@ func (s *Type) onClose(will bool) {
 	s.retained.lock.Unlock()
 
 	s.mu.Lock()
+	s.conn.in = nil
+	s.conn.out = nil
 	s.conn = nil
 	s.mu.Unlock()
 }
