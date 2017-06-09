@@ -26,33 +26,7 @@ import (
 	"github.com/troian/surgemq/types"
 )
 
-func GetConnectMessage(conn io.Closer) (*message.ConnectMessage, error) {
-	buf, err := GetMessageBuffer(conn)
-	if err != nil {
-		appLog.Errorf("Receive error: %v", err)
-		return nil, err
-	}
-
-	msg := message.NewConnectMessage()
-
-	_, err = msg.Decode(buf)
-	return msg, err
-}
-
-func GetConnAckMessage(conn io.Closer) (*message.ConnAckMessage, error) {
-	buf, err := GetMessageBuffer(conn)
-	if err != nil {
-		appLog.Debugf("Receive error: %v", err)
-		return nil, err
-	}
-
-	msg := message.NewConnAckMessage()
-
-	_, err = msg.Decode(buf)
-	appLog.Debugf("Received: %s", msg)
-	return msg, err
-}
-
+// WriteMessage write message into connection
 func WriteMessage(conn io.Closer, msg message.Provider) error {
 	buf := make([]byte, msg.Len())
 	_, err := msg.Encode(buf)
@@ -65,6 +39,7 @@ func WriteMessage(conn io.Closer, msg message.Provider) error {
 	return WriteMessageBuffer(conn, buf)
 }
 
+// GetMessageBuffer read message from connection
 func GetMessageBuffer(c io.Closer) ([]byte, error) {
 	if c == nil {
 		return nil, types.ErrInvalidConnectionType
@@ -123,6 +98,7 @@ func GetMessageBuffer(c io.Closer) ([]byte, error) {
 	return buf, nil
 }
 
+// WriteMessageBuffer write buffered message into connection
 func WriteMessageBuffer(c io.Closer, b []byte) error {
 	if c == nil {
 		return types.ErrInvalidConnectionType

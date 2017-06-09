@@ -419,11 +419,14 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 
 	resp := message.NewConnAckMessage()
 
-	var req *message.ConnectMessage
+	var req message.Provider
 
-	// This part is ugly
-	// Take some time to analyse and improve
-	if req, err = GetConnectMessage(conn); err != nil {
+	var buf []byte
+	if buf, err = GetMessageBuffer(conn); err != nil {
+		return err
+	}
+
+	if req, _, err = message.Decode(buf); err != nil {
 		if code, ok := message.ValidConnAckError(err); ok {
 			s.sysTree.Metric().Packets().Received(resp.Type())
 			resp.SetReturnCode(code)
@@ -437,27 +440,32 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 			return err
 		}
 	} else {
-		if req.UsernameFlag() {
-			if err = authMng.Password(string(req.Username()), string(req.Password())); err == nil {
-				resp.SetReturnCode(message.ConnectionAccepted)
+		switch r := req.(type) {
+		case *message.ConnectMessage:
+			if r.UsernameFlag() {
+				if err = authMng.Password(string(r.Username()), string(r.Password())); err == nil {
+					resp.SetReturnCode(message.ConnectionAccepted)
+				} else {
+					resp.SetReturnCode(message.ErrBadUsernameOrPassword)
+				}
 			} else {
-				resp.SetReturnCode(message.ErrBadUsernameOrPassword)
+				if s.config.Anonymous {
+					resp.SetReturnCode(message.ConnectionAccepted)
+				} else {
+					resp.SetReturnCode(message.ErrNotAuthorized)
+				}
 			}
-		} else {
-			if s.config.Anonymous {
-				resp.SetReturnCode(message.ConnectionAccepted)
-			} else {
-				resp.SetReturnCode(message.ErrNotAuthorized)
-			}
-		}
 
-		if req.KeepAlive() == 0 {
-			req.SetKeepAlive(uint16(s.config.KeepAlive))
-		}
-		if err = s.sessionsMgr.Start(req, resp, conn); err != nil {
-			if err != session.ErrNotAccepted {
-				appLog.Errorf("Couldn't start session: %s", err.Error())
+			if r.KeepAlive() == 0 {
+				r.SetKeepAlive(uint16(s.config.KeepAlive))
 			}
+			if err = s.sessionsMgr.Start(r, resp, conn); err != nil {
+				if err != session.ErrNotAccepted {
+					appLog.Errorf("Couldn't start session: %s", err.Error())
+				}
+			}
+		default:
+			return errors.New("Invalid message type")
 		}
 	}
 

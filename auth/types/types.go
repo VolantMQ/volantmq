@@ -37,6 +37,7 @@ var (
 	ErrInternal = errors.New("internal error")
 )
 
+// Type return string representation of the type
 func (t AccessType) Type() string {
 	switch t {
 	case AuthAccessTypeRead:
