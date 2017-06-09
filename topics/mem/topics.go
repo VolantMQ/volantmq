@@ -87,7 +87,7 @@ func (mT *provider) Configure(stat systree.TopicsStat, persist persistenceTypes.
 	for _, msg := range entries {
 		// Loading retained messages
 		if m, ok := msg.(*message.PublishMessage); ok {
-			appLog.Tracef("Loading retained message Qos %d, Topic: %s", m.QoS(), m.Topic())
+			appLog.Errorf("Loading retained message Qos %d, Topic: %s", m.QoS(), m.Topic())
 			mT.Retain(m) // nolint: errcheck
 		}
 	}
@@ -187,7 +187,7 @@ func (mT *provider) Close() error {
 	}
 
 	if len(toStore) > 0 {
-		appLog.Tracef("Storing %d retained messages", len(toStore))
+		appLog.Errorf("Storing %d retained messages", len(toStore))
 		mT.persist.Store(toStore) // nolint: errcheck
 	}
 
