@@ -94,6 +94,8 @@ type Type struct {
 
 	subscriber types.Subscriber
 
+	stopped chan struct{}
+
 	// Serialize access to this session
 	mu sync.Mutex
 
@@ -141,6 +143,7 @@ func newSession(config config) (*Type, error) {
 		publisher: publisher{
 			messages: list.New(),
 		},
+		stopped: make(chan struct{}),
 	}
 
 	s.publisher.cond = sync.NewCond(&s.publisher.lock)
@@ -253,6 +256,12 @@ func (s *Type) disconnect() {
 
 // stop session. Function assumed to be invoked once server about to shutdown
 func (s *Type) stop() {
+	select {
+	case <-s.stopped:
+		return
+	default:
+		close(s.stopped)
+	}
 	s.disconnect()
 
 	if !s.clean {
@@ -329,7 +338,7 @@ func (s *Type) publishToTopic(msg *message.PublishMessage) error {
 	// [MQTT-3.3.1.3]
 	if msg.Retain() {
 		if err := s.config.topicsMgr.Retain(msg); err != nil {
-			appLog.Errorf("Error retaining message [%s]: %v", s.config.id, err)
+			appLog.Tracef("Error retaining message [%s]: %v", s.config.id, err)
 		}
 
 		// [MQTT-3.3.1-7]
