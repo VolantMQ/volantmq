@@ -15,7 +15,7 @@
 package main
 
 import (
-	"net/http"
+	//"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
@@ -104,6 +104,14 @@ func main() {
 
 	var srv server.Type
 
+	listenerStatus := func(id string, start bool) {
+		if start {
+			appLog.Infof("Started listener [%s]", id)
+		} else {
+			appLog.Infof("Stopped listener [%s]", id)
+		}
+	}
+
 	srv, err = server.New(server.Config{
 		KeepAlive:      types.DefaultKeepAlive,
 		AckTimeout:     types.DefaultAckTimeout,
@@ -119,6 +127,7 @@ func main() {
 			Replace:   true,
 			OnAttempt: nil,
 		},
+		ListenerStatus: listenerStatus,
 	})
 	if err != nil {
 		appLog.Errorf(err.Error())
@@ -132,22 +141,16 @@ func main() {
 		return
 	}
 
-	go func() {
-		appLog.Errorf(http.ListenAndServe("localhost:6067", nil).Error())
-	}()
+	config := &server.Listener{
+		Scheme:      "tcp4",
+		Host:        "",
+		Port:        1883,
+		AuthManager: authMng,
+	}
 
-	go func() {
-		config := &server.Listener{
-			Scheme:      "tcp4",
-			Host:        "",
-			Port:        1883,
-			AuthManager: authMng,
-		}
-
-		if err = srv.ListenAndServe(config); err != nil {
-			appLog.Errorf("%s", err.Error())
-		}
-	}()
+	if err = srv.ListenAndServe(config); err != nil {
+		appLog.Errorf("%s", err.Error())
+	}
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)

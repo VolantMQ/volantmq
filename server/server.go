@@ -72,6 +72,8 @@ type Config struct {
 
 	// DupConfig behaviour of server when client with existing ID tries connect
 	DupConfig types.DuplicateConfig
+
+	ListenerStatus func(id string, start bool)
 }
 
 // Listener listener
@@ -118,10 +120,11 @@ type implementation struct {
 	// is closed, then it's a signal for it to shutdown as well.
 	quit chan struct{}
 
+	lock sync.Mutex
+
 	listeners struct {
 		list map[int]*Listener
 		wg   sync.WaitGroup
-		lock sync.Mutex
 	}
 
 	wgConnections sync.WaitGroup
@@ -228,6 +231,15 @@ func New(config Config) (Type, error) {
 // supplied should be of the form "protocol://host:port" that can be parsed by
 // url.Parse(). For example, an URI could be "tcp://0.0.0.0:1883".
 func (s *implementation) ListenAndServe(listener *Listener) error {
+	select {
+	case <-s.quit:
+		return nil
+	default:
+	}
+
+	defer s.lock.Unlock()
+	s.lock.Lock()
+
 	var err error
 
 	if listener.CertFile != "" && listener.KeyFile != "" {
@@ -240,7 +252,6 @@ func (s *implementation) ListenAndServe(listener *Listener) error {
 			listener.tlsConfig = nil
 			return err
 		}
-
 	}
 
 	var ln net.Listener
@@ -254,17 +265,24 @@ func (s *implementation) ListenAndServe(listener *Listener) error {
 		listener.listener = ln
 	}
 
-	s.listeners.lock.Lock()
 	if _, ok := s.listeners.list[listener.Port]; !ok {
 		listener.quit = s.quit
 		s.listeners.list[listener.Port] = listener
-		s.listeners.lock.Unlock()
-
 		s.listeners.wg.Add(1)
-		defer s.listeners.wg.Done()
-		err = s.serve(listener)
+
+		go func() {
+			defer s.listeners.wg.Done()
+
+			if s.config.ListenerStatus != nil {
+				s.config.ListenerStatus(listener.Scheme+"://"+listener.Host+":"+strconv.Itoa(listener.Port), true)
+			}
+			err = s.serve(listener)
+
+			if s.config.ListenerStatus != nil {
+				s.config.ListenerStatus(listener.Scheme+"://"+listener.Host+":"+strconv.Itoa(listener.Port), false)
+			}
+		}()
 	} else {
-		s.listeners.lock.Unlock()
 		err = errors.New("Listener already exists")
 	}
 
@@ -274,31 +292,35 @@ func (s *implementation) ListenAndServe(listener *Listener) error {
 // Close terminates the server by shutting down all the client connections and closing
 // the listener. It will, as best it can, clean up after itself.
 func (s *implementation) Close() error {
-	//defer func() {
-	//	if r := recover(); r != nil {
-	//		appLog.Errorf("Recover from panic: %s", r)
-	//	}
-	//}()
-
 	// By closing the quit channel, we are telling the server to stop accepting new
 	// connection.
-	close(s.quit)
+	select {
+	case <-s.quit:
+		return nil
+	default:
+		close(s.quit)
+	}
+
+	defer s.lock.Unlock()
+	s.lock.Lock()
 
 	// We then close all net.Listener, which will force Accept() to return if it's
 	// blocked waiting for new connections.
-	s.listeners.lock.Lock()
-	for port, l := range s.listeners.list {
+	for _, l := range s.listeners.list {
 		if err := l.listener.Close(); err != nil {
 			appLog.Errorf(err.Error())
 		}
-		delete(s.listeners.list, port)
 	}
-	s.listeners.lock.Unlock()
-	// Wait all of listeners has finished
-	s.listeners.wg.Wait()
 
 	// if there are any new connection in progress lets wait until they are finished
 	s.wgConnections.Wait()
+
+	// Wait all of listeners has finished
+	s.listeners.wg.Wait()
+
+	for port := range s.listeners.list {
+		delete(s.listeners.list, port)
+	}
 
 	if s.sessionsMgr != nil {
 		if s.persist != nil {
@@ -314,10 +336,6 @@ func (s *implementation) Close() error {
 }
 
 func (s *implementation) serve(l *Listener) error {
-	defer func() {
-		l.listener.Close() // nolint: errcheck, gas
-	}()
-
 	var tempDelay time.Duration // how long to sleep on accept failure
 
 	for {
