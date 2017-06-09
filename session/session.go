@@ -97,8 +97,17 @@ type Type struct {
 	// Serialize access to this session
 	mu sync.Mutex
 
-	wgSessionStarted sync.WaitGroup
-	wgSessionStopped sync.WaitGroup
+	wg struct {
+		conn struct {
+			started sync.WaitGroup
+			stopped sync.WaitGroup
+		}
+	}
+
+	//wgSessionStarted sync.WaitGroup
+	//wgSessionStopped sync.WaitGroup
+	wgConnection sync.WaitGroup
+	//wgConnectionStopped sync.WaitGroup
 
 	publisher publisher
 
@@ -108,8 +117,11 @@ type Type struct {
 	}
 
 	// Whether this is service is closed or not.
-	running int64
-	closed  int64
+	//running   int64
+	//closed    int64
+
+	connected int64
+	//connected chan struct{}
 
 	clean bool
 
@@ -166,25 +178,27 @@ func (s *Type) restore(messages *persistenceTypes.SessionMessages) {
 // Start inform session there is a new connection with matching clientID
 // thus provide necessary info to spin
 func (s *Type) start(msg *message.ConnectMessage, conn io.Closer) (err error) {
+	if !atomic.CompareAndSwapInt64(&s.connected, 0, 1) {
+		s.wg.conn.started.Wait()
+		return errors.New("Already running")
+	}
+
 	defer func() {
 		if err != nil {
 			close(s.publisher.quit)
 			s.conn = nil
-			atomic.StoreInt64(&s.running, 0)
+			atomic.StoreInt64(&s.connected, 0)
 		}
-		s.wgSessionStarted.Done()
+
+		// signal all waiting that connection has tried to start
+		s.wg.conn.started.Done()
 	}()
 
 	// In case we call start for stored session onClose might not finished
-	// it's work thus lets wait until it completed
-	s.wgSessionStopped.Wait()
-
-	if !atomic.CompareAndSwapInt64(&s.running, 0, 1) {
-		return errors.New("Already running")
-	}
-
-	s.wgSessionStarted.Add(1)
-	s.wgSessionStopped.Add(1)
+	// it's work yet thus lets wait until it has completed
+	s.wg.conn.stopped.Wait()
+	s.wg.conn.started.Add(1)
+	s.wg.conn.stopped.Add(1)
 
 	if msg.WillFlag() {
 		s.will = message.NewPublishMessage()
@@ -226,38 +240,20 @@ func (s *Type) start(msg *message.ConnectMessage, conn io.Closer) (err error) {
 }
 
 func (s *Type) disconnect() {
-	if !atomic.CompareAndSwapInt64(&s.closed, 0, 1) {
-		s.wgSessionStarted.Wait()
-		return
-	}
-
 	// If Stop has been issued by the server handler it looks like
 	// application about to shutdown, thus we try close network connection.
 	// If close successful connection manager invokes onClose method which cleans up writer.
 	// If close error just check writer goroutine has finished it's job
+	s.mu.Lock()
 	if s.conn != nil {
 		s.conn.config.conn.Close() // nolint: errcheck
 	}
+	s.mu.Unlock()
 }
 
 // stop session. Function assumed to be invoked once server about to shutdown
 func (s *Type) stop() {
-	if !atomic.CompareAndSwapInt64(&s.closed, 0, 1) {
-		s.wgSessionStarted.Wait()
-		return
-	}
-
-	// If Stop has been issued by the server handler it looks like
-	// application about to shutdown, thus we try close network connection.
-	// If close successful connection manager invokes onClose method which cleans up writer.
-	// If close error just check writer goroutine has finished it's job
-	var err error
-	if s.conn != nil {
-		if err = s.conn.config.conn.Close(); err != nil {
-			appLog.Errorf("Couldn't close connection [%s]: %s", s.config.id, err.Error())
-		}
-	}
-	s.wgSessionStopped.Wait()
+	s.disconnect()
 
 	if !s.clean {
 		s.config.callbacks.onClose(s.config.id, s.config.subscriptions)

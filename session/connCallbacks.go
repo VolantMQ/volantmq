@@ -10,8 +10,6 @@ import (
 
 func (s *Type) onClose(will bool) {
 	defer func() {
-		atomic.StoreInt64(&s.running, 0)
-
 		var persist *persistTypes.SessionMessages
 		shutdown := true
 
@@ -48,11 +46,12 @@ func (s *Type) onClose(will bool) {
 
 		s.config.callbacks.onDisconnect(s.config.id, persist, shutdown)
 
-		s.wgSessionStopped.Done()
+		atomic.StoreInt64(&s.connected, 0)
+		s.wg.conn.stopped.Done()
 	}()
 
 	// just in case make sure session has been started
-	s.wgSessionStarted.Wait()
+	s.wg.conn.started.Wait()
 
 	// [MQTT-3.1.3.3]
 	if will && s.will != nil {
@@ -88,8 +87,6 @@ func (s *Type) onClose(will bool) {
 	// Wait writer to finish it's job
 	s.publisher.stopped.Wait()
 
-	s.conn = nil
-
 	// [MQTT-3.3.1-7]
 	// Discard retained messages with QoS 0
 	s.retained.lock.Lock()
@@ -98,6 +95,10 @@ func (s *Type) onClose(will bool) {
 	}
 	s.retained.list = []*message.PublishMessage{}
 	s.retained.lock.Unlock()
+
+	s.mu.Lock()
+	s.conn = nil
+	s.mu.Unlock()
 }
 
 // onPublish invoked when server receives PUBLISH message from remote

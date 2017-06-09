@@ -26,30 +26,31 @@ type onProcess struct {
 }
 
 type connConfig struct {
-	id string
-
-	// The number of seconds to keep the connection live if there's no data.
-	// If not set then default to 5 mins.
-	keepAlive int
-
-	conn io.Closer
-
-	on onProcess
-
+	id            string
+	keepAlive     int
+	conn          io.Closer
+	on            onProcess
 	packetsMetric systree.PacketsMetric
 }
 
 type connection struct {
 	config connConfig
 	// Wait for the various goroutines to finish starting and stopping
-	wgStarted     sync.WaitGroup
-	wgStopped     sync.WaitGroup
-	wgConnStarted sync.WaitGroup
-	wgConnStopped sync.WaitGroup
-	wmu           sync.Mutex
+	wg struct {
+		routines struct {
+			started sync.WaitGroup
+			stopped sync.WaitGroup
+		}
+		conn struct {
+			started sync.WaitGroup
+			stopped sync.WaitGroup
+		}
+	}
 
-	// Whether this is service is closed or not.
-	closed int64
+	wmu sync.Mutex
+
+	// Whether this connection is running or not.
+	running int64
 
 	// Quit signal for determining when this service should end. If channel is closed,
 	// then exit.
@@ -81,8 +82,8 @@ func newConnection(config connConfig) (conn *connection, err error) {
 		will:   true,
 	}
 
-	conn.wgConnStarted.Add(1)
-	conn.wgConnStopped.Add(1)
+	conn.wg.conn.started.Add(1)
+	conn.wg.conn.stopped.Add(1)
 
 	// Create the incoming ring buffer
 	conn.in, err = buffer.New(buffer.DefaultBufferSize)
@@ -99,58 +100,51 @@ func newConnection(config connConfig) (conn *connection, err error) {
 	return conn, nil
 }
 
+// start serving messages over this connection
 func (s *connection) start() {
-	defer s.wgConnStarted.Done()
+	// firstly check if connection already runnin
+	if !atomic.CompareAndSwapInt64(&s.running, 0, 1) {
+		// already running. Check if previous call to start has finished before return
+		s.wg.conn.started.Wait()
+		return
+	}
 
-	// Sender is responsible for writing data in the buffer into the connection.
-	s.wgStarted.Add(1)
-	s.wgStopped.Add(1)
+	defer s.wg.conn.started.Done()
+
+	s.wg.routines.stopped.Add(3)
+
+	// these routines must start in specified order
+	// and next proceed next one only when previous finished
+	s.wg.routines.started.Add(1)
 	go s.sender()
-	s.wgStarted.Wait()
+	s.wg.routines.started.Wait()
 
-	// Processor is responsible for reading messages out of the buffer and processing
-	// them accordingly.
-	s.wgStarted.Add(1)
-	s.wgStopped.Add(1)
+	s.wg.routines.started.Add(1)
 	go s.processIncoming()
-	s.wgStarted.Wait()
+	s.wg.routines.started.Wait()
 
-	// Receiver is responsible for reading from the connection and putting data into
-	// a buffer.
-	s.wgStarted.Add(1)
-	s.wgStopped.Add(1)
+	s.wg.routines.started.Add(1)
 	go s.receiver()
-	s.wgStarted.Wait()
+	s.wg.routines.started.Wait()
 }
 
-// Stop service
 func (s *connection) stop() (ret bool) {
-	defer func() {
-		if r := recover(); r != nil {
-			appLog.Errorf("Recover from panic: %s", r)
-			debug.PrintStack()
-		}
-	}()
-
-	// In case stop invoked before newConnection() finished lets wait
-	s.wgConnStarted.Wait()
+	// wait if stop invoked before start finished
+	s.wg.conn.started.Wait()
 
 	// if connection stop has already been invoked wait for previous call to finish
-	if !atomic.CompareAndSwapInt64(&s.closed, 0, 1) {
-		s.wgConnStopped.Wait()
+	if !atomic.CompareAndSwapInt64(&s.running, 1, 0) {
+		// already running. Check if previous call to start has finished before return
+		s.wg.conn.stopped.Wait()
 		return false
 	}
 
 	// Close quit channel, effectively telling all the goroutines it's time to quit
-	if s.done != nil {
-		close(s.done)
-	}
+	close(s.done)
 
 	// Close the network connection
-	if s.config.conn != nil {
-		// we do not check for error here as connection might be already closed by session
-		s.config.conn.Close() // nolint: goling, errcheck
-	}
+	// we do not check for error here as connection might be already closed by session
+	s.config.conn.Close() // nolint: goling, errcheck
 
 	if err := s.in.Close(); err != nil {
 		appLog.Errorf("close input buffer error [%s]: %s", s.config.id, err.Error())
@@ -160,18 +154,17 @@ func (s *connection) stop() (ret bool) {
 		appLog.Errorf("close output buffer error [%s]: %s", s.config.id, err.Error())
 	}
 
-	// Wait for all the goroutines are finished
-	s.wgStopped.Wait()
+	// Wait for all the connection goroutines are finished
+	s.wg.routines.stopped.Wait()
 
-	s.config.on.close(s.will)
-
-	s.config.conn = nil
 	s.in = nil
 	s.out = nil
 
-	s.wgConnStopped.Done()
+	s.wg.conn.stopped.Done()
 
-	appLog.Tracef("Connection stopped [%s]", s.config.id)
+	defer func(will bool, onClose func(will bool)) {
+		onClose(will)
+	}(s.will, s.config.on.close)
 
 	return true
 }
@@ -198,7 +191,7 @@ func (s *connection) isDone() bool {
 func (s *connection) processIncoming() {
 	defer s.onRoutineReturn()
 
-	s.wgStarted.Done()
+	s.wg.routines.started.Done()
 
 	for {
 		// 1. firstly lets peak message type and total length
@@ -274,7 +267,7 @@ func (s *connection) processIncoming() {
 func (s *connection) receiver() {
 	defer s.onRoutineReturn()
 
-	s.wgStarted.Done()
+	s.wg.routines.started.Done()
 
 	switch conn := s.config.conn.(type) {
 	case net.Conn:
@@ -298,7 +291,7 @@ func (s *connection) receiver() {
 func (s *connection) sender() {
 	defer s.onRoutineReturn()
 
-	s.wgStarted.Done()
+	s.wg.routines.started.Done()
 
 	switch conn := s.config.conn.(type) {
 	case net.Conn:
@@ -313,7 +306,7 @@ func (s *connection) sender() {
 }
 
 func (s *connection) onRoutineReturn() {
-	s.wgStopped.Done()
+	s.wg.routines.stopped.Done()
 	s.stop()
 
 	if r := recover(); r != nil {
