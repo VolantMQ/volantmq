@@ -304,50 +304,47 @@ func (m *Manager) allocSession(id string, msg *message.ConnectMessage, resp *mes
 
 	var pSes persistenceTypes.Session
 
-	// if session is non-clean look for persistence
-	if !msg.CleanSession() {
-		// 1. search over suspended sessions with active subscriptions
-		m.sessions.suspended.lock.Lock()
-		if s, ok := m.sessions.suspended.list[id]; ok {
-			// session exists. acquire it
-			delete(m.sessions.suspended.list, id)
-			m.sessions.suspended.count.Done()
+	// session may be persisted before
+	m.sessions.suspended.lock.Lock()
+	if s, ok := m.sessions.suspended.list[id]; ok {
+		// session exists. acquire it
+		delete(m.sessions.suspended.list, id)
 
-			ses = s
-			present = true
+		ses = s
+		present = true
 
-			// do not check error here.
-			// if session has not been found there is no any persisted messages for it
-			pSes, _ = m.config.Persist.Get(id)
-		} else {
-			// no such session in persisted list. It might be shutdown
-			if pSes, err = m.config.Persist.Get(id); err != nil {
-				// No such session exists at all. Just create new
-				appLog.Debugf("Create new persist entry for [%s]", id)
-				if _, err = m.config.Persist.New(id); err != nil {
-					appLog.Errorf("Couldn't create persis object for session [%s]: %s", id, err.Error())
-				}
-			} else {
-				// Session exists and is in shutdown state
-				appLog.Debugf("Restore session [%s] from shutdown", id)
-				present = true
-			}
-		}
-
-		m.sessions.suspended.lock.Unlock()
+		// do not check error here.
+		// if session has not been found there is no any persisted messages for it
+		pSes, _ = m.config.Persist.Get(id)
 	} else {
-		// Session might change from non-clean to clean state
-		// if so make sure it does not exists in persistence db
-		// check if it was suspended
-		m.sessions.suspended.lock.Lock()
-		if suspended, ok := m.sessions.suspended.list[id]; ok {
-			suspended.stop()
-			delete(m.sessions.suspended.list, id)
+		// no such session in persisted list. It might be shutdown
+		if pSes, err = m.config.Persist.Get(id); err != nil {
+			// No such session exists at all. Just create new
+			appLog.Debugf("Create new persist entry for [%s]", id)
+			if _, err = m.config.Persist.New(id); err != nil {
+				appLog.Errorf("Couldn't create persis object for session [%s]: %s", id, err.Error())
+			}
+		} else {
+			// Session exists and is in shutdown state
+			appLog.Debugf("Restore session [%s] from shutdown", id)
+			present = true
 		}
-		m.sessions.suspended.lock.Unlock()
+	}
+
+	m.sessions.suspended.lock.Unlock()
+
+	// check if new session is clean. if so wipe previous session before continue
+	if msg.CleanSession() && ses != nil {
+		ses.stop()
+		ses = nil
+
 		if err = m.config.Persist.Delete(id); err != nil {
 			appLog.Tracef("Couldn't wipe session after restore [%s]: %s", id, err.Error())
 		}
+
+		present = false
+	} else if !msg.CleanSession() && ses != nil {
+		m.sessions.suspended.count.Done()
 	}
 
 	if ses == nil {
