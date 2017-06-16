@@ -121,7 +121,7 @@ func NewManager(cfg Config) (*Manager, error) {
 							id:             sID,
 							callbacks: managerCallbacks{
 								onDisconnect: m.onDisconnect,
-								onClose:      m.onClose,
+								onStop:       m.onStop,
 								onPublish:    m.onPublish,
 							},
 						}
@@ -194,14 +194,17 @@ func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessag
 		id = m.genSessionID()
 	}
 
-	m.sessions.active.lock.Lock()
-	ses = m.sessions.active.list[id]
+	m.sessions.active.lock.RLock()
 
+	alloc := true
 	// there is no such active session
 	// proceed to either persisted or new one
-	if ses == nil {
-		ses, present, err = m.allocSession(id, msg, resp)
-	} else {
+	if s, ok := m.sessions.active.list[id]; ok {
+		ses = s
+	}
+	m.sessions.active.lock.RUnlock()
+
+	if ses != nil {
 		replaced := true
 		// session already exists thus duplicate case happened
 		if !m.config.OnDup.Replace {
@@ -209,15 +212,10 @@ func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessag
 			resp.SetReturnCode(message.ErrIdentifierRejected)
 			err = ErrDupNotAllowed
 			replaced = false
+			alloc = false
 		} else {
 			// duplicate allowed stop current session
-			m.sessions.active.lock.Unlock()
-			ses.stop()
-			m.sessions.active.lock.Lock()
-
-			// previous session stopped
-			// lets create new one
-			ses, present, err = m.allocSession(id, msg, resp)
+			ses.stop(true)
 		}
 
 		// notify subscriber about dup attempt
@@ -226,7 +224,9 @@ func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessag
 		}
 	}
 
-	m.sessions.active.lock.Unlock()
+	if alloc {
+		ses, present, err = m.allocSession(id, msg, resp)
+	}
 
 	return nil
 }
@@ -240,9 +240,8 @@ func (m *Manager) Shutdown() error {
 	case <-m.quit:
 		return errors.New("already stopped")
 	default:
+		close(m.quit)
 	}
-
-	close(m.quit)
 
 	// 1. Now signal all active sessions to finish
 	m.sessions.active.lock.Lock()
@@ -259,7 +258,7 @@ func (m *Manager) Shutdown() error {
 
 	// 4. Signal suspended sessions to exit
 	for _, s := range m.sessions.suspended.list {
-		s.stop()
+		s.stop(false)
 	}
 
 	// 2. Wait until suspended sessions stopped
@@ -294,7 +293,7 @@ func (m *Manager) allocSession(id string, msg *message.ConnectMessage, resp *mes
 		id:             id,
 		callbacks: managerCallbacks{
 			onDisconnect: m.onDisconnect,
-			onClose:      m.onClose,
+			onStop:       m.onStop,
 			onPublish:    m.onPublish,
 		},
 	}
@@ -310,13 +309,28 @@ func (m *Manager) allocSession(id string, msg *message.ConnectMessage, resp *mes
 		// session exists. acquire it
 		delete(m.sessions.suspended.list, id)
 
-		ses = s
-		present = true
+		if msg.CleanSession() {
+			// client may want clear previously persisted state. If client with same ID is clean
+			// delete all persisted data
 
-		// do not check error here.
-		// if session has not been found there is no any persisted messages for it
-		pSes, _ = m.config.Persist.Get(id)
-	} else {
+			s.stop(false)
+			if err = m.config.Persist.Delete(id); err != nil {
+				appLog.Tracef("Couldn't wipe session after restore [%s]: %s", id, err.Error())
+			}
+		} else {
+			if s != nil && s.isOpen() {
+				ses = s
+				present = true
+				// do not check error here.
+				// if session has not been found there is no any persisted messages for it
+				pSes, _ = m.config.Persist.Get(id)
+				m.sessions.suspended.count.Done()
+			}
+		}
+	}
+	m.sessions.suspended.lock.Unlock()
+
+	if ses == nil {
 		// no such session in persisted list. It might be shutdown
 		if pSes, err = m.config.Persist.Get(id); err != nil {
 			// No such session exists at all. Just create new
@@ -329,25 +343,7 @@ func (m *Manager) allocSession(id string, msg *message.ConnectMessage, resp *mes
 			appLog.Debugf("Restore session [%s] from shutdown", id)
 			present = true
 		}
-	}
 
-	m.sessions.suspended.lock.Unlock()
-
-	// check if new session is clean. if so wipe previous session before continue
-	if msg.CleanSession() && ses != nil {
-		ses.stop()
-		ses = nil
-
-		if err = m.config.Persist.Delete(id); err != nil {
-			appLog.Tracef("Couldn't wipe session after restore [%s]: %s", id, err.Error())
-		}
-
-		present = false
-	} else if !msg.CleanSession() && ses != nil {
-		m.sessions.suspended.count.Done()
-	}
-
-	if ses == nil {
 		if ses, err = newSession(sConfig); err != nil {
 			ses = nil
 			resp.SetReturnCode(message.ErrServerUnavailable)
@@ -374,15 +370,17 @@ func (m *Manager) allocSession(id string, msg *message.ConnectMessage, resp *mes
 			}
 		}
 
+		m.sessions.active.lock.Lock()
 		m.sessions.active.list[id] = ses
+		m.sessions.active.lock.Unlock()
 		m.sessions.active.count.Add(1)
 	}
 
 	return ses, present, err
 }
 
-// close is only invoked for non-clean session
-func (m *Manager) onClose(id string, s message.TopicsQoS) {
+// onStop is only invoked for non-clean session
+func (m *Manager) onStop(id string, s message.TopicsQoS) {
 	defer m.sessions.suspended.count.Done()
 
 	ses, err := m.config.Persist.Get(id)
@@ -418,14 +416,15 @@ func (m *Manager) onPublish(id string, msg *message.PublishMessage) {
 func (m *Manager) onDisconnect(id string, messages *persistenceTypes.SessionMessages, shutdown bool) {
 	defer m.sessions.active.count.Done()
 
+	// non-nil messages object means this is non-clean session
 	if messages != nil {
+		// persist messages if any
 		if ses, err := m.config.Persist.Get(id); err != nil {
 			appLog.Errorf("Trying to persist session that has not been initiated for persistence [%s]: %s", id, err.Error())
 		} else {
 			var sesMsg persistenceTypes.Messages
 			if sesMsg, err = ses.Messages(); err == nil {
 				if len(messages.Out.Messages) > 0 {
-
 					if err = sesMsg.Store("out", messages.Out.Messages); err != nil {
 						appLog.Errorf("Couldn't persist messages [%s]: %s", id, err.Error())
 					}
@@ -441,12 +440,12 @@ func (m *Manager) onDisconnect(id string, messages *persistenceTypes.SessionMess
 			}
 		}
 
+		// if session has active subscriptions move it to suspended place
 		if !shutdown {
-			// copy session to persisted list
 			m.sessions.suspended.lock.Lock()
-			m.sessions.active.lock.Lock()
+			m.sessions.active.lock.RLock()
 			m.sessions.suspended.list[id] = m.sessions.active.list[id]
-			m.sessions.active.lock.Unlock()
+			m.sessions.active.lock.RUnlock()
 			m.sessions.suspended.count.Add(1)
 			m.sessions.suspended.lock.Unlock()
 		}

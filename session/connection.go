@@ -22,7 +22,7 @@ type onProcess struct {
 	ack         func(msg message.Provider) error
 	subscribe   func(msg *message.SubscribeMessage) error
 	unSubscribe func(msg *message.UnSubscribeMessage) (*message.UnSubAckMessage, error)
-	close       func(will bool)
+	disconnect  func(will bool)
 }
 
 type connConfig struct {
@@ -159,9 +159,9 @@ func (s *connection) stop() (ret bool) {
 
 	s.wg.conn.stopped.Done()
 
-	defer func(will bool, onClose func(will bool)) {
-		onClose(will)
-	}(s.will, s.config.on.close)
+	defer func(will bool, onDisconnect func(will bool)) {
+		onDisconnect(will)
+	}(s.will, s.config.on.disconnect)
 
 	return true
 }

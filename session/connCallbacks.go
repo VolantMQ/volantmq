@@ -8,7 +8,7 @@ import (
 	persistTypes "github.com/troian/surgemq/persistence/types"
 )
 
-func (s *Type) onClose(will bool) {
+func (s *Type) onDisconnect(will bool) {
 	defer func() {
 		var persist *persistTypes.SessionMessages
 		shutdown := true
@@ -68,11 +68,8 @@ func (s *Type) onClose(will bool) {
 
 	for t, q := range s.config.subscriptions {
 		// if this is clean session unsubscribe from all topics
-		if s.clean {
-			unSub(t, q)
-			delete(s.config.subscriptions, t)
-		} else if q == message.QosAtMostOnce {
-			// if session is non clean unsubscribe only from topics with Fire and Forget QoS
+		// if session is non-clean unsubscribe only QoS 0 topics
+		if s.clean || q == message.QosAtMostOnce {
 			unSub(t, q)
 			delete(s.config.subscriptions, t)
 		}
@@ -158,7 +155,7 @@ func (s *Type) onAck(msg message.Provider) error {
 		if _, err = s.conn.writeMessage(resp); err == nil {
 			// 3. PUBREL delivered to remote. Wait to PUBCOMP
 		} else {
-			appLog.Errorf("[%s] Couldn't deliver PUBREL. Requeue publish", s.config.id)
+			appLog.Tracef("[%s] Couldn't deliver PUBREL. Requeue publish", s.config.id)
 			// Couldn't deliver message. Remove it from ack queue and put into publish queue
 			s.ack.pubOut.ack(resp) // nolint: errcheck
 			s.publisher.lock.Lock()

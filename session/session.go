@@ -31,9 +31,12 @@ import (
 )
 
 type managerCallbacks struct {
-	onClose      func(id string, s message.TopicsQoS)
-	onDisconnect func(id string, messages *persistenceTypes.SessionMessages, suspend bool)
-	onPublish    func(id string, msg *message.PublishMessage)
+	// onClose called when session has done all work and should be deleted
+	onStop func(id string, s message.TopicsQoS)
+	// onDisconnect called when session stopped net connection and should be either suspended or deleted
+	onDisconnect func(id string, messages *persistenceTypes.SessionMessages, shutdown bool)
+	// onPublish
+	onPublish func(id string, msg *message.PublishMessage)
 }
 
 // Config is system wide configuration parameters for every session
@@ -224,7 +227,7 @@ func (s *Type) start(msg *message.ConnectMessage, conn io.Closer) (err error) {
 				ack:         s.onAck,
 				subscribe:   s.onSubscribe,
 				unSubscribe: s.onUnSubscribe,
-				close:       s.onClose,
+				disconnect:  s.onDisconnect,
 			},
 			packetsMetric: s.config.metric.packets,
 		})
@@ -255,7 +258,7 @@ func (s *Type) disconnect() {
 }
 
 // stop session. Function assumed to be invoked once server about to shutdown
-func (s *Type) stop() {
+func (s *Type) stop(wait bool) {
 	select {
 	case <-s.stopped:
 		return
@@ -264,8 +267,21 @@ func (s *Type) stop() {
 	}
 	s.disconnect()
 
+	if wait {
+		s.wg.conn.stopped.Wait()
+	}
+
 	if !s.clean {
-		s.config.callbacks.onClose(s.config.id, s.config.subscriptions)
+		s.config.callbacks.onStop(s.config.id, s.config.subscriptions)
+	}
+}
+
+func (s *Type) isOpen() bool {
+	select {
+	case <-s.stopped:
+		return false
+	default:
+		return true
 	}
 }
 
