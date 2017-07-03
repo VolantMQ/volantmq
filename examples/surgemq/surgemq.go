@@ -19,10 +19,9 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
-	"runtime/debug"
+	_ "runtime/debug"
 	"syscall"
 
-	"github.com/juju/loggo"
 	"github.com/spf13/viper"
 	"github.com/troian/surgemq/auth"
 	authTypes "github.com/troian/surgemq/auth/types"
@@ -30,9 +29,8 @@ import (
 	"github.com/troian/surgemq/server"
 	_ "github.com/troian/surgemq/topics/mem"
 	"github.com/troian/surgemq/types"
+	"go.uber.org/zap"
 )
-
-var appLog loggo.Logger
 
 type internalAuth struct {
 	creds map[string]string
@@ -57,25 +55,27 @@ func (a internalAuth) PskKey(hint, identity string, key []byte, maxKeyLen int) e
 }
 
 func main() {
+	logger, _ := zap.NewProduction() // nolint: gas
+	sugar := logger.Sugar()
+
 	defer func() {
 		if r := recover(); r != nil {
-			appLog.Errorf("Recover from panic: %s", r)
-			debug.PrintStack()
+			sugar.Errorf("Recover from panic: %v", r)
 		}
 	}()
 
 	var err error
 
-	appLog.SetLogLevel(loggo.DEBUG)
-	appLog.Infof("Starting application")
+	sugar.Named("example")
+	sugar.Infof("Starting application")
 
 	viper.SetConfigName("config")
 	viper.AddConfigPath("conf")
 	viper.SetConfigType("json")
 
-	appLog.Infof("Initializing configs")
+	sugar.Infof("Initializing configs")
 	if err = viper.ReadInConfig(); err != nil {
-		appLog.Errorf("Fatal error config file: %s \n", err)
+		sugar.Errorf("Fatal error config file: %s \n", err)
 		os.Exit(1)
 	}
 
@@ -89,7 +89,7 @@ func main() {
 	}
 
 	if err = viper.UnmarshalKey("mqtt.auth.internal", &internalCreds); err != nil {
-		appLog.Errorf("Fatal error config file: %s \n", err)
+		sugar.Errorf("Fatal error config file: %s \n", err)
 		os.Exit(1)
 	}
 
@@ -98,7 +98,7 @@ func main() {
 	}
 
 	if err = auth.Register("internal", ia); err != nil {
-		appLog.Errorf(err.Error())
+		sugar.Errorf(err.Error())
 		os.Exit(1)
 	}
 
@@ -106,9 +106,9 @@ func main() {
 
 	listenerStatus := func(id string, start bool) {
 		if start {
-			appLog.Infof("Started listener [%s]", id)
+			sugar.Infof("Started listener [%s]", id)
 		} else {
-			appLog.Infof("Stopped listener [%s]", id)
+			sugar.Infof("Stopped listener [%s]", id)
 		}
 	}
 
@@ -130,14 +130,14 @@ func main() {
 		ListenerStatus: listenerStatus,
 	})
 	if err != nil {
-		appLog.Errorf(err.Error())
+		sugar.Errorf(err.Error())
 		os.Exit(1)
 	}
 
 	var authMng *auth.Manager
 
 	if authMng, err = auth.NewManager("internal"); err != nil {
-		appLog.Errorf("Couldn't register *amqp* auth provider: %s", err.Error())
+		sugar.Errorf("Couldn't register *amqp* auth provider: %s", err.Error())
 		return
 	}
 
@@ -149,14 +149,14 @@ func main() {
 	}
 
 	if err = srv.ListenAndServe(config); err != nil {
-		appLog.Errorf("%s", err.Error())
+		sugar.Errorf("%s", err.Error())
 	}
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
-	appLog.Warningf("Received signal: [%s]\n", <-ch)
+	sugar.Warnf("Received signal: [%s]\n", <-ch)
 
 	if err = srv.Close(); err != nil {
-		appLog.Errorf(err.Error())
+		sugar.Errorf(err.Error())
 	}
 }
