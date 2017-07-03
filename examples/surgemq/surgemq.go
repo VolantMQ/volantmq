@@ -60,7 +60,7 @@ func main() {
 
 	defer func() {
 		if r := recover(); r != nil {
-			sugar.Errorf("Recover from panic: %", r)
+			sugar.Errorf("Recover from panic: %v", r)
 		}
 	}()
 
