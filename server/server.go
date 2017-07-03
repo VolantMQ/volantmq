@@ -24,7 +24,6 @@ import (
 
 	"strconv"
 
-	"github.com/juju/loggo"
 	"github.com/troian/surgemq/auth"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/persistence"
@@ -33,6 +32,7 @@ import (
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics"
 	types "github.com/troian/surgemq/types"
+	"go.uber.org/zap"
 )
 
 // Config server configuration
@@ -132,11 +132,14 @@ type implementation struct {
 	sysTree systree.Provider
 }
 
-var appLog loggo.Logger
+var logger *zap.Logger
+var dLogger *zap.Logger
 
 func init() {
-	appLog = loggo.GetLogger("mq.server")
-	appLog.SetLogLevel(loggo.INFO)
+	logger, _ = zap.NewProduction()
+	logger.Named("server")
+	dLogger, _ = zap.NewDevelopment()
+	dLogger.Named("server")
 }
 
 // New new server
@@ -308,7 +311,7 @@ func (s *implementation) Close() error {
 	// blocked waiting for new connections.
 	for _, l := range s.listeners.list {
 		if err := l.listener.Close(); err != nil {
-			appLog.Errorf(err.Error())
+			logger.Error(err.Error())
 		}
 	}
 
@@ -360,7 +363,10 @@ func (s *implementation) serve(l *Listener) error {
 				if max := 1 * time.Second; tempDelay > max {
 					tempDelay = max
 				}
-				appLog.Errorf("Accept error: %v; retrying in %v", err, tempDelay)
+				logger.Error("Accept error. Retrying",
+					zap.Error(err),
+					zap.Duration("retryIn", tempDelay))
+
 				time.Sleep(tempDelay)
 				continue
 			}
@@ -398,7 +404,7 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 	var conn types.Conn
 
 	if conn, err = types.NewConn(netConn, s.sysTree.Metric().Bytes()); err != nil {
-		appLog.Errorf("Couldn't create connection interface: %s", err.Error())
+		logger.Error("Couldn't create connection interface", zap.Error(err))
 		return err
 	}
 
@@ -436,7 +442,7 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 			}
 			s.sysTree.Metric().Packets().Sent(resp.Type())
 		} else {
-			appLog.Warningf("Couldn't read connect message: %s", err.Error())
+			logger.Warn("Couldn't read connect message", zap.Error(err))
 			return err
 		}
 	} else {
@@ -461,7 +467,7 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 			}
 			if err = s.sessionsMgr.Start(r, resp, conn); err != nil {
 				if err != session.ErrNotAccepted {
-					appLog.Errorf("Couldn't start session: %s", err.Error())
+					logger.Error("Couldn't start session", zap.Error(err))
 				}
 			}
 		default:

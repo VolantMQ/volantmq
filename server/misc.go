@@ -24,6 +24,7 @@ import (
 
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/types"
+	"go.uber.org/zap"
 )
 
 // WriteMessage write message into connection
@@ -31,10 +32,9 @@ func WriteMessage(conn io.Closer, msg message.Provider) error {
 	buf := make([]byte, msg.Len())
 	_, err := msg.Encode(buf)
 	if err != nil {
-		appLog.Debugf("Write error: %v", err)
+		dLogger.Debug("Write error", zap.Error(err))
 		return err
 	}
-	appLog.Debugf("Writing: %s", msg)
 
 	return WriteMessageBuffer(conn, buf)
 }
@@ -65,7 +65,7 @@ func GetMessageBuffer(c io.Closer) ([]byte, error) {
 
 		n, err := conn.Read(b[0:])
 		if err != nil {
-			appLog.Errorf("Read error: %v", err)
+			dLogger.Error("Read error", zap.Error(err))
 			return nil, err
 		}
 

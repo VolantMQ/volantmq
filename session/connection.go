@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"errors"
-	"runtime/debug"
 	"sync"
 	"sync/atomic"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/types"
+	"go.uber.org/zap"
 )
 
 type onProcess struct {
@@ -147,11 +147,11 @@ func (s *connection) stop() (ret bool) {
 	s.config.conn.Close() // nolint: goling, errcheck, gas
 
 	if err := s.in.Close(); err != nil {
-		appLog.Errorf("close input buffer error [%s]: %s", s.config.id, err.Error())
+		logger.Error("close input buffer error", zap.String("ClientID", s.config.id), zap.Error(err))
 	}
 
 	if err := s.out.Close(); err != nil {
-		appLog.Errorf("close output buffer error [%s]: %s", s.config.id, err.Error())
+		logger.Error("close output buffer error", zap.String("ClientID", s.config.id), zap.Error(err))
 	}
 
 	// Wait for all the connection goroutines are finished
@@ -196,8 +196,7 @@ func (s *connection) processIncoming() {
 
 		if err != nil {
 			if err != io.EOF {
-				appLog.Errorf("Error peeking next message size [%s]: %v", s.config.id, err)
-
+				logger.Error("Error peeking next message size", zap.String("ClientID", s.config.id), zap.Error(err))
 			}
 			return
 		}
@@ -208,7 +207,7 @@ func (s *connection) processIncoming() {
 		msg, _, err = s.readMessage(mType, total)
 		if err != nil {
 			if err != io.EOF {
-				appLog.Errorf("Error peeking next message [%s]: %v: total len: %d", s.config.id, err, total)
+				logger.Error("Error peeking next message", zap.String("ClientID", s.config.id), zap.Error(err), zap.Int("total len", total))
 			}
 			return
 		}
@@ -246,7 +245,7 @@ func (s *connection) processIncoming() {
 			s.will = false
 			return
 		default:
-			appLog.Errorf("[%s] Unsupported incoming message type: %s", s.config.id, msg.Type().String())
+			logger.Error("Unsupported incoming message type", zap.String("ClientID", s.config.id), zap.String("type", msg.Type().String()))
 			return
 		}
 
@@ -280,7 +279,7 @@ func (s *connection) receiver() {
 			}
 		}
 	default:
-		appLog.Errorf("Invalid connection type [%s]", s.config.id)
+		logger.Error("Invalid connection type", zap.String("ClientID", s.config.id))
 	}
 }
 
@@ -298,7 +297,7 @@ func (s *connection) sender() {
 			}
 		}
 	default:
-		appLog.Errorf("Invalid connection type [%s]", s.config.id)
+		logger.Error("Invalid connection type", zap.String("ClientID", s.config.id))
 	}
 }
 
@@ -307,8 +306,8 @@ func (s *connection) onRoutineReturn() {
 	s.stop()
 
 	if r := recover(); r != nil {
-		appLog.Errorf("Recover from panic: %s", r)
-		debug.PrintStack()
+		logger.Error("Recover from panic")
+		//debug.PrintStack()
 	}
 }
 
@@ -435,13 +434,13 @@ func (s *connection) readMessage(mType message.Type, total int) (message.Provide
 
 	msg, err = mType.New()
 	if err != nil {
-		appLog.Errorf(err.Error())
+		logger.Error("Error", zap.Error(err))
 		return msg, 0, err
 	}
 
 	n, err = msg.Decode(s.in.ExternalBuf[:total])
 	if err != nil {
-		appLog.Errorf(err.Error())
+		logger.Error("Error", zap.Error(err))
 	}
 
 	return msg, n, err

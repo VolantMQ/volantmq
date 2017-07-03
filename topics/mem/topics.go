@@ -20,12 +20,12 @@ import (
 
 	"errors"
 
-	"github.com/juju/loggo"
 	"github.com/troian/surgemq/message"
 	persistenceTypes "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics"
 	"github.com/troian/surgemq/types"
+	"go.uber.org/zap"
 )
 
 //var (
@@ -53,15 +53,16 @@ type provider struct {
 
 var _ topics.Provider = (*provider)(nil)
 
-var appLog loggo.Logger
+var logger *zap.Logger
+var dLogger *zap.Logger
 
 func init() {
-}
+	logger, _ = zap.NewProduction()
+	logger.Named("topic.mem")
+	dLogger, _ = zap.NewDevelopment()
+	dLogger.Named("topic.mem")
 
-func init() {
 	topics.Register("mem", NewMemProvider())
-	appLog = loggo.GetLogger("topics.mem")
-	appLog.SetLogLevel(loggo.INFO)
 }
 
 // NewMemProvider returns an new instance of the provider, which is implements the
@@ -87,7 +88,7 @@ func (mT *provider) Configure(stat systree.TopicsStat, persist persistenceTypes.
 	for _, msg := range entries {
 		// Loading retained messages
 		if m, ok := msg.(*message.PublishMessage); ok {
-			appLog.Tracef("Loading retained message Qos %d, Topic: %s", m.QoS(), m.Topic())
+			dLogger.Debug("Loading retained message", zap.String("topic", m.Topic()), zap.Int8("QoS", int8(m.QoS())))
 			mT.Retain(m) // nolint: errcheck
 		}
 	}
@@ -141,7 +142,7 @@ func (mT *provider) Publish(msg *message.PublishMessage) error {
 	for _, s := range subs {
 		if s != nil {
 			if err := s.Publish(msg); err != nil {
-				appLog.Errorf(err.Error())
+				logger.Error("Error", zap.Error(err))
 			}
 
 			s.WgWriters.Done()
@@ -187,7 +188,7 @@ func (mT *provider) Close() error {
 	}
 
 	if len(toStore) > 0 {
-		appLog.Tracef("Storing %d retained messages", len(toStore))
+		dLogger.Debug("Storing retained messages", zap.Int("amount", len(toStore)))
 		mT.persist.Store(toStore) // nolint: errcheck
 	}
 
