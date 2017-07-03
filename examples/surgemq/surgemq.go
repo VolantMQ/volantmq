@@ -55,7 +55,7 @@ func (a internalAuth) PskKey(hint, identity string, key []byte, maxKeyLen int) e
 }
 
 func main() {
-	logger, _ := zap.NewProduction()
+	logger, _ := zap.NewProduction() // nolint: gas
 	sugar := logger.Sugar()
 
 	defer func() {
