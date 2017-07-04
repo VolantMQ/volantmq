@@ -335,9 +335,9 @@ func (m *Manager) allocSession(id string, msg *message.ConnectMessage, resp *mes
 		// no such session in persisted list. It might be shutdown
 		if pSes, err = m.config.Persist.Get(id); err != nil {
 			// No such session exists at all. Just create new
-			dLogger.Debug("Create new persist entry", zap.String("ClientID", id), zap.Error(err))
+			dLogger.Debug("Create new persist entry", zap.String("ClientID", id))
 			if _, err = m.config.Persist.New(id); err != nil {
-				logger.Error("Couldn't create persis object for session [%s]: %s", zap.String("ClientID", id), zap.Error(err))
+				logger.Error("Couldn't create persis object for session", zap.String("ClientID", id), zap.Error(err))
 			}
 		} else {
 			// Session exists and is in shutdown state

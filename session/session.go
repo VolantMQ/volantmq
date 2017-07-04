@@ -224,6 +224,7 @@ func (s *Type) start(msg *message.ConnectMessage, conn io.Closer) (err error) {
 	s.clean = msg.CleanSession()
 	s.publisher.quit = make(chan struct{})
 
+	s.mu.Lock()
 	s.conn, err = newConnection(
 		connConfig{
 			id:        s.config.id,
@@ -238,6 +239,7 @@ func (s *Type) start(msg *message.ConnectMessage, conn io.Closer) (err error) {
 			},
 			packetsMetric: s.config.metric.packets,
 		})
+	s.mu.Unlock()
 	if err != nil {
 		return err
 	}

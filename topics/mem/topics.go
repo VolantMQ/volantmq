@@ -156,14 +156,13 @@ func (mT *provider) Retain(msg *message.PublishMessage) error {
 	mT.rmu.Lock()
 	defer mT.rmu.Unlock()
 
-	// [MQTT-3.3.1-10]
-	if len(msg.Payload()) == 0 {
-		return mT.rRoot.remove(msg.Topic())
-	}
-
-	// [MQTT-3.3.1-7]
-	if msg.QoS() == message.QosAtMostOnce {
+	// [MQTT-3.3.1-10]            [MQTT-3.3.1-7]
+	if len(msg.Payload()) == 0 || msg.QoS() == message.QosAtMostOnce {
 		mT.rRoot.remove(msg.Topic()) // nolint: errcheck, gas
+
+		if len(msg.Payload()) == 0 {
+			return nil
+		}
 	}
 
 	return mT.rRoot.insert(msg.Topic(), msg)
