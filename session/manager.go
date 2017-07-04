@@ -313,11 +313,7 @@ func (m *Manager) allocSession(id string, msg *message.ConnectMessage, resp *mes
 		if msg.CleanSession() {
 			// client may want clear previously persisted state. If client with same ID is clean
 			// delete all persisted data
-
 			s.stop(false)
-			if err = m.config.Persist.Delete(id); err != nil {
-				dLogger.Debug("Couldn't wipe session after restore", zap.String("ClientID", id), zap.Error(err))
-			}
 		} else {
 			if s != nil && s.isOpen() {
 				ses = s
@@ -332,43 +328,39 @@ func (m *Manager) allocSession(id string, msg *message.ConnectMessage, resp *mes
 	m.sessions.suspended.lock.Unlock()
 
 	if ses == nil {
-		// no such session in persisted list. It might be shutdown
-		if pSes, err = m.config.Persist.Get(id); err != nil {
-			// No such session exists at all. Just create new
-			dLogger.Debug("Create new persist entry", zap.String("ClientID", id))
-			if _, err = m.config.Persist.New(id); err != nil {
-				logger.Error("Couldn't create persis object for session", zap.String("ClientID", id), zap.Error(err))
-			}
-		} else {
-			// Session exists and is in shutdown state
-			dLogger.Debug("Restore session from shutdown", zap.String("ClientID", id))
-			present = true
-		}
+		dLogger.Debug("Allocate session", zap.String("ClientID", id))
 
 		if ses, err = newSession(sConfig); err != nil {
 			ses = nil
 			resp.SetReturnCode(message.ErrServerUnavailable)
-			if !msg.CleanSession() {
-				if err = m.config.Persist.Delete(id); err != nil {
-					logger.Error("Couldn't wipe session after restore", zap.String("ClientID", id), zap.Error(err))
-				}
-			}
 		}
 	}
 
 	if ses != nil {
-		// restore messages if it was shutdown non-clean session
-		if pSes != nil {
-			var sesMessages persistenceTypes.Messages
-			if sesMessages, err = pSes.Messages(); err == nil {
-				var storedMessages *persistenceTypes.SessionMessages
-				if storedMessages, err = sesMessages.Load(); err == nil {
-					ses.restore(storedMessages)
-					if err = sesMessages.Delete(); err != nil {
-						logger.Error("Couldn't wipe messages after restore", zap.String("ClientID", id), zap.Error(err))
+		// if session is not clean try find persisted object or create new if not exists
+		if !msg.CleanSession() {
+			if pSes, err = m.config.Persist.Get(id); err == nil {
+				// Session exists and is in shutdown state
+				dLogger.Debug("Restore session from shutdown", zap.String("ClientID", id))
+				present = true
+				var sesMessages persistenceTypes.Messages
+				if sesMessages, err = pSes.Messages(); err == nil {
+					var storedMessages *persistenceTypes.SessionMessages
+					if storedMessages, err = sesMessages.Load(); err == nil {
+						ses.restore(storedMessages)
+						if err = sesMessages.Delete(); err != nil {
+							logger.Error("Couldn't wipe messages after restore", zap.String("ClientID", id), zap.Error(err))
+						}
 					}
 				}
+			} else {
+				dLogger.Debug("Create new persist entry", zap.String("ClientID", id))
+				if _, err = m.config.Persist.New(id); err != nil {
+					logger.Error("Couldn't create persis object for session", zap.String("ClientID", id), zap.Error(err))
+				}
 			}
+		} else {
+			m.config.Persist.Delete(id)
 		}
 
 		m.sessions.active.lock.Lock()
