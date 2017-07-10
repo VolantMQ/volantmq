@@ -20,6 +20,7 @@ import (
 
 	"errors"
 
+	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/message"
 	persistenceTypes "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/systree"
@@ -49,19 +50,16 @@ type provider struct {
 	stat systree.TopicsStat
 
 	persist persistenceTypes.Retained
+
+	log struct {
+		prod *zap.Logger
+		dev  *zap.Logger
+	}
 }
 
 var _ topics.Provider = (*provider)(nil)
 
-var logger *zap.Logger
-var dLogger *zap.Logger
-
 func init() {
-	logger, _ = zap.NewProduction()
-	logger.Named("topic.mem")
-	dLogger, _ = zap.NewDevelopment()
-	dLogger.Named("topic.mem")
-
 	topics.Register("mem", NewMemProvider())
 }
 
@@ -70,10 +68,15 @@ func init() {
 // subscriptions and retained messages in memory. The content is not persistend so
 // when the server goes, everything will be gone. Use with care.
 func NewMemProvider() topics.Provider {
-	return &provider{
+	p := &provider{
 		sRoot: newSNode(),
 		rRoot: newRNode(),
 	}
+
+	p.log.prod = surgemq.GetProdLogger().Named("topics.mem")
+	p.log.dev = surgemq.GetDevLogger().Named("topics.mem")
+
+	return p
 }
 
 func (mT *provider) Configure(stat systree.TopicsStat, persist persistenceTypes.Retained) error {
@@ -88,7 +91,7 @@ func (mT *provider) Configure(stat systree.TopicsStat, persist persistenceTypes.
 	for _, msg := range entries {
 		// Loading retained messages
 		if m, ok := msg.(*message.PublishMessage); ok {
-			dLogger.Debug("Loading retained message", zap.String("topic", m.Topic()), zap.Int8("QoS", int8(m.QoS())))
+			mT.log.dev.Debug("Loading retained message", zap.String("topic", m.Topic()), zap.Int8("QoS", int8(m.QoS())))
 			mT.Retain(m) // nolint: errcheck
 		}
 	}
@@ -142,7 +145,7 @@ func (mT *provider) Publish(msg *message.PublishMessage) error {
 	for _, s := range subs {
 		if s != nil {
 			if err := s.Publish(msg); err != nil {
-				logger.Error("Error", zap.Error(err))
+				mT.log.prod.Error("Error", zap.Error(err))
 			}
 
 			s.WgWriters.Done()
@@ -187,7 +190,7 @@ func (mT *provider) Close() error {
 	}
 
 	if len(toStore) > 0 {
-		dLogger.Debug("Storing retained messages", zap.Int("amount", len(toStore)))
+		mT.log.dev.Debug("Storing retained messages", zap.Int("amount", len(toStore)))
 		mT.persist.Store(toStore) // nolint: errcheck
 	}
 

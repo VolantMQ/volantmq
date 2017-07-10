@@ -22,6 +22,7 @@ import (
 	"net"
 	"sync"
 
+	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/message"
 	persistenceTypes "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/systree"
@@ -81,6 +82,11 @@ type Manager struct {
 	}
 	lock sync.Mutex
 	quit chan struct{}
+
+	log struct {
+		prod *zap.Logger
+		dev  *zap.Logger
+	}
 }
 
 // NewManager alloc new
@@ -98,6 +104,9 @@ func NewManager(cfg Config) (*Manager, error) {
 		quit:   make(chan struct{}),
 	}
 
+	m.log.prod = surgemq.GetProdLogger().Named("manager.session")
+	m.log.dev = surgemq.GetDevLogger().Named("manager.session")
+
 	m.sessions.active.list = make(map[string]*Type)
 	m.sessions.suspended.list = make(map[string]*Type)
 
@@ -111,7 +120,7 @@ func NewManager(cfg Config) (*Manager, error) {
 				if subscriptions, err = persistedSubs.Get(); err == nil && len(subscriptions) > 0 {
 					var sID string
 					if sID, err = s.ID(); err != nil {
-						logger.Error("Couldn't get persisted session ID", zap.Error(err))
+						m.log.prod.Error("Couldn't get persisted session ID", zap.Error(err))
 					} else {
 						sCfg := config{
 							topicsMgr:      m.config.TopicsMgr,
@@ -132,18 +141,16 @@ func NewManager(cfg Config) (*Manager, error) {
 
 						var ses *Type
 						if ses, err = newSession(sCfg); err != nil {
-							logger.Error("Couldn't start persisted session", zap.String("ClientID", sID), zap.Error(err))
+							m.log.prod.Error("Couldn't start persisted session", zap.String("ClientID", sID), zap.Error(err))
 						} else {
 							m.sessions.suspended.list[sID] = ses
 							m.sessions.suspended.count.Add(1)
 							if err = persistedSubs.Delete(); err != nil {
-								logger.Error("Couldn't wipe subscriptions after restore", zap.String("ClientID", sID), zap.Error(err))
+								m.log.prod.Error("Couldn't wipe subscriptions after restore", zap.String("ClientID", sID), zap.Error(err))
 							}
 						}
 					}
 				}
-			} else {
-				//logger.Error(zap.Error(err))
 			}
 		}
 	}
@@ -161,7 +168,7 @@ func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessag
 		resp.SetSessionPresent(present)
 
 		if err = m.writeMessage(conn, resp); err != nil {
-			logger.Error("Couldn't write CONNACK", zap.Error(err))
+			m.log.prod.Error("Couldn't write CONNACK", zap.Error(err))
 		}
 		if err == nil {
 			if ses != nil {
@@ -169,7 +176,7 @@ func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessag
 				if err = ses.start(msg, conn); err != nil {
 					// should never get into this section.
 					// if so this code does not work as expected :)
-					logger.Error("Something really bad happened", zap.Error(err))
+					m.log.prod.Error("Something really bad happened", zap.Error(err))
 				}
 			}
 		}
@@ -328,7 +335,7 @@ func (m *Manager) allocSession(id string, msg *message.ConnectMessage, resp *mes
 	m.sessions.suspended.lock.Unlock()
 
 	if ses == nil {
-		dLogger.Debug("Allocate session", zap.String("ClientID", id))
+		m.log.dev.Debug("Allocate session", zap.String("ClientID", id))
 
 		if ses, err = newSession(sConfig); err != nil {
 			ses = nil
@@ -341,7 +348,7 @@ func (m *Manager) allocSession(id string, msg *message.ConnectMessage, resp *mes
 		if !msg.CleanSession() {
 			if pSes, err = m.config.Persist.Get(id); err == nil {
 				// Session exists and is in shutdown state
-				dLogger.Debug("Restore session from shutdown", zap.String("ClientID", id))
+				m.log.dev.Debug("Restore session from shutdown", zap.String("ClientID", id))
 				present = true
 				var sesMessages persistenceTypes.Messages
 				if sesMessages, err = pSes.Messages(); err == nil {
@@ -349,18 +356,18 @@ func (m *Manager) allocSession(id string, msg *message.ConnectMessage, resp *mes
 					if storedMessages, err = sesMessages.Load(); err == nil {
 						ses.restore(storedMessages)
 						if err = sesMessages.Delete(); err != nil {
-							logger.Error("Couldn't wipe messages after restore", zap.String("ClientID", id), zap.Error(err))
+							m.log.prod.Error("Couldn't wipe messages after restore", zap.String("ClientID", id), zap.Error(err))
 						}
 					}
 				}
 			} else {
-				dLogger.Debug("Create new persist entry", zap.String("ClientID", id))
+				m.log.dev.Debug("Create new persist entry", zap.String("ClientID", id))
 				if _, err = m.config.Persist.New(id); err != nil {
-					logger.Error("Couldn't create persis object for session", zap.String("ClientID", id), zap.Error(err))
+					m.log.prod.Error("Couldn't create persis object for session", zap.String("ClientID", id), zap.Error(err))
 				}
 			}
 		} else {
-			m.config.Persist.Delete(id)
+			m.config.Persist.Delete(id) // nolint: errcheck
 		}
 
 		m.sessions.active.lock.Lock()
@@ -378,15 +385,15 @@ func (m *Manager) onStop(id string, s message.TopicsQoS) {
 
 	ses, err := m.config.Persist.Get(id)
 	if err != nil {
-		logger.Error("Trying to persist session that has not been initiated for persistence", zap.String("ClientID", id), zap.Error(err))
+		m.log.prod.Error("Trying to persist session that has not been initiated for persistence", zap.String("ClientID", id), zap.Error(err))
 	} else {
 		var sesSubs persistenceTypes.Subscriptions
 		if sesSubs, err = ses.Subscriptions(); err == nil {
 			if err = sesSubs.Add(s); err != nil {
-				logger.Error("Couldn't persist subscriptions", zap.String("ClientID", id), zap.Error(err))
+				m.log.prod.Error("Couldn't persist subscriptions", zap.String("ClientID", id), zap.Error(err))
 			}
 		} else {
-			logger.Error("Error", zap.Error(err))
+			m.log.prod.Error("Error", zap.Error(err))
 		}
 	}
 }
@@ -396,13 +403,13 @@ func (m *Manager) onPublish(id string, msg *message.PublishMessage) {
 		var sesMsg persistenceTypes.Messages
 		if sesMsg, err = ses.Messages(); err == nil {
 			if err = sesMsg.Store("out", []message.Provider{msg}); err != nil {
-				logger.Error("Couldn't store messages", zap.String("ClientID", id), zap.Error(err))
+				m.log.prod.Error("Couldn't store messages", zap.String("ClientID", id), zap.Error(err))
 			}
 		} else {
-			logger.Error("Couldn't store messages", zap.String("ClientID", id), zap.Error(err))
+			m.log.prod.Error("Couldn't store messages", zap.String("ClientID", id), zap.Error(err))
 		}
 	} else {
-		logger.Error("Couldn't persist message for shutdown session", zap.String("ClientID", id), zap.Error(err))
+		m.log.prod.Error("Couldn't persist message for shutdown session", zap.String("ClientID", id), zap.Error(err))
 	}
 }
 
@@ -413,23 +420,23 @@ func (m *Manager) onDisconnect(id string, messages *persistenceTypes.SessionMess
 	if messages != nil {
 		// persist messages if any
 		if ses, err := m.config.Persist.Get(id); err != nil {
-			logger.Error("Trying to persist session that has not been initiated for persistence", zap.String("ClientID", id), zap.Error(err))
+			m.log.prod.Error("Trying to persist session that has not been initiated for persistence", zap.String("ClientID", id), zap.Error(err))
 		} else {
 			var sesMsg persistenceTypes.Messages
 			if sesMsg, err = ses.Messages(); err == nil {
 				if len(messages.Out.Messages) > 0 {
 					if err = sesMsg.Store("out", messages.Out.Messages); err != nil {
-						logger.Error("Couldn't persist messages", zap.String("ClientID", id), zap.Error(err))
+						m.log.prod.Error("Couldn't persist messages", zap.String("ClientID", id), zap.Error(err))
 					}
 				}
 
 				if len(messages.In.Messages) > 0 {
 					if err = sesMsg.Store("in", messages.In.Messages); err != nil {
-						logger.Error("Couldn't persist messages", zap.String("ClientID", id), zap.Error(err))
+						m.log.prod.Error("Couldn't persist messages", zap.String("ClientID", id), zap.Error(err))
 					}
 				}
 			} else {
-				logger.Error("Couldn't persist messages", zap.String("ClientID", id), zap.Error(err))
+				m.log.prod.Error("Couldn't persist messages", zap.String("ClientID", id), zap.Error(err))
 			}
 		}
 
@@ -459,7 +466,7 @@ func (m *Manager) writeMessage(conn io.Closer, msg message.Provider) error {
 	buf := make([]byte, msg.Len())
 	_, err := msg.Encode(buf)
 	if err != nil {
-		dLogger.Debug("Write error", zap.Error(err))
+		m.log.dev.Debug("Write error", zap.Error(err))
 		return err
 	}
 	//appLog.Debugf("Writing: %s", msg)

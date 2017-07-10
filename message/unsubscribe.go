@@ -17,7 +17,6 @@ package message
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 
 	"github.com/troian/surgemq/buffer"
 )
@@ -39,18 +38,6 @@ func NewUnSubscribeMessage() *UnSubscribeMessage {
 	msg.SetType(UNSUBSCRIBE) // nolint: errcheck
 
 	return msg
-}
-
-func (msg *UnSubscribeMessage) String() string {
-	msgstr := fmt.Sprintf("%s", msg.header)
-
-	i := 0
-	for t := range msg.topics {
-		msgstr = fmt.Sprintf("%s, Topic%d=%s", msgstr, i, t)
-		i++
-	}
-
-	return msgstr
 }
 
 // Topics returns a list of topics sent by the Client.

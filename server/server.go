@@ -24,6 +24,7 @@ import (
 
 	"strconv"
 
+	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/auth"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/persistence"
@@ -130,16 +131,11 @@ type implementation struct {
 	wgConnections sync.WaitGroup
 
 	sysTree systree.Provider
-}
 
-var logger *zap.Logger
-var dLogger *zap.Logger
-
-func init() {
-	logger, _ = zap.NewProduction()
-	logger.Named("server")
-	dLogger, _ = zap.NewDevelopment()
-	dLogger.Named("server")
+	log struct {
+		prod *zap.Logger
+		dev  *zap.Logger
+	}
 }
 
 // New new server
@@ -148,6 +144,9 @@ func New(config Config) (Type, error) {
 		config: config,
 		quit:   make(chan struct{}),
 	}
+
+	s.log.prod = surgemq.GetProdLogger().Named("server")
+	s.log.dev = surgemq.GetDevLogger().Named("server")
 
 	s.listeners.list = make(map[int]*Listener)
 
@@ -311,7 +310,7 @@ func (s *implementation) Close() error {
 	// blocked waiting for new connections.
 	for _, l := range s.listeners.list {
 		if err := l.listener.Close(); err != nil {
-			logger.Error(err.Error())
+			s.log.prod.Error(err.Error())
 		}
 	}
 
@@ -363,7 +362,7 @@ func (s *implementation) serve(l *Listener) error {
 				if max := 1 * time.Second; tempDelay > max {
 					tempDelay = max
 				}
-				logger.Error("Accept error. Retrying",
+				s.log.prod.Error("Accept error. Retrying",
 					zap.Error(err),
 					zap.Duration("retryIn", tempDelay))
 
@@ -404,7 +403,7 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 	var conn types.Conn
 
 	if conn, err = types.NewConn(netConn, s.sysTree.Metric().Bytes()); err != nil {
-		logger.Error("Couldn't create connection interface", zap.Error(err))
+		s.log.prod.Error("Couldn't create connection interface", zap.Error(err))
 		return err
 	}
 
@@ -442,7 +441,7 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 			}
 			s.sysTree.Metric().Packets().Sent(resp.Type())
 		} else {
-			logger.Warn("Couldn't read connect message", zap.Error(err))
+			s.log.prod.Warn("Couldn't read connect message", zap.Error(err))
 			return err
 		}
 	} else {
@@ -467,7 +466,7 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 			}
 			if err = s.sessionsMgr.Start(r, resp, conn); err != nil {
 				if err != session.ErrNotAccepted {
-					logger.Error("Couldn't start session", zap.Error(err))
+					s.log.prod.Error("Couldn't start session", zap.Error(err))
 				}
 			}
 		default:

@@ -195,7 +195,7 @@ func TestSubscriptions(t *testing.T) {
 			sessions, err = pr.Sessions()
 			require.NoError(t, err)
 
-			session, err = sessions.New("test1")
+			_, err = sessions.New("test1")
 			require.EqualError(t, err, types.ErrAlreadyExists.Error())
 
 			session, err = sessions.Get("test1")
@@ -237,11 +237,11 @@ func TestRetained(t *testing.T) {
 				msg := message.NewPublishMessage()
 				msg.SetPacketID(uint16(i))
 				msg.SetRetain(true)
-				msg.SetTopic("Topic:" + strconv.Itoa(i))
+				msg.SetTopic("Topic:" + strconv.Itoa(i)) // nolint: errcheck
 				if (i % 10) != 0 {
-					msg.SetQoS(message.QosExactlyOnce)
+					msg.SetQoS(message.QosExactlyOnce) // nolint: errcheck
 				} else {
-					msg.SetQoS(message.QosAtLeastOnce)
+					msg.SetQoS(message.QosAtLeastOnce) // nolint: errcheck
 				}
 			}
 
@@ -320,12 +320,12 @@ func TestMessages(t *testing.T) {
 				}
 
 				if (i % 2) != 0 {
-					m.SetQoS(message.QosAtLeastOnce)
+					m.SetQoS(message.QosAtLeastOnce) // nolint: errcheck
 				} else {
-					m.SetQoS(message.QosExactlyOnce)
+					m.SetQoS(message.QosExactlyOnce) // nolint: errcheck
 				}
 
-				m.SetTopic("test topic: " + strconv.Itoa(i))
+				m.SetTopic("test topic: " + strconv.Itoa(i)) // nolint: errcheck
 
 				m.SetPayload([]byte("test payload: " + strconv.Itoa(i)))
 

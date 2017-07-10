@@ -37,6 +37,7 @@ var (
 		0x0, 0x0,
 	}
 
+	// nolint: megacheck
 	msgBytes = []byte{
 		byte(CONNECT << 4),
 		60,

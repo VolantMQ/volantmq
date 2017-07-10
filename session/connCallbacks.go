@@ -56,14 +56,14 @@ func (s *Type) onDisconnect(will bool) {
 
 	// [MQTT-3.1.3.3]
 	if will && s.will != nil {
-		dLogger.Debug("Connection unexpectedly closed. Sending Will", zap.String("ClientID", s.config.id))
+		s.log.dev.Debug("Connection unexpectedly closed. Sending Will", zap.String("ClientID", s.config.id))
 		s.publishToTopic(s.will) // nolint: errcheck
 	}
 
 	unSub := func(t string, q message.QosType) {
-		dLogger.Debug("Unsubscribing from topic", zap.String("ClientID", s.config.id), zap.String("topic", t))
+		s.log.dev.Debug("Unsubscribing from topic", zap.String("ClientID", s.config.id), zap.String("topic", t))
 		if err := s.config.topicsMgr.UnSubscribe(t, &s.subscriber); err != nil {
-			logger.Error("Couldn't unsubscribe from topic", zap.String("ClientID", s.config.id), zap.String("topic", t), zap.Error(err))
+			s.log.prod.Error("Couldn't unsubscribe from topic", zap.String("ClientID", s.config.id), zap.String("topic", t), zap.Error(err))
 		}
 	}
 
@@ -156,7 +156,7 @@ func (s *Type) onAck(msg message.Provider) error {
 		if _, err = s.conn.writeMessage(resp); err == nil {
 			// 3. PUBREL delivered to remote. Wait to PUBCOMP
 		} else {
-			dLogger.Debug("Couldn't deliver PUBREL. Requeue publish", zap.String("ClientID", s.config.id))
+			s.log.dev.Debug("Couldn't deliver PUBREL. Requeue publish", zap.String("ClientID", s.config.id))
 			// Couldn't deliver message. Remove it from ack queue and put into publish queue
 			s.ack.pubOut.ack(resp) // nolint: errcheck
 			s.publisher.lock.Lock()
@@ -173,13 +173,13 @@ func (s *Type) onAck(msg message.Provider) error {
 		if _, err = s.conn.writeMessage(resp); err == nil {
 			s.ack.pubIn.ack(msg) // nolint: errcheck
 		} else {
-			logger.Error("Couldn't deliver PUBCOMP", zap.String("ClientID", s.config.id))
+			s.log.prod.Error("Couldn't deliver PUBCOMP", zap.String("ClientID", s.config.id))
 		}
 	case *message.PubCompMessage:
 		// PUBREL message has been acknowledged, release from queue
 		s.ack.pubOut.ack(msg) // nolint: errcheck
 	default:
-		logger.Error("Unsupported ack message type", zap.String("ClientID", s.config.id), zap.String("type", msg.Type().String()))
+		s.log.prod.Error("Unsupported ack message type", zap.String("ClientID", s.config.id), zap.String("type", msg.Type().String()))
 	}
 
 	return err
@@ -199,7 +199,7 @@ func (s *Type) onSubscribe(msg *message.SubscribeMessage) error {
 	for _, t := range topics {
 		// Let topic manager know we want to listen to given topic
 		qos := msg.TopicQos(t)
-		dLogger.Debug("Subscribing", zap.String("ClientID", s.config.id), zap.String("topic", t), zap.Int8("QoS", int8(qos)))
+		s.log.dev.Debug("Subscribing", zap.String("ClientID", s.config.id), zap.String("topic", t), zap.Int8("QoS", int8(qos)))
 		rQoS, err := s.config.topicsMgr.Subscribe(t, qos, &s.subscriber)
 		if err != nil {
 			return err
@@ -219,7 +219,7 @@ func (s *Type) onSubscribe(msg *message.SubscribeMessage) error {
 
 	if _, err := s.conn.writeMessage(resp); err != nil {
 		// TODO: Unsubscribe
-		logger.Error("Couldn't send SUBACK", zap.String("ClientID", s.config.id), zap.Error(err))
+		s.log.prod.Error("Couldn't send SUBACK", zap.String("ClientID", s.config.id), zap.Error(err))
 		return err
 	}
 

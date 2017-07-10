@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/buffer"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/systree"
@@ -63,6 +64,11 @@ type connection struct {
 	out *buffer.Type
 
 	will bool
+
+	log struct {
+		prod *zap.Logger
+		dev  *zap.Logger
+	}
 }
 
 type netReader interface {
@@ -81,6 +87,9 @@ func newConnection(config connConfig) (conn *connection, err error) {
 		done:   make(chan struct{}),
 		will:   true,
 	}
+
+	conn.log.prod = surgemq.GetProdLogger().Named("session.conn." + config.id)
+	conn.log.dev = surgemq.GetDevLogger().Named("session.conn." + config.id)
 
 	conn.wg.conn.started.Add(1)
 	conn.wg.conn.stopped.Add(1)
@@ -147,11 +156,11 @@ func (s *connection) stop() (ret bool) {
 	s.config.conn.Close() // nolint: goling, errcheck, gas
 
 	if err := s.in.Close(); err != nil {
-		logger.Error("close input buffer error", zap.String("ClientID", s.config.id), zap.Error(err))
+		s.log.prod.Error("close input buffer error", zap.String("ClientID", s.config.id), zap.Error(err))
 	}
 
 	if err := s.out.Close(); err != nil {
-		logger.Error("close output buffer error", zap.String("ClientID", s.config.id), zap.Error(err))
+		s.log.prod.Error("close output buffer error", zap.String("ClientID", s.config.id), zap.Error(err))
 	}
 
 	// Wait for all the connection goroutines are finished
@@ -196,7 +205,7 @@ func (s *connection) processIncoming() {
 
 		if err != nil {
 			if err != io.EOF {
-				logger.Error("Error peeking next message size", zap.String("ClientID", s.config.id), zap.Error(err))
+				s.log.prod.Error("Error peeking next message size", zap.String("ClientID", s.config.id), zap.Error(err))
 			}
 			return
 		}
@@ -207,7 +216,7 @@ func (s *connection) processIncoming() {
 		msg, _, err = s.readMessage(mType, total)
 		if err != nil {
 			if err != io.EOF {
-				logger.Error("Error peeking next message", zap.String("ClientID", s.config.id), zap.Error(err), zap.Int("total len", total))
+				s.log.prod.Error("Error peeking next message", zap.String("ClientID", s.config.id), zap.Error(err), zap.Int("total len", total))
 			}
 			return
 		}
@@ -245,7 +254,7 @@ func (s *connection) processIncoming() {
 			s.will = false
 			return
 		default:
-			logger.Error("Unsupported incoming message type", zap.String("ClientID", s.config.id), zap.String("type", msg.Type().String()))
+			s.log.prod.Error("Unsupported incoming message type", zap.String("ClientID", s.config.id), zap.String("type", msg.Type().String()))
 			return
 		}
 
@@ -279,7 +288,7 @@ func (s *connection) receiver() {
 			}
 		}
 	default:
-		logger.Error("Invalid connection type", zap.String("ClientID", s.config.id))
+		s.log.prod.Error("Invalid connection type", zap.String("ClientID", s.config.id))
 	}
 }
 
@@ -297,7 +306,7 @@ func (s *connection) sender() {
 			}
 		}
 	default:
-		logger.Error("Invalid connection type", zap.String("ClientID", s.config.id))
+		s.log.prod.Error("Invalid connection type", zap.String("ClientID", s.config.id))
 	}
 }
 
@@ -306,7 +315,7 @@ func (s *connection) onRoutineReturn() {
 	s.stop()
 
 	if r := recover(); r != nil {
-		logger.Error("Recover from panic")
+		s.log.prod.Error("Recover from panic")
 		//debug.PrintStack()
 	}
 }
@@ -363,40 +372,40 @@ func (s *connection) peekMessageSize() (message.Type, int, error) {
 
 // peekMessage reads a message from the buffer, but the bytes are NOT committed.
 // This means the buffer still thinks the bytes are not read yet.
-func (s *connection) peekMessage(mtype message.Type, total int) (message.Provider, int, error) {
-
-	var b []byte
-	var err error
-	var i int
-	var n int
-	var msg message.Provider
-
-	if s.in == nil {
-		return nil, 0, types.ErrBufferNotReady
-	}
-
-	// Peek until we get total bytes
-	for i = 0; ; i++ {
-		// Peek remLen bytes from the input buffer.
-		b, err = s.in.ReadWait(total)
-		if err != nil && err != buffer.ErrBufferInsufficientData {
-			return nil, 0, err
-		}
-
-		// If not enough bytes are returned, then continue until there's enough.
-		if len(b) >= total {
-			break
-		}
-	}
-
-	msg, err = mtype.New()
-	if err != nil {
-		return nil, 0, err
-	}
-
-	n, err = msg.Decode(b)
-	return msg, n, err
-}
+//func (s *connection) peekMessage(mtype message.Type, total int) (message.Provider, int, error) {
+//
+//	var b []byte
+//	var err error
+//	var i int
+//	var n int
+//	var msg message.Provider
+//
+//	if s.in == nil {
+//		return nil, 0, types.ErrBufferNotReady
+//	}
+//
+//	// Peek until we get total bytes
+//	for i = 0; ; i++ {
+//		// Peek remLen bytes from the input buffer.
+//		b, err = s.in.ReadWait(total)
+//		if err != nil && err != buffer.ErrBufferInsufficientData {
+//			return nil, 0, err
+//		}
+//
+//		// If not enough bytes are returned, then continue until there's enough.
+//		if len(b) >= total {
+//			break
+//		}
+//	}
+//
+//	msg, err = mtype.New()
+//	if err != nil {
+//		return nil, 0, err
+//	}
+//
+//	n, err = msg.Decode(b)
+//	return msg, n, err
+//}
 
 // readMessage reads and copies a message from the buffer. The buffer bytes are
 // committed as a result of the read.
@@ -434,13 +443,13 @@ func (s *connection) readMessage(mType message.Type, total int) (message.Provide
 
 	msg, err = mType.New()
 	if err != nil {
-		logger.Error("Error", zap.Error(err))
+		s.log.prod.Error("Error", zap.Error(err))
 		return msg, 0, err
 	}
 
 	n, err = msg.Decode(s.in.ExternalBuf[:total])
 	if err != nil {
-		logger.Error("Error", zap.Error(err))
+		s.log.prod.Error("Error", zap.Error(err))
 	}
 
 	return msg, n, err

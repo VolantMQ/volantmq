@@ -22,6 +22,7 @@ import (
 	"io"
 	"sync/atomic"
 
+	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/message"
 	persistenceTypes "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/systree"
@@ -109,11 +110,6 @@ type Type struct {
 		}
 	}
 
-	//wgSessionStarted sync.WaitGroup
-	//wgSessionStopped sync.WaitGroup
-	wgConnection sync.WaitGroup
-	//wgConnectionStopped sync.WaitGroup
-
 	publisher publisher
 
 	retained struct {
@@ -121,26 +117,16 @@ type Type struct {
 		list []*message.PublishMessage
 	}
 
-	// Whether this is service is closed or not.
-	//running   int64
-	//closed    int64
-
 	connected int64
-	//connected chan struct{}
 
 	clean bool
 
 	packetID uint64
-}
 
-var logger *zap.Logger
-var dLogger *zap.Logger
-
-func init() {
-	logger, _ = zap.NewProduction()
-	logger.Named("server")
-	dLogger, _ = zap.NewDevelopment()
-	dLogger.Named("server")
+	log struct {
+		prod *zap.Logger
+		dev  *zap.Logger
+	}
 }
 
 func newSession(config config) (*Type, error) {
@@ -152,6 +138,9 @@ func newSession(config config) (*Type, error) {
 		stopped: make(chan struct{}),
 	}
 
+	s.log.prod = surgemq.GetProdLogger().Named("session." + s.config.id)
+	s.log.dev = surgemq.GetDevLogger().Named("session." + s.config.id)
+
 	s.publisher.cond = sync.NewCond(&s.publisher.lock)
 
 	s.ack.pubIn = newAckQueue(s.onAckIn)
@@ -161,8 +150,7 @@ func newSession(config config) (*Type, error) {
 	// restore subscriptions if any
 	for t, q := range s.config.subscriptions {
 		if _, err := s.config.topicsMgr.Subscribe(t, q, &s.subscriber); err != nil {
-			logger.Error("Couldn't subscribe",
-				zap.String("ClientID", s.config.id),
+			s.log.prod.Error("Couldn't subscribe",
 				zap.String("topic", t),
 				zap.Int8("QoS", int8(q)),
 				zap.Error(err))
@@ -363,7 +351,7 @@ func (s *Type) publishToTopic(msg *message.PublishMessage) error {
 	// [MQTT-3.3.1.3]
 	if msg.Retain() {
 		if err := s.config.topicsMgr.Retain(msg); err != nil {
-			logger.Error("Error retaining message", zap.String("ClientID", s.config.id), zap.Error(err))
+			s.log.prod.Error("Error retaining message", zap.String("ClientID", s.config.id), zap.Error(err))
 		}
 
 		// [MQTT-3.3.1-7]
@@ -381,7 +369,7 @@ func (s *Type) publishToTopic(msg *message.PublishMessage) error {
 	msg.SetRetain(false)
 
 	if err := s.config.topicsMgr.Publish(msg); err != nil {
-		logger.Error(" Error retrieving subscribers list", zap.String("ClientID", s.config.id), zap.Error(err))
+		s.log.prod.Error(" Error retrieving subscribers list", zap.String("ClientID", s.config.id), zap.Error(err))
 	}
 
 	return nil
@@ -421,7 +409,7 @@ func (s *Type) onAckOut(msg message.Provider, status error) {
 func (s *Type) publishWorker() {
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Error("Recover from panic")
+			s.log.prod.Error("Recover from panic")
 		}
 
 		s.publisher.lock.Lock()
@@ -438,7 +426,7 @@ func (s *Type) publishWorker() {
 		s.publisher.lock.Unlock()
 		s.publisher.stopped.Done()
 		if r := recover(); r != nil {
-			logger.Error("Recover from panic")
+			s.log.prod.Error("Recover from panic")
 		}
 	}()
 
