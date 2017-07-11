@@ -146,14 +146,27 @@ func main() {
 		return
 	}
 
-	config := &server.Listener{
-		Scheme:      "tcp4",
-		Host:        "",
-		Port:        1883,
-		AuthManager: authMng,
+	config := &server.ListenerTCP{
+		Scheme: "tcp4",
+		Host:   "",
+		ListenerBase: server.ListenerBase{
+			Port:        1883,
+			AuthManager: authMng,
+		},
 	}
 
 	if err = srv.ListenAndServe(config); err != nil {
+		logger.Error("Couldn't start listener", zap.Error(err))
+	}
+
+	configWs := &server.ListenerWS{
+		ListenerBase: server.ListenerBase{
+			Port:        8080,
+			AuthManager: authMng,
+		},
+	}
+
+	if err = srv.ListenAndServe(configWs); err != nil {
 		logger.Error("Couldn't start listener", zap.Error(err))
 	}
 

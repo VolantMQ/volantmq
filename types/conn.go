@@ -4,6 +4,9 @@ import (
 	"net"
 	"time"
 
+	"io"
+
+	"github.com/gorilla/websocket"
 	"github.com/troian/surgemq/systree"
 )
 
@@ -60,14 +63,21 @@ type Conn interface {
 	SetWriteDeadline(t time.Time) error
 }
 
-type connImpl struct {
+type connTCP struct {
 	conn net.Conn
 	stat systree.BytesMetric
 }
 
-// NewConn initiate connection with net.Conn object and stat
-func NewConn(conn net.Conn, stat systree.BytesMetric) (Conn, error) {
-	c := &connImpl{
+type connWs struct {
+	conn *websocket.Conn
+	stat systree.BytesMetric
+
+	prev io.Reader
+}
+
+// NewConnTCP initiate connection with net.Conn tcp object and stat
+func NewConnTCP(conn net.Conn, stat systree.BytesMetric) (Conn, error) {
+	c := &connTCP{
 		conn: conn,
 		stat: stat,
 	}
@@ -75,7 +85,17 @@ func NewConn(conn net.Conn, stat systree.BytesMetric) (Conn, error) {
 	return c, nil
 }
 
-func (c *connImpl) Read(b []byte) (int, error) {
+// NewConnWs initiate connection with websocket.Conn ws object and stat
+func NewConnWs(conn *websocket.Conn, stat systree.BytesMetric) (Conn, error) {
+	c := &connWs{
+		conn: conn,
+		stat: stat,
+	}
+
+	return c, nil
+}
+
+func (c *connTCP) Read(b []byte) (int, error) {
 	n, err := c.conn.Read(b)
 
 	c.stat.Received(uint64(n))
@@ -83,33 +103,130 @@ func (c *connImpl) Read(b []byte) (int, error) {
 	return n, err
 }
 
-func (c *connImpl) Write(b []byte) (int, error) {
+func (c *connTCP) Write(b []byte) (int, error) {
 	n, err := c.conn.Write(b)
 	c.stat.Sent(uint64(n))
 
 	return n, err
 }
 
-func (c *connImpl) Close() error {
+func (c *connTCP) Close() error {
 	return c.conn.Close()
 }
 
-func (c *connImpl) LocalAddr() net.Addr {
+func (c *connTCP) LocalAddr() net.Addr {
 	return c.conn.LocalAddr()
 }
 
-func (c *connImpl) RemoteAddr() net.Addr {
+func (c *connTCP) RemoteAddr() net.Addr {
 	return c.conn.RemoteAddr()
 }
 
-func (c *connImpl) SetDeadline(t time.Time) error {
+func (c *connTCP) SetDeadline(t time.Time) error {
 	return c.conn.SetDeadline(t)
 }
 
-func (c *connImpl) SetReadDeadline(t time.Time) error {
+func (c *connTCP) SetReadDeadline(t time.Time) error {
 	return c.conn.SetReadDeadline(t)
 }
 
-func (c *connImpl) SetWriteDeadline(t time.Time) error {
+func (c *connTCP) SetWriteDeadline(t time.Time) error {
+	return c.conn.SetWriteDeadline(t)
+}
+
+// Read
+// FIXME: looks ugly
+func (c *connWs) Read(b []byte) (int, error) {
+	var mType int
+	var err error
+	var total int
+
+	// if previous reader exists try read remaining data
+	if c.prev != nil {
+		total, err = c.prev.Read(b)
+
+		if total > 0 {
+			c.stat.Received(uint64(total))
+		}
+		if err != nil {
+			c.prev = nil
+		}
+
+		if total > 0 {
+			return total, nil
+		}
+	}
+
+	if mType, c.prev, err = c.conn.NextReader(); err != nil {
+		return 0, io.EOF
+	}
+
+	switch mType {
+	case websocket.CloseMessage:
+		return 0, io.EOF
+	case websocket.TextMessage:
+		fallthrough
+	case websocket.PingMessage:
+		fallthrough
+	case websocket.PongMessage:
+		return 0, nil
+	}
+
+	total, err = c.prev.Read(b)
+	if total > 0 {
+		c.stat.Received(uint64(total))
+	}
+
+	if err != nil {
+		c.prev = nil
+	}
+
+	if total > 0 {
+		return total, nil
+	}
+
+	return 0, nil
+}
+
+func (c *connWs) Write(b []byte) (int, error) {
+	err := c.conn.WriteMessage(websocket.BinaryMessage, b)
+	n := 0
+	if err == nil {
+		n = len(b)
+		c.stat.Sent(uint64(n))
+	}
+
+	return n, err
+}
+
+func (c *connWs) Close() error {
+	return c.conn.Close()
+}
+
+func (c *connWs) LocalAddr() net.Addr {
+	return c.conn.LocalAddr()
+}
+
+func (c *connWs) RemoteAddr() net.Addr {
+	return c.conn.RemoteAddr()
+}
+
+func (c *connWs) SetDeadline(t time.Time) error {
+	if err := c.conn.SetReadDeadline(t); err != nil {
+		return err
+	}
+
+	if err := c.conn.SetWriteDeadline(t); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *connWs) SetReadDeadline(t time.Time) error {
+	return c.conn.SetReadDeadline(t)
+}
+
+func (c *connWs) SetWriteDeadline(t time.Time) error {
 	return c.conn.SetWriteDeadline(t)
 }
