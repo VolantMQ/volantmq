@@ -8,40 +8,52 @@ import (
 
 	"crypto/tls"
 
+	"context"
+	"time"
+
 	"github.com/gorilla/websocket"
 	"github.com/troian/surgemq/types"
 	"go.uber.org/zap"
-	//"github.com/gorilla/mux"
 )
+
+type httpServer struct {
+	mux *http.ServeMux
+	h   *http.Server
+}
 
 // ListenerWS listener object for websocket server
 type ListenerWS struct {
 	ListenerBase
+	Path string
 
 	up  websocket.Upgrader
 	log types.LogInterface
+
+	s httpServer
+}
+
+func (s *httpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mux.ServeHTTP(w, r)
 }
 
 func (l *ListenerWS) serveWs(w http.ResponseWriter, r *http.Request) {
-	cn, err := l.up.Upgrade(w, r, nil)
+	conn, err := l.up.Upgrade(w, r, nil)
 	if err != nil {
 		l.log.Prod.Error("Couldn't upgrade WebSocket connection", zap.Error(err))
 		return
 	}
 
 	l.inner.wgConnections.Add(1)
-	defer l.inner.wgConnections.Done()
-	if conn, err := types.NewConnWs(cn, l.inner.sysTree.Metric().Bytes()); err != nil {
-		l.log.Prod.Error("Couldn't create connection interface", zap.Error(err))
-	} else {
-		if err = l.handleConnection(conn); err != nil {
-			l.log.Prod.Error("Couldn't handle connection", zap.Error(err))
+	go func(cn *websocket.Conn) {
+		defer l.inner.wgConnections.Done()
+		if conn, err := types.NewConnWs(cn, l.inner.sysTree.Metric().Bytes()); err != nil {
+			l.log.Prod.Error("Couldn't create connection interface", zap.Error(err))
+		} else {
+			if err = l.handleConnection(conn); err != nil {
+				l.log.Prod.Error("Couldn't handle connection", zap.Error(err))
+			}
 		}
-	}
-
-	//go func(cn *websocket.Conn) {
-
-	//}(conn)
+	}(conn)
 }
 
 func (l *ListenerWS) start() error {
@@ -53,6 +65,10 @@ func (l *ListenerWS) start() error {
 
 	defer l.inner.lock.Unlock()
 	l.inner.lock.Lock()
+
+	if l.Path == "" {
+		l.Path = "/"
+	}
 
 	l.up.Subprotocols = make([]string, 3)
 	l.up.Subprotocols[0] = "mqtt"
@@ -72,8 +88,13 @@ func (l *ListenerWS) start() error {
 		isTLS = true
 	}
 
-	//mux := http.NewServeMux()
-	http.HandleFunc("/mqtt", l.serveWs)
+	l.s.mux = http.NewServeMux()
+	l.s.mux.HandleFunc(l.Path, l.serveWs)
+
+	l.s.h = &http.Server{
+		Addr:    ":" + strconv.Itoa(l.Port),
+		Handler: &l.s,
+	}
 
 	if _, ok := l.inner.listeners.list[l.Port]; !ok {
 		l.inner.listeners.list[l.Port] = l
@@ -94,9 +115,9 @@ func (l *ListenerWS) start() error {
 			}
 
 			if isTLS {
-				err = http.ListenAndServeTLS(":"+strconv.Itoa(l.Port), l.CertFile, l.KeyFile, nil)
+				err = l.s.h.ListenAndServeTLS(l.CertFile, l.KeyFile)
 			} else {
-				err = http.ListenAndServe(":"+strconv.Itoa(l.Port), nil)
+				err = l.s.h.ListenAndServe()
 			}
 
 			if l.inner.config.ListenerStatus != nil {
@@ -111,7 +132,10 @@ func (l *ListenerWS) start() error {
 }
 
 func (l *ListenerWS) close() error {
-	return nil
+	ctx, ctxCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer ctxCancel()
+
+	return l.s.h.Shutdown(ctx)
 }
 
 func (l *ListenerWS) listenerProtocol() string {
