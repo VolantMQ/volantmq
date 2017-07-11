@@ -86,7 +86,7 @@ func (l *ListenerTCP) start() error {
 }
 
 func (l *ListenerTCP) close() error {
-	return nil
+	return l.listener.Close()
 }
 
 func (l *ListenerTCP) listenerProtocol() string {
