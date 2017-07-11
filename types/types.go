@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/troian/surgemq/message"
+	"go.uber.org/zap"
 )
 
 //type OnCompleteFunc func(msg, ack message.Provider, err error) error
@@ -36,6 +37,12 @@ type DuplicateConfig struct {
 
 	// OnAttempt If requested we notify if there is attempt to dup session
 	OnAttempt func(id string, replaced bool)
+}
+
+// LogInterface inherited by internal packages to provide hierarchical logs
+type LogInterface struct {
+	Prod *zap.Logger
+	Dev  *zap.Logger
 }
 
 // Errors

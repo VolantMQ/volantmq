@@ -15,14 +15,14 @@
 package server
 
 import (
-	"crypto/tls"
 	"errors"
-	"io"
-	"net"
 	"sync"
-	"time"
+
+	"go.uber.org/zap"
 
 	"strconv"
+
+	"time"
 
 	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/auth"
@@ -33,7 +33,6 @@ import (
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics"
 	types "github.com/troian/surgemq/types"
-	"go.uber.org/zap"
 )
 
 // Config server configuration
@@ -77,34 +76,8 @@ type Config struct {
 	ListenerStatus func(id string, start bool)
 }
 
-// Listener listener
-type Listener struct {
-	Scheme      string
-	Host        string
-	Port        int
-	CertFile    string
-	KeyFile     string
-	AuthManager *auth.Manager
-	listener    net.Listener
-	tlsConfig   *tls.Config
-
-	// The quit channel for the server. If the server detects that this channel
-	// is closed, then it's a signal for it to shutdown as well.
-	quit chan struct{}
-}
-
-// Type server API
-type Type interface {
-	ListenAndServe(listener *Listener) error
-	//Publish(msg *message.PublishMessage, onComplete surgemq.OnCompleteFunc) error
-	Close() error
-}
-
-// Type is a library implementation of the MQTT server that, as best it can, complies
-// with the MQTT 3.1 and 3.1.1 specs.
-type implementation struct {
+type listenerInner struct {
 	config Config
-
 	// authMgr is the authentication manager that we are going to use for authenticating
 	// incoming connections
 	authMgr *auth.Manager
@@ -124,168 +97,152 @@ type implementation struct {
 	lock sync.Mutex
 
 	listeners struct {
-		list map[int]*Listener
+		list map[int]Listener
 		wg   sync.WaitGroup
 	}
 
 	wgConnections sync.WaitGroup
 
 	sysTree systree.Provider
+}
 
-	log struct {
-		prod *zap.Logger
-		dev  *zap.Logger
-	}
+// ListenerBase base configuration object for listeners
+type ListenerBase struct {
+	Port        int
+	CertFile    string
+	KeyFile     string
+	AuthManager *auth.Manager
+
+	inner *listenerInner
+	log   types.LogInterface
+}
+
+// Listener listener
+type Listener interface {
+	listenerProtocol() string
+	start() error
+	close() error
+}
+
+// Type server API
+type Type interface {
+	ListenAndServe(listener Listener) error
+	Close() error
+}
+
+// Type is a library implementation of the MQTT server that, as best it can, complies
+// with the MQTT 3.1 and 3.1.1 specs.
+type implementation struct {
+	log types.LogInterface
+
+	inner listenerInner
 }
 
 // New new server
 func New(config Config) (Type, error) {
-	s := &implementation{
-		config: config,
-		quit:   make(chan struct{}),
+	s := &implementation{}
+
+	s.inner.config = config
+
+	s.log.Prod = surgemq.GetProdLogger().Named("server")
+	s.log.Dev = surgemq.GetDevLogger().Named("server")
+
+	s.inner.quit = make(chan struct{})
+	s.inner.listeners.list = make(map[int]Listener)
+
+	if s.inner.config.KeepAlive == 0 {
+		s.inner.config.KeepAlive = types.DefaultAckTimeout
 	}
 
-	s.log.prod = surgemq.GetProdLogger().Named("server")
-	s.log.dev = surgemq.GetDevLogger().Named("server")
-
-	s.listeners.list = make(map[int]*Listener)
-
-	if s.config.KeepAlive == 0 {
-		s.config.KeepAlive = types.DefaultAckTimeout
+	if s.inner.config.ConnectTimeout == 0 {
+		s.inner.config.ConnectTimeout = types.DefaultConnectTimeout
 	}
 
-	if s.config.ConnectTimeout == 0 {
-		s.config.ConnectTimeout = types.DefaultConnectTimeout
+	if s.inner.config.AckTimeout == 0 {
+		s.inner.config.AckTimeout = types.DefaultAckTimeout
 	}
 
-	if s.config.AckTimeout == 0 {
-		s.config.AckTimeout = types.DefaultAckTimeout
+	if s.inner.config.TimeoutRetries == 0 {
+		s.inner.config.TimeoutRetries = types.DefaultTimeoutRetries
 	}
 
-	if s.config.TimeoutRetries == 0 {
-		s.config.TimeoutRetries = types.DefaultTimeoutRetries
-	}
-
-	if s.config.Authenticators == "" {
-		s.config.Authenticators = "mockSuccess"
+	if s.inner.config.Authenticators == "" {
+		s.inner.config.Authenticators = "mockSuccess"
 	}
 
 	var err error
-	if s.authMgr, err = auth.NewManager(s.config.Authenticators); err != nil {
+	if s.inner.authMgr, err = auth.NewManager(s.inner.config.Authenticators); err != nil {
 		return nil, err
 	}
 
-	if s.sysTree, err = systree.NewTree(); err != nil {
+	if s.inner.sysTree, err = systree.NewTree(); err != nil {
 		return nil, err
 	}
 
-	if s.config.Persistence == nil {
+	if s.inner.config.Persistence == nil {
 		return nil, errors.New("Persistence provider cannot be nil")
 	}
 
-	if s.persist, err = persistence.New(s.config.Persistence); err != nil {
+	if s.inner.persist, err = persistence.New(s.inner.config.Persistence); err != nil {
 		return nil, err
 	}
 
 	var persisRetained persistTypes.Retained
 
-	persisRetained, _ = s.persist.Retained()
+	persisRetained, _ = s.inner.persist.Retained()
 
 	tConfig := topics.Config{
-		Name:    s.config.TopicsProvider,
-		Stat:    s.sysTree.Topics(),
+		Name:    s.inner.config.TopicsProvider,
+		Stat:    s.inner.sysTree.Topics(),
 		Persist: persisRetained,
 	}
-	if s.topicsMgr, err = topics.NewManager(tConfig); err != nil {
+	if s.inner.topicsMgr, err = topics.NewManager(tConfig); err != nil {
 		return nil, err
 	}
 
 	var persisSession persistTypes.Sessions
 
-	persisSession, _ = s.persist.Sessions()
+	persisSession, _ = s.inner.persist.Sessions()
 
 	mConfig := session.Config{
-		TopicsMgr:      s.topicsMgr,
-		ConnectTimeout: s.config.ConnectTimeout,
-		AckTimeout:     s.config.AckTimeout,
-		TimeoutRetries: s.config.TimeoutRetries,
+		TopicsMgr:      s.inner.topicsMgr,
+		ConnectTimeout: s.inner.config.ConnectTimeout,
+		AckTimeout:     s.inner.config.AckTimeout,
+		TimeoutRetries: s.inner.config.TimeoutRetries,
 		Persist:        persisSession,
-		OnDup:          s.config.DupConfig,
+		OnDup:          s.inner.config.DupConfig,
 	}
-	mConfig.Metric.Packets = s.sysTree.Metric().Packets()
-	mConfig.Metric.Session = s.sysTree.Session()
-	mConfig.Metric.Sessions = s.sysTree.Sessions()
+	mConfig.Metric.Packets = s.inner.sysTree.Metric().Packets()
+	mConfig.Metric.Session = s.inner.sysTree.Session()
+	mConfig.Metric.Sessions = s.inner.sysTree.Sessions()
 
-	if s.sessionsMgr, err = session.NewManager(mConfig); err != nil {
+	if s.inner.sessionsMgr, err = session.NewManager(mConfig); err != nil {
 		return nil, err
 	}
 
-	if s.config.TopicsProvider == "" {
-		s.config.TopicsProvider = "mem"
+	if s.inner.config.TopicsProvider == "" {
+		s.inner.config.TopicsProvider = "mem"
 	}
 
 	return s, nil
 }
 
-// ListenAndServe listens to connections on the URI requested, and handles any
-// incoming MQTT client sessions. It should not return until Close() is called
-// or if there's some critical error that stops the server from running. The URI
-// supplied should be of the form "protocol://host:port" that can be parsed by
-// url.Parse(). For example, an URI could be "tcp://0.0.0.0:1883".
-func (s *implementation) ListenAndServe(listener *Listener) error {
-	select {
-	case <-s.quit:
-		return nil
-	default:
-	}
-
-	defer s.lock.Unlock()
-	s.lock.Lock()
-
+func (s *implementation) ListenAndServe(listener Listener) error {
 	var err error
 
-	if listener.CertFile != "" && listener.KeyFile != "" {
-		listener.tlsConfig = &tls.Config{
-			Certificates: make([]tls.Certificate, 1),
-		}
-
-		listener.tlsConfig.Certificates[0], err = tls.LoadX509KeyPair(listener.CertFile, listener.KeyFile)
-		if err != nil {
-			listener.tlsConfig = nil
-			return err
-		}
-	}
-
-	var ln net.Listener
-	if ln, err = net.Listen(listener.Scheme, listener.Host+":"+strconv.Itoa(listener.Port)); err != nil {
-		return err
-	}
-
-	if listener.tlsConfig != nil {
-		listener.listener = tls.NewListener(ln, listener.tlsConfig)
-	} else {
-		listener.listener = ln
-	}
-
-	if _, ok := s.listeners.list[listener.Port]; !ok {
-		listener.quit = s.quit
-		s.listeners.list[listener.Port] = listener
-		s.listeners.wg.Add(1)
-
-		go func() {
-			defer s.listeners.wg.Done()
-
-			if s.config.ListenerStatus != nil {
-				s.config.ListenerStatus(listener.Scheme+"://"+listener.Host+":"+strconv.Itoa(listener.Port), true)
-			}
-			err = s.serve(listener)
-
-			if s.config.ListenerStatus != nil {
-				s.config.ListenerStatus(listener.Scheme+"://"+listener.Host+":"+strconv.Itoa(listener.Port), false)
-			}
-		}()
-	} else {
-		err = errors.New("Listener already exists")
+	switch l := listener.(type) {
+	case *ListenerTCP:
+		l.inner = &s.inner
+		l.log.Prod = s.log.Prod.Named("tcp").Named(strconv.Itoa(l.Port))
+		l.log.Dev = s.log.Dev.Named("tcp").Named(strconv.Itoa(l.Port))
+		err = l.start()
+	case *ListenerWS:
+		l.inner = &s.inner
+		l.log.Prod = s.log.Prod.Named("ws").Named(strconv.Itoa(l.Port))
+		l.log.Dev = s.log.Dev.Named("ws").Named(strconv.Itoa(l.Port))
+		err = l.start()
+	default:
+		err = errors.New("Invalid listener type")
 	}
 
 	return err
@@ -297,91 +254,48 @@ func (s *implementation) Close() error {
 	// By closing the quit channel, we are telling the server to stop accepting new
 	// connection.
 	select {
-	case <-s.quit:
+	case <-s.inner.quit:
 		return nil
 	default:
-		close(s.quit)
+		close(s.inner.quit)
 	}
 
-	defer s.lock.Unlock()
-	s.lock.Lock()
+	defer s.inner.lock.Unlock()
+	s.inner.lock.Lock()
 
 	// We then close all net.Listener, which will force Accept() to return if it's
 	// blocked waiting for new connections.
-	for _, l := range s.listeners.list {
-		if err := l.listener.Close(); err != nil {
-			s.log.prod.Error(err.Error())
+	for _, l := range s.inner.listeners.list {
+		if err := l.close(); err != nil {
+			s.log.Prod.Error(err.Error())
 		}
 	}
 
 	// if there are any new connection in progress lets wait until they are finished
-	s.wgConnections.Wait()
+	s.inner.wgConnections.Wait()
 
 	// Wait all of listeners has finished
-	s.listeners.wg.Wait()
+	s.inner.listeners.wg.Wait()
 
-	for port := range s.listeners.list {
-		delete(s.listeners.list, port)
+	for port := range s.inner.listeners.list {
+		delete(s.inner.listeners.list, port)
 	}
 
-	if s.sessionsMgr != nil {
-		if s.persist != nil {
-			s.sessionsMgr.Shutdown() // nolint: errcheck, gas
+	if s.inner.sessionsMgr != nil {
+		if s.inner.persist != nil {
+			s.inner.sessionsMgr.Shutdown() // nolint: errcheck, gas
 		}
 	}
 
-	if s.topicsMgr != nil {
-		s.topicsMgr.Close() // nolint: errcheck, gas
+	if s.inner.topicsMgr != nil {
+		s.inner.topicsMgr.Close() // nolint: errcheck, gas
 	}
 
 	return nil
 }
 
-func (s *implementation) serve(l *Listener) error {
-	var tempDelay time.Duration // how long to sleep on accept failure
-
-	for {
-		var conn net.Conn
-		var err error
-
-		if conn, err = l.listener.Accept(); err != nil {
-			// http://zhen.org/blog/graceful-shutdown-of-go-net-dot-listeners/
-			select {
-			case <-s.quit:
-				return nil
-			default:
-			}
-
-			// Borrowed from go1.3.3/src/pkg/net/http/server.go:1699
-			if ne, ok := err.(net.Error); ok && ne.Temporary() {
-				if tempDelay == 0 {
-					tempDelay = 5 * time.Millisecond
-				} else {
-					tempDelay *= 2
-				}
-				if max := 1 * time.Second; tempDelay > max {
-					tempDelay = max
-				}
-				s.log.prod.Error("Accept error. Retrying",
-					zap.Error(err),
-					zap.Duration("retryIn", tempDelay))
-
-				time.Sleep(tempDelay)
-				continue
-			}
-			return err
-		}
-
-		s.wgConnections.Add(1)
-		go func(cn net.Conn) {
-			defer s.wgConnections.Done()
-			s.handleConnection(cn, l.AuthManager) // nolint: errcheck, gas
-		}(conn)
-	}
-}
-
 // handleConnection is for the broker to handle an incoming connection from a client
-func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) error {
+func (l *ListenerBase) handleConnection(c types.Conn) error {
 	if c == nil {
 		return types.ErrInvalidConnectionType
 	}
@@ -394,18 +308,6 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 			c = nil
 		}
 	}()
-
-	netConn, ok := c.(net.Conn)
-	if !ok {
-		return types.ErrInvalidConnectionType
-	}
-
-	var conn types.Conn
-
-	if conn, err = types.NewConn(netConn, s.sysTree.Metric().Bytes()); err != nil {
-		s.log.prod.Error("Couldn't create connection interface", zap.Error(err))
-		return err
-	}
 
 	// To establish a connection, we must
 	// 1. Read and decode the message.ConnectMessage from the wire
@@ -420,41 +322,41 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 	// a CONNACK error. If it's CONNACK error, send the proper CONNACK error back
 	// to client. Exit regardless of error type.
 
-	conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(s.config.ConnectTimeout))) // nolint: errcheck, gas
+	c.SetReadDeadline(time.Now().Add(time.Second * time.Duration(l.inner.config.ConnectTimeout))) // nolint: errcheck, gas
 
 	resp := message.NewConnAckMessage()
 
 	var req message.Provider
 
 	var buf []byte
-	if buf, err = GetMessageBuffer(conn); err != nil {
+	if buf, err = GetMessageBuffer(c); err != nil {
 		return err
 	}
 
 	if req, _, err = message.Decode(buf); err != nil {
 		if code, ok := message.ValidConnAckError(err); ok {
-			s.sysTree.Metric().Packets().Received(resp.Type())
+			l.inner.sysTree.Metric().Packets().Received(resp.Type())
 			resp.SetReturnCode(code)
 
 			if err = WriteMessage(c, resp); err != nil {
 				return err
 			}
-			s.sysTree.Metric().Packets().Sent(resp.Type())
+			l.inner.sysTree.Metric().Packets().Sent(resp.Type())
 		} else {
-			s.log.prod.Warn("Couldn't read connect message", zap.Error(err))
+			//l.log.Prod.Warn("Couldn't read connect message", zap.Error(err))
 			return err
 		}
 	} else {
 		switch r := req.(type) {
 		case *message.ConnectMessage:
 			if r.UsernameFlag() {
-				if err = authMng.Password(string(r.Username()), string(r.Password())); err == nil {
+				if err = l.AuthManager.Password(string(r.Username()), string(r.Password())); err == nil {
 					resp.SetReturnCode(message.ConnectionAccepted)
 				} else {
 					resp.SetReturnCode(message.ErrBadUsernameOrPassword)
 				}
 			} else {
-				if s.config.Anonymous {
+				if l.inner.config.Anonymous {
 					resp.SetReturnCode(message.ConnectionAccepted)
 				} else {
 					resp.SetReturnCode(message.ErrNotAuthorized)
@@ -462,11 +364,11 @@ func (s *implementation) handleConnection(c io.Closer, authMng *auth.Manager) er
 			}
 
 			if r.KeepAlive() == 0 {
-				r.SetKeepAlive(uint16(s.config.KeepAlive))
+				r.SetKeepAlive(uint16(l.inner.config.KeepAlive))
 			}
-			if err = s.sessionsMgr.Start(r, resp, conn); err != nil {
+			if err = l.inner.sessionsMgr.Start(r, resp, c); err != nil {
 				if err != session.ErrNotAccepted {
-					s.log.prod.Error("Couldn't start session", zap.Error(err))
+					l.log.Prod.Error("Couldn't start session", zap.Error(err))
 				}
 			}
 		default:
