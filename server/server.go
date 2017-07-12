@@ -336,7 +336,7 @@ func (l *ListenerBase) handleConnection(c types.Conn) {
 	}
 
 	if req, _, err = message.Decode(buf); err != nil {
-		l.log.Prod.Error("Couldn't decode message", zap.Error(err))
+		l.log.Prod.Warn("Couldn't decode message", zap.Error(err))
 
 		if code, ok := message.ValidConnAckError(err); ok {
 			if req != nil {

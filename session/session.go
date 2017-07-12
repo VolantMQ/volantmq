@@ -18,7 +18,6 @@ import (
 	"sync"
 
 	"container/list"
-	"errors"
 	"io"
 	"sync/atomic"
 
@@ -178,17 +177,21 @@ func (s *Type) restore(messages *persistenceTypes.SessionMessages) {
 
 // Start inform session there is a new connection with matching clientID
 // thus provide necessary info to spin
-func (s *Type) start(msg *message.ConnectMessage, conn io.Closer) (err error) {
+func (s *Type) start(msg *message.ConnectMessage, conn io.Closer) {
 	if !atomic.CompareAndSwapInt64(&s.connected, 0, 1) {
 		s.wg.conn.started.Wait()
-		return errors.New("Already running")
+		s.log.prod.Warn("Starting already running session")
+		return
 	}
 
+	var err error
 	defer func() {
 		if err != nil {
 			close(s.publisher.quit)
 			s.conn = nil
 			atomic.StoreInt64(&s.connected, 0)
+
+			s.log.prod.Warn("Couldn't start session", zap.Error(err))
 		}
 
 		// signal all waiting that connection has tried to start
@@ -229,7 +232,7 @@ func (s *Type) start(msg *message.ConnectMessage, conn io.Closer) (err error) {
 		})
 	s.mu.Unlock()
 	if err != nil {
-		return err
+		return
 	}
 
 	s.conn.start()
@@ -238,8 +241,6 @@ func (s *Type) start(msg *message.ConnectMessage, conn io.Closer) (err error) {
 	s.publisher.started.Add(1)
 	go s.publishWorker()
 	s.publisher.started.Wait()
-
-	return nil
 }
 
 func (s *Type) disconnect() {
