@@ -167,6 +167,14 @@ func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessag
 	defer func() {
 		resp.SetSessionPresent(present)
 
+		m.log.prod.Info("Client connect",
+			zap.String("Status", resp.ReturnCode().Desc()),
+			zap.String("ClientID", string(msg.ClientID())),
+			zap.Bool("Clean session", msg.CleanSession()),
+			zap.Bool("Session present", present),
+			zap.String("RemoteAddr", conn.(net.Conn).RemoteAddr().String()),
+		)
+
 		if err = m.writeMessage(conn, resp); err != nil {
 			m.log.prod.Error("Couldn't write CONNACK", zap.Error(err))
 		}
@@ -459,6 +467,8 @@ func (m *Manager) onDisconnect(id string, messages *persistenceTypes.SessionMess
 		delete(m.sessions.active.list, id)
 		m.sessions.active.lock.Unlock()
 	}
+
+	m.log.prod.Info("Client disconnected", zap.String("ClientID", id))
 }
 
 // WriteMessage into connection
@@ -469,7 +479,6 @@ func (m *Manager) writeMessage(conn io.Closer, msg message.Provider) error {
 		m.log.dev.Debug("Write error", zap.Error(err))
 		return err
 	}
-	//appLog.Debugf("Writing: %s", msg)
 
 	return m.writeMessageBuffer(conn, buf)
 }

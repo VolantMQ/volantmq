@@ -133,7 +133,7 @@ func (l *ListenerTCP) serve() error {
 			if conn, err := types.NewConnTCP(cn, l.inner.sysTree.Metric().Bytes()); err != nil {
 				l.log.Prod.Error("Couldn't create connection interface", zap.Error(err))
 			} else {
-				l.handleConnection(conn) // nolint: errcheck, gas
+				l.handleConnection(conn)
 			}
 		}(conn)
 	}
