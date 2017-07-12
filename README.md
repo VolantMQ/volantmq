@@ -6,33 +6,29 @@ SurgeMQ
 [![codecov.io](https://codecov.io/gh/troian/surgemq/coverage.svg?branch=master)](https://codecov.io/gh/troian/surgemq?branch=master)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-<aside class="warning">
+### Warning
 This implementation might not be compatible with original.
 Original has not been updated since 2014 thus I forked to improve
 
 It's currently in active development thus highly not recommended for production
 
 **This project should be considered unstable until further notice.**
-</aside>
 
 SurgeMQ is a high performance MQTT broker that aims to be fully compliant with MQTT 3.1 and 3.1.1 specs.
 
 ### Features, Limitations, and Future
 
 **Features**
-
-* Supports QOS 0, 1 and 2 messages
-* Supports will messages
-* Supports retained messages (add/remove)
-* SSL
-* Session persistence
-* Plain TCP
-* WebSockets
+* [MQTT v3.1 - V3.1.1 compliant](http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html)
+* Full support of WebSockets transport
+* SSL for both plain tcp and WebSockets transports
+* Independent auth providers for each transport
+* Persistence provider by [BoltDB](https://github.com/boltdb/bolt)
 
 **Future**
 
 * $SYS topics
-* Server bridge
+* Cluster
 * Ack timeout/retry
 
 ### Performance
