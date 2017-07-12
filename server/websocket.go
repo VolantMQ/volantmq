@@ -49,9 +49,7 @@ func (l *ListenerWS) serveWs(w http.ResponseWriter, r *http.Request) {
 		if conn, err := types.NewConnWs(cn, l.inner.sysTree.Metric().Bytes()); err != nil {
 			l.log.Prod.Error("Couldn't create connection interface", zap.Error(err))
 		} else {
-			if err = l.handleConnection(conn); err != nil {
-				l.log.Prod.Error("Couldn't handle connection", zap.Error(err))
-			}
+			l.handleConnection(conn)
 		}
 	}(conn)
 }

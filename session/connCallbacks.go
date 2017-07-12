@@ -154,8 +154,6 @@ func (s *Type) onAck(msg message.Provider) error {
 
 		// 2. Try send PUBREL reply
 		if _, err = s.conn.writeMessage(resp); err == nil {
-			// 3. PUBREL delivered to remote. Wait to PUBCOMP
-		} else {
 			s.log.dev.Debug("Couldn't deliver PUBREL. Requeue publish", zap.String("ClientID", s.config.id))
 			// Couldn't deliver message. Remove it from ack queue and put into publish queue
 			s.ack.pubOut.ack(resp) // nolint: errcheck
@@ -164,6 +162,7 @@ func (s *Type) onAck(msg message.Provider) error {
 			s.publisher.lock.Unlock()
 			s.publisher.cond.Signal()
 		}
+		// 3. PUBREL delivered to remote. Wait to PUBCOMP
 	case *message.PubRelMessage:
 		// Message sent by remote has been released
 		// send corresponding PUBCOMP

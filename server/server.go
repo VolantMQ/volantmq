@@ -295,9 +295,10 @@ func (s *implementation) Close() error {
 }
 
 // handleConnection is for the broker to handle an incoming connection from a client
-func (l *ListenerBase) handleConnection(c types.Conn) error {
+func (l *ListenerBase) handleConnection(c types.Conn) {
 	if c == nil {
-		return types.ErrInvalidConnectionType
+		l.log.Prod.Error("Invalid connection type")
+		return
 	}
 
 	var err error
@@ -330,21 +331,25 @@ func (l *ListenerBase) handleConnection(c types.Conn) error {
 
 	var buf []byte
 	if buf, err = GetMessageBuffer(c); err != nil {
-		return err
+		l.log.Prod.Error("Couldn't get CONNECT message", zap.Error(err))
+		return
 	}
 
 	if req, _, err = message.Decode(buf); err != nil {
+		l.log.Prod.Error("Couldn't decode message", zap.Error(err))
+
 		if code, ok := message.ValidConnAckError(err); ok {
-			l.inner.sysTree.Metric().Packets().Received(resp.Type())
+			if req != nil {
+				l.inner.sysTree.Metric().Packets().Received(req.Type())
+			}
+
 			resp.SetReturnCode(code)
 
 			if err = WriteMessage(c, resp); err != nil {
-				return err
+				l.log.Prod.Error("Couldn't write CONNACK", zap.Error(err))
+				return
 			}
 			l.inner.sysTree.Metric().Packets().Sent(resp.Type())
-		} else {
-			//l.log.Prod.Warn("Couldn't read connect message", zap.Error(err))
-			return err
 		}
 	} else {
 		switch r := req.(type) {
@@ -366,15 +371,14 @@ func (l *ListenerBase) handleConnection(c types.Conn) error {
 			if r.KeepAlive() == 0 {
 				r.SetKeepAlive(uint16(l.inner.config.KeepAlive))
 			}
+
 			if err = l.inner.sessionsMgr.Start(r, resp, c); err != nil {
 				if err != session.ErrNotAccepted {
 					l.log.Prod.Error("Couldn't start session", zap.Error(err))
 				}
 			}
 		default:
-			return errors.New("Invalid message type")
+			l.log.Prod.Error("Unexpected message type", zap.String("expected", "CONNECT"), zap.String("received", r.Type().String()))
 		}
 	}
-
-	return err
 }
