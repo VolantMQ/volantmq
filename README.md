@@ -71,3 +71,5 @@ limitations under the License.
 ### Examples
 
 Look into examples/surgemq
+
+### [Contributing guidelines](https://github.com/troian/surgemq/blob/master/CONTRIBUTING.md)
