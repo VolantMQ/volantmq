@@ -181,11 +181,7 @@ func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessag
 		if err == nil {
 			if ses != nil {
 				// try start session
-				if err = ses.start(msg, conn); err != nil {
-					// should never get into this section.
-					// if so this code does not work as expected :)
-					m.log.prod.Error("Something really bad happened", zap.Error(err))
-				}
+				ses.start(msg, conn)
 			}
 		}
 	}()
