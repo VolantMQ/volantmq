@@ -71,18 +71,22 @@ func (b *sequence) set(seq int64) {
 }
 
 // Type of buffer
+// align atomic values to prevent panics on 32 bits macnines
+// see https://github.com/golang/go/issues/5278
 type Type struct {
-	ExternalBuf []byte
-	id          int64
+	id   int64
+	size int64
+	mask int64
+	done int64
+
 	buf         []byte
 	tmp         []byte
-	size        int64
-	mask        int64
-	done        int64
-	pSeq        *sequence
-	cSeq        *sequence
-	pCond       *sync.Cond
-	cCond       *sync.Cond
+	ExternalBuf []byte
+
+	pSeq  *sequence
+	cSeq  *sequence
+	pCond *sync.Cond
+	cCond *sync.Cond
 }
 
 // New buffer
