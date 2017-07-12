@@ -10,21 +10,25 @@ Please provide the following minimum information:
 * A detailed issue description
 * Error Log if present
 * If possible, a short example
+* Try reproduce issue with development build
 
 
 ## Contributing Code
 
 By contributing to this project, you share your code under the Apache License, Version 2.0, as specified in the LICENSE file.
-Don't forget to add yourself to the AUTHORS file.
 
 ### Pull Requests Checklist
 
 Please check the following points before submitting your pull request:
-- [x] Code compiles correctly
+- [x] Install [pre-commit](http://pre-commit.com) in your local git copy 
+      ```
+      pre-commit install
+      ```
+- [x] Code passes all of pre-commit hooks
 - [x] Created tests, if possible
 - [x] All tests pass
 - [x] Extended the README / documentation, if necessary
-- [x] Added yourself to the AUTHORS file
+- [x] Create with remote branch with in following pattern: issue-<issue_id> (e.g. issue-22)
 
 ### Code Review
 
