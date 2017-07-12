@@ -4,6 +4,8 @@
 
 Before creating a new Issue, please check first if a similar Issue [already exists](https://github.com/surgemq/message/issues?state=open) or was [recently closed](https://github.com/surgemq/message/issues?direction=desc&page=1&sort=updated&state=closed).
 
+[Gophers channel](https://gophers.slack.com/messages/C67KYG1RQ/)
+
 Please provide the following minimum information:
 * Your SurgeMQ version (or git SHA)
 * Your Go version (run `go version` in your console)
@@ -20,7 +22,7 @@ By contributing to this project, you share your code under the Apache License, V
 ### Pull Requests Checklist
 
 Please check the following points before submitting your pull request:
-- [x] Install [pre-commit](http://pre-commit.com) in your local git copy 
+- [x] Install [pre-commit](http://pre-commit.com) in your local git copy
       ```
       pre-commit install
       ```
