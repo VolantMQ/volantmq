@@ -58,19 +58,19 @@ message types are defined as constants below.
 
 As you may have noticed, the second important item is the Message interface. It defines
 several methods that are common to all messages, including Name(), Desc(), and Type().
-Most importantly, it also defines the Encode() and Decode() methods.
+Most importantly, it also defines the Encode() and decode() methods.
 
 	Encode() (io.Reader, int, error)
-	Decode(io.Reader) (int, error)
+	decode(io.Reader) (int, error)
 
 Encode returns an io.Reader in which the encoded bytes can be read. The second return
 value is the number of bytes encoded, so the caller knows how many bytes there will be.
 If Encode returns an error, then the first two return values should be considered invalid.
 Any changes to the message after Encode() is called will invalidate the io.Reader.
 
-Decode reads from the io.Reader parameter until a full message is decoded, or when io.Reader
+decode reads from the io.Reader parameter until a full message is decoded, or when io.Reader
 returns EOF or error. The first return value is the number of bytes read from io.Reader.
-The second is error if Decode encounters any problems.
+The second is error if decode encounters any problems.
 
 With these in mind, we can now do:
 
@@ -107,8 +107,8 @@ To receive a CONNECT message from a connection, we can do:
 	// Create a new CONNECT message
 	msg := NewConnectMessage()
 
-	// Decode the message by reading from conn
-	n, err := msg.Decode(conn)
+	// decode the message by reading from conn
+	n, err := msg.decode(conn)
 
 If you don't know what type of message is coming down the pipe, you can do something like this:
 
@@ -130,8 +130,8 @@ If you don't know what type of message is coming down the pipe, you can do somet
 		return err
 	}
 
-	// Decode it from the bufio.Reader
-	n, err := msg.Decode(br)
+	// decode it from the bufio.Reader
+	n, err := msg.decode(br)
 	if err != nil {
 		return err
 	}

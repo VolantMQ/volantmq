@@ -32,13 +32,13 @@ var _ Provider = (*PingReqMessage)(nil)
 // NewPingReqMessage creates a new PINGREQ message.
 func NewPingReqMessage() *PingReqMessage {
 	msg := &PingReqMessage{}
-	msg.SetType(PINGREQ) // nolint: errcheck
+	msg.setType(PINGREQ) // nolint: errcheck
 
 	return msg
 }
 
-// Decode message
-func (msg *PingReqMessage) Decode(src []byte) (int, error) {
+// decode message
+func (msg *PingReqMessage) decode(src []byte) (int, error) {
 	return msg.header.decode(src)
 }
 

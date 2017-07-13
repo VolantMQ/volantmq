@@ -29,13 +29,13 @@ var _ Provider = (*PingRespMessage)(nil)
 // NewPingRespMessage creates a new PINGRESP message.
 func NewPingRespMessage() Provider {
 	msg := &PingRespMessage{}
-	msg.SetType(PINGRESP) // nolint: errcheck
+	msg.setType(PINGRESP) // nolint: errcheck
 
 	return msg
 }
 
-// Decode message
-func (msg *PingRespMessage) Decode(src []byte) (int, error) {
+// decode message
+func (msg *PingRespMessage) decode(src []byte) (int, error) {
 	return msg.header.decode(src)
 }
 

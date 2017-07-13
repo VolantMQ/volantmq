@@ -16,7 +16,6 @@ package message
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"github.com/troian/surgemq/buffer"
 )
@@ -32,15 +31,10 @@ var _ Provider = (*PubRelMessage)(nil)
 // NewPubRelMessage creates a new PUBREL message.
 func NewPubRelMessage() *PubRelMessage {
 	msg := &PubRelMessage{}
-	msg.SetType(PUBREL) // nolint: errcheck
-	msg.mTypeFlags[0] |= 0x02
+	msg.setType(PUBREL) // nolint: errcheck
+	msg.mTypeFlags |= 0x02
 
 	return msg
-}
-
-// String message as string
-func (msg *PubRelMessage) String() string {
-	return fmt.Sprintf("%s, Packet ID=%d", msg.header, msg.packetID)
 }
 
 // SetPacketID sets the ID of the packet.
@@ -52,15 +46,15 @@ func (msg *PubRelMessage) SetPacketID(v uint16) {
 func (msg *PubRelMessage) Len() int {
 	ml := msg.msgLen()
 
-	if err := msg.SetRemainingLength(int32(ml)); err != nil {
+	if err := msg.setRemainingLength(int32(ml)); err != nil {
 		return 0
 	}
 
 	return msg.header.msgLen() + ml
 }
 
-// Decode message
-func (msg *PubRelMessage) Decode(src []byte) (int, error) {
+// decode message
+func (msg *PubRelMessage) decode(src []byte) (int, error) {
 	total := 0
 
 	n, err := msg.header.decode(src[total:])

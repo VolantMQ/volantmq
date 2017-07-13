@@ -29,13 +29,13 @@ var _ Provider = (*DisconnectMessage)(nil)
 // NewDisconnectMessage creates a new DISCONNECT message.
 func NewDisconnectMessage() *DisconnectMessage {
 	msg := &DisconnectMessage{}
-	msg.SetType(DISCONNECT) // nolint: errcheck
+	msg.setType(DISCONNECT) // nolint: errcheck
 
 	return msg
 }
 
-// Decode message
-func (msg *DisconnectMessage) Decode(src []byte) (int, error) {
+// decode message
+func (msg *DisconnectMessage) decode(src []byte) (int, error) {
 	return msg.header.decode(src)
 }
 

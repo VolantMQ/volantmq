@@ -16,7 +16,6 @@ package message
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"github.com/troian/surgemq/buffer"
 )
@@ -41,14 +40,9 @@ var _ Provider = (*PublishMessage)(nil)
 // NewPublishMessage creates a new PUBLISH message.
 func NewPublishMessage() *PublishMessage {
 	msg := &PublishMessage{}
-	msg.SetType(PUBLISH) // nolint: errcheck
+	msg.setType(PUBLISH) // nolint: errcheck
 
 	return msg
-}
-
-func (msg *PublishMessage) String() string {
-	return fmt.Sprintf("%s, Topic=%q, Packet ID=%d, QoS=%d, Retained=%t, Dup=%t, Payload=%v",
-		msg.header, msg.topic, msg.packetID, msg.QoS(), msg.Retain(), msg.Dup(), msg.payload)
 }
 
 // Dup returns the value specifying the duplicate delivery of a PUBLISH Control Packet.
@@ -63,9 +57,9 @@ func (msg *PublishMessage) Dup() bool {
 // SetDup sets the value specifying the duplicate delivery of a PUBLISH Control Packet.
 func (msg *PublishMessage) SetDup(v bool) {
 	if v {
-		msg.mTypeFlags[0] |= publishFlagDupMask // 0x8 // 00001000
+		msg.mTypeFlags |= publishFlagDupMask // 0x8 // 00001000
 	} else {
-		msg.mTypeFlags[0] &= ^publishFlagDupMask // 247 // 11110111
+		msg.mTypeFlags &= ^publishFlagDupMask // 247 // 11110111
 	}
 }
 
@@ -80,28 +74,28 @@ func (msg *PublishMessage) Retain() bool {
 // SetRetain sets the value of the RETAIN flag.
 func (msg *PublishMessage) SetRetain(v bool) {
 	if v {
-		msg.mTypeFlags[0] |= publishFlagRetainMask //0x1 // 00000001
+		msg.mTypeFlags |= publishFlagRetainMask //0x1 // 00000001
 	} else {
-		msg.mTypeFlags[0] &= ^publishFlagRetainMask // 254 // 11111110
+		msg.mTypeFlags &= ^publishFlagRetainMask // 254 // 11111110
 	}
 }
 
 // QoS returns the field that indicates the level of assurance for delivery of an
-// Application Message. The values are QosAtMostOnce, QosAtLeastOnce and QosExactlyOnce.
+// Application Message. The values are QoS0, QoS1 and QoS2.
 func (msg *PublishMessage) QoS() QosType {
 	return QosType((msg.Flags() & publishFlagQosMask) >> 1)
 }
 
 // SetQoS sets the field that indicates the level of assurance for delivery of an
-// Application Message. The values are QosAtMostOnce, QosAtLeastOnce and QosExactlyOnce.
+// Application Message. The values are QoS0, QoS1 and QoS2.
 // An error is returned if the value is not one of these.
 func (msg *PublishMessage) SetQoS(v QosType) error {
 	if !v.IsValid() {
 		return ErrInvalidQoS
 	}
-	msg.mTypeFlags[0] &= ^publishFlagQosMask
+	msg.mTypeFlags &= ^publishFlagQosMask
 
-	msg.mTypeFlags[0] |= byte(v) << 1 // (msg.mTypeFlags[0] & 249) | byte(v<<1) // 249 = 11111001
+	msg.mTypeFlags |= byte(v) << 1 // (msg.mTypeFlags[0] & 249) | byte(v<<1) // 249 = 11111001
 
 	return nil
 }
@@ -144,15 +138,15 @@ func (msg *PublishMessage) SetPacketID(v uint16) {
 func (msg *PublishMessage) Len() int {
 	ml := msg.msgLen()
 
-	if err := msg.SetRemainingLength(int32(ml)); err != nil {
+	if err := msg.setRemainingLength(int32(ml)); err != nil {
 		return 0
 	}
 
 	return msg.header.msgLen() + ml
 }
 
-// Decode message
-func (msg *PublishMessage) Decode(src []byte) (int, error) {
+// decode message
+func (msg *PublishMessage) decode(src []byte) (int, error) {
 	total := 0
 
 	hn, err := msg.header.decode(src[total:])
@@ -177,7 +171,7 @@ func (msg *PublishMessage) Decode(src []byte) (int, error) {
 
 	// The packet identifier field is only present in the PUBLISH packets where the
 	// QoS level is 1 or 2
-	if msg.QoS() != QosAtMostOnce {
+	if msg.QoS() != QoS0 {
 		msg.packetID = binary.BigEndian.Uint16(src[total:])
 		total += 2
 	}
@@ -204,7 +198,7 @@ func (msg *PublishMessage) preEncode(dst []byte) (int, error) {
 	}
 
 	// [MQTT-2.3.1]
-	if (msg.QoS() == QosAtLeastOnce || msg.QoS() == QosExactlyOnce) && msg.packetID == 0 {
+	if (msg.QoS() == QoS1 || msg.QoS() == QoS2) && msg.packetID == 0 {
 		return 0, ErrPackedIDZero
 	}
 
@@ -220,7 +214,7 @@ func (msg *PublishMessage) preEncode(dst []byte) (int, error) {
 	}
 	total += n
 
-	if msg.QoS() == QosAtLeastOnce || msg.QoS() == QosExactlyOnce {
+	if msg.QoS() == QoS1 || msg.QoS() == QoS2 {
 		binary.BigEndian.PutUint16(dst[total:], msg.packetID)
 		total += 2
 	}
@@ -249,7 +243,7 @@ func (msg *PublishMessage) Encode(dst []byte) (int, error) {
 func (msg *PublishMessage) Send(to *buffer.Type) (int, error) {
 	msg.Len()
 	expectedSize := 2 + len(msg.topic)
-	if msg.QoS() != QosAtMostOnce {
+	if msg.QoS() != QoS0 {
 		expectedSize += 2
 	}
 

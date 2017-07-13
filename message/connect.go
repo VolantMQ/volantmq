@@ -74,24 +74,9 @@ var _ Provider = (*ConnectMessage)(nil)
 // NewConnectMessage creates a new CONNECT message.
 func NewConnectMessage() *ConnectMessage {
 	msg := &ConnectMessage{}
-	msg.SetType(CONNECT) // nolint: errcheck
+	msg.setType(CONNECT) // nolint: errcheck
 
 	return msg
-}
-
-// String returns a string representation of the CONNECT message
-func (msg ConnectMessage) String() string {
-	return fmt.Sprintf("%s, Connect Flags=%08b, Version=%d, KeepAlive=%d, Client ID=%q, Will Topic=%q, Will Message=%q, Username=%q, Password=%q",
-		msg.header,
-		msg.connectFlags,
-		msg.Version(),
-		msg.KeepAlive(),
-		msg.ClientID(),
-		msg.WillTopic(),
-		msg.WillMessage(),
-		msg.Username(),
-		msg.Password(),
-	)
 }
 
 // Version returns the the 8 bit unsigned value that represents the revision level
@@ -319,21 +304,21 @@ func (msg *ConnectMessage) SetPassword(v []byte) {
 func (msg *ConnectMessage) Len() int {
 	ml := msg.msgLen()
 
-	if err := msg.SetRemainingLength(int32(ml)); err != nil {
+	if err := msg.setRemainingLength(int32(ml)); err != nil {
 		return 0
 	}
 
 	return msg.header.msgLen() + ml
 }
 
-// Decode For the CONNECT message, the error returned could be a ConnAckReturnCode, so
+// decode For the CONNECT message, the error returned could be a ConnAckReturnCode, so
 // be sure to check that. Otherwise it's a generic error. If a generic error is
 // returned, this Message should be considered invalid.
 //
 // Caller should call ValidConnAckError(err) to see if the returned error is
 // a ConnAck error. If so, caller should send the Client back the corresponding
 // CONNACK message.
-func (msg *ConnectMessage) Decode(src []byte) (int, error) {
+func (msg *ConnectMessage) decode(src []byte) (int, error) {
 	total := 0
 
 	n, err := msg.header.decode(src[total:])
@@ -363,7 +348,7 @@ func (msg *ConnectMessage) preEncode(dst []byte) (int, error) {
 		return 0, ErrInvalidProtocolVersion
 	}
 
-	if err = msg.SetRemainingLength(int32(msg.msgLen())); err != nil {
+	if err = msg.setRemainingLength(int32(msg.msgLen())); err != nil {
 		return 0, err
 	}
 
@@ -499,7 +484,7 @@ func (msg *ConnectMessage) decodeMessage(src []byte) (int, error) {
 		return total, ErrInvalidQoS
 	}
 
-	if !msg.WillFlag() && (msg.WillRetain() || (msg.WillQos() != QosAtMostOnce)) {
+	if !msg.WillFlag() && (msg.WillRetain() || (msg.WillQos() != QoS0)) {
 		return total, ErrProtocolViolation
 	}
 

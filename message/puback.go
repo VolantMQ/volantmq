@@ -16,7 +16,6 @@ package message
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"github.com/troian/surgemq/buffer"
 )
@@ -31,14 +30,9 @@ var _ Provider = (*PubAckMessage)(nil)
 // NewPubAckMessage creates a new PUBACK message.
 func NewPubAckMessage() *PubAckMessage {
 	msg := &PubAckMessage{}
-	msg.SetType(PUBACK) // nolint: errcheck
+	msg.setType(PUBACK) // nolint: errcheck
 
 	return msg
-}
-
-// String message as string
-func (msg PubAckMessage) String() string {
-	return fmt.Sprintf("%s, Packet ID=%d", msg.header, msg.packetID)
 }
 
 // SetPacketID sets the ID of the packet.
@@ -50,15 +44,15 @@ func (msg *PubAckMessage) SetPacketID(v uint16) {
 func (msg *PubAckMessage) Len() int {
 	ml := msg.msgLen()
 
-	if err := msg.SetRemainingLength(int32(ml)); err != nil {
+	if err := msg.setRemainingLength(int32(ml)); err != nil {
 		return 0
 	}
 
 	return msg.header.msgLen() + ml
 }
 
-// Decode message
-func (msg *PubAckMessage) Decode(src []byte) (int, error) {
+// decode message
+func (msg *PubAckMessage) decode(src []byte) (int, error) {
 	total := 0
 
 	n, err := msg.header.decode(src[total:])

@@ -16,7 +16,6 @@ package message
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"github.com/troian/surgemq/buffer"
 )
@@ -32,14 +31,9 @@ var _ Provider = (*PubCompMessage)(nil)
 // NewPubCompMessage creates a new PUBCOMP message.
 func NewPubCompMessage() *PubCompMessage {
 	msg := &PubCompMessage{}
-	msg.SetType(PUBCOMP) // nolint: errcheck
+	msg.setType(PUBCOMP) // nolint: errcheck
 
 	return msg
-}
-
-// String message as string
-func (msg *PubCompMessage) String() string {
-	return fmt.Sprintf("%s, Packet ID=%d", msg.header, msg.packetID)
 }
 
 // SetPacketID sets the ID of the packet.
@@ -51,15 +45,15 @@ func (msg *PubCompMessage) SetPacketID(v uint16) {
 func (msg *PubCompMessage) Len() int {
 	ml := msg.msgLen()
 
-	if err := msg.SetRemainingLength(int32(ml)); err != nil {
+	if err := msg.setRemainingLength(int32(ml)); err != nil {
 		return 0
 	}
 
 	return msg.header.msgLen() + ml
 }
 
-// Decode message
-func (msg *PubCompMessage) Decode(src []byte) (int, error) {
+// decode message
+func (msg *PubCompMessage) decode(src []byte) (int, error) {
 	total := 0
 
 	n, err := msg.header.decode(src[total:])
@@ -83,7 +77,7 @@ func (msg *PubCompMessage) preEncode(dst []byte) (int, error) {
 	var err error
 	total := 0
 
-	if err = msg.SetRemainingLength(int32(msg.msgLen())); err != nil {
+	if err = msg.setRemainingLength(int32(msg.msgLen())); err != nil {
 		return 0, err
 	}
 

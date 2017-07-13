@@ -58,8 +58,11 @@ func TestUnSubscribeMessageDecode(t *testing.T) {
 		'/', 'a', '/', 'b', '/', '#', '/', 'c', 'd', 'd',
 	}
 
-	msg := NewUnSubscribeMessage()
-	n, err := msg.Decode(msgBytes)
+	m, n, err := Decode(msgBytes)
+
+	msg, ok := m.(*UnSubscribeMessage)
+
+	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
@@ -79,8 +82,8 @@ func TestUnSubscribeMessageDecode2(t *testing.T) {
 		7, // packet ID LSB (7)
 	}
 
-	msg := NewUnSubscribeMessage()
-	_, err := msg.Decode(msgBytes)
+	//msg := NewUnSubscribeMessage()
+	_, _, err := Decode(msgBytes)
 
 	require.Error(t, err)
 }
@@ -114,9 +117,13 @@ func TestUnSubscribeMessageEncode(t *testing.T) {
 	require.NoError(t, err, "Error encoding message.")
 	require.Equal(t, len(msgBytes), n, "Error encoding message.")
 
-	msg1 := NewUnSubscribeMessage()
+	//msg1 := NewUnSubscribeMessage()
 
-	n, err = msg1.Decode(dst)
+	var m1 Provider
+	m1, n, err = Decode(dst)
+	msg1, ok := m1.(*UnSubscribeMessage)
+	require.Equal(t, true, ok, "Invalid message type")
+
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
 
@@ -154,9 +161,9 @@ func TestUnSubscribeDecodeEncodeEquiv(t *testing.T) {
 		'/', 'a', '/', 'b', '/', '#', '/', 'c', 'd', 'd',
 	}
 
-	msg := NewUnSubscribeMessage()
-	n, err := msg.Decode(msgBytes)
-
+	m, n, err := Decode(msgBytes)
+	msg, ok := m.(*UnSubscribeMessage)
+	require.Equal(t, true, ok, "Invalid message type")
 	require.NoError(t, err, "Error decoding message")
 	require.Equal(t, len(msgBytes), n, "Raw message length does not match")
 
@@ -178,7 +185,7 @@ func TestUnSubscribeDecodeEncodeEquiv(t *testing.T) {
 	topics := msg.Topics()
 	require.Equal(t, 3, len(topics), "Topics count does not match")
 
-	n3, err := msg.Decode(dst)
+	_, n3, err := Decode(dst)
 
 	require.NoError(t, err, "Error decoding message")
 	require.Equal(t, len(msgBytes), n3, "Raw message length does not match")

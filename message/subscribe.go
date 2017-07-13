@@ -17,7 +17,6 @@ package message
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 
 	"github.com/troian/surgemq/buffer"
 )
@@ -41,19 +40,9 @@ func NewSubscribeMessage() *SubscribeMessage {
 	msg := &SubscribeMessage{
 		topics: make(TopicsQoS),
 	}
-	msg.SetType(SUBSCRIBE) // nolint: errcheck
+	msg.setType(SUBSCRIBE) // nolint: errcheck
 
 	return msg
-}
-
-func (msg *SubscribeMessage) String() string {
-	msgStr := fmt.Sprintf("%s, Packet ID=%d", msg.header, msg.packetID)
-
-	for t, q := range msg.topics {
-		msgStr = fmt.Sprintf("%s, Topic=%q/%d", msgStr, t, q)
-	}
-
-	return msgStr
 }
 
 // Topics returns a list of topics sent by the Client.
@@ -132,15 +121,15 @@ func (msg *SubscribeMessage) SetPacketID(v uint16) {
 func (msg *SubscribeMessage) Len() int {
 	ml := msg.msgLen()
 
-	if err := msg.SetRemainingLength(int32(ml)); err != nil {
+	if err := msg.setRemainingLength(int32(ml)); err != nil {
 		return 0
 	}
 
 	return msg.header.msgLen() + ml
 }
 
-// Decode message
-func (msg *SubscribeMessage) Decode(src []byte) (int, error) {
+// decode message
+func (msg *SubscribeMessage) decode(src []byte) (int, error) {
 	total := 0
 
 	hn, err := msg.header.decode(src[total:])
@@ -167,7 +156,7 @@ func (msg *SubscribeMessage) Decode(src []byte) (int, error) {
 	}
 
 	if len(msg.topics) == 0 {
-		return 0, errors.New("subscribe/Decode: Empty topic list")
+		return 0, errors.New("subscribe/decode: Empty topic list")
 	}
 
 	return total, nil

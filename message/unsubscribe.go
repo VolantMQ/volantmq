@@ -35,7 +35,7 @@ func NewUnSubscribeMessage() *UnSubscribeMessage {
 	msg := &UnSubscribeMessage{
 		topics: make(TopicsQoS),
 	}
-	msg.SetType(UNSUBSCRIBE) // nolint: errcheck
+	msg.setType(UNSUBSCRIBE) // nolint: errcheck
 
 	return msg
 }
@@ -86,17 +86,17 @@ func (msg *UnSubscribeMessage) SetPacketID(v uint16) {
 func (msg *UnSubscribeMessage) Len() int {
 	ml := msg.msgLen()
 
-	if err := msg.SetRemainingLength(int32(ml)); err != nil {
+	if err := msg.setRemainingLength(int32(ml)); err != nil {
 		return 0
 	}
 
 	return msg.header.msgLen() + ml
 }
 
-// Decode reads from the io.Reader parameter until a full message is decoded, or
+// decode reads from the io.Reader parameter until a full message is decoded, or
 // when io.Reader returns EOF or error. The first return value is the number of
-// bytes read from io.Reader. The second is error if Decode encounters any problems.
-func (msg *UnSubscribeMessage) Decode(src []byte) (int, error) {
+// bytes read from io.Reader. The second is error if decode encounters any problems.
+func (msg *UnSubscribeMessage) decode(src []byte) (int, error) {
 	total := 0
 
 	hn, err := msg.header.decode(src[total:])
@@ -121,7 +121,7 @@ func (msg *UnSubscribeMessage) Decode(src []byte) (int, error) {
 	}
 
 	if len(msg.topics) == 0 {
-		return 0, errors.New("unsubscribe/Decode: Empty topic list")
+		return 0, errors.New("unsubscribe/decode: Empty topic list")
 	}
 
 	return total, nil

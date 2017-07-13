@@ -16,7 +16,6 @@ package message
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"github.com/troian/surgemq/buffer"
 )
@@ -37,14 +36,9 @@ var _ Provider = (*SubAckMessage)(nil)
 // NewSubAckMessage creates a new SUBACK message.
 func NewSubAckMessage() *SubAckMessage {
 	msg := &SubAckMessage{}
-	msg.SetType(SUBACK) // nolint: errcheck
+	msg.setType(SUBACK) // nolint: errcheck
 
 	return msg
-}
-
-// String returns a string representation of the message.
-func (msg *SubAckMessage) String() string {
-	return fmt.Sprintf("%s, Packet ID=%d, Return Codes=%v", msg.header, msg.packetID, msg.returnCodes)
 }
 
 // ReturnCodes returns the list of QoS returns from the subscriptions sent in the SUBSCRIBE message.
@@ -80,15 +74,15 @@ func (msg *SubAckMessage) SetPacketID(v uint16) {
 func (msg *SubAckMessage) Len() int {
 	ml := msg.msgLen()
 
-	if err := msg.SetRemainingLength(int32(ml)); err != nil {
+	if err := msg.setRemainingLength(int32(ml)); err != nil {
 		return 0
 	}
 
 	return msg.header.msgLen() + ml
 }
 
-// Decode message
-func (msg *SubAckMessage) Decode(src []byte) (int, error) {
+// decode message
+func (msg *SubAckMessage) decode(src []byte) (int, error) {
 	total := 0
 
 	hn, err := msg.header.decode(src[total:])

@@ -170,9 +170,9 @@ func TestSubscriptions(t *testing.T) {
 			require.EqualError(t, err, types.ErrNotFound.Error())
 
 			subsList := make(message.TopicsQoS)
-			subsList["topic1"] = message.QosAtLeastOnce
-			subsList["topic2"] = message.QosAtLeastOnce
-			subsList["topic3"] = message.QosExactlyOnce
+			subsList["topic1"] = message.QoS1
+			subsList["topic2"] = message.QoS1
+			subsList["topic3"] = message.QoS2
 
 			err = subscriptions.Add(subsList)
 			require.NoError(t, err)
@@ -239,9 +239,9 @@ func TestRetained(t *testing.T) {
 				msg.SetRetain(true)
 				msg.SetTopic("Topic:" + strconv.Itoa(i)) // nolint: errcheck
 				if (i % 10) != 0 {
-					msg.SetQoS(message.QosExactlyOnce) // nolint: errcheck
+					msg.SetQoS(message.QoS2) // nolint: errcheck
 				} else {
-					msg.SetQoS(message.QosAtLeastOnce) // nolint: errcheck
+					msg.SetQoS(message.QoS1) // nolint: errcheck
 				}
 			}
 
@@ -320,12 +320,12 @@ func TestMessages(t *testing.T) {
 				}
 
 				if (i % 2) != 0 {
-					m.SetQoS(message.QosAtLeastOnce) // nolint: errcheck
+					m.SetQoS(message.QoS1) // nolint: errcheck
 				} else {
-					m.SetQoS(message.QosExactlyOnce) // nolint: errcheck
+					m.SetQoS(message.QoS2) // nolint: errcheck
 				}
 
-				m.SetTopic("test topic: " + strconv.Itoa(i)) // nolint: errcheck
+				m.SetTopic("test/topic/" + strconv.Itoa(i)) // nolint: errcheck
 
 				m.SetPayload([]byte("test payload: " + strconv.Itoa(i)))
 

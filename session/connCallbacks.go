@@ -70,7 +70,7 @@ func (s *Type) onDisconnect(will bool) {
 	for t, q := range s.config.subscriptions {
 		// if this is clean session unsubscribe from all topics
 		// if session is non-clean unsubscribe only QoS 0 topics
-		if s.clean || q == message.QosAtMostOnce {
+		if s.clean || q == message.QoS0 {
 			unSub(t, q)
 			delete(s.config.subscriptions, t)
 		}
@@ -110,14 +110,14 @@ func (s *Type) onPublish(msg *message.PublishMessage) error {
 	var err error
 
 	switch msg.QoS() {
-	case message.QosExactlyOnce:
+	case message.QoS2:
 		resp := message.NewPubRecMessage()
 		resp.SetPacketID(msg.PacketID())
 
 		if _, err = s.conn.writeMessage(resp); err == nil {
 			s.ack.pubIn.put(msg)
 		}
-	case message.QosAtLeastOnce:
+	case message.QoS1:
 		resp := message.NewPubAckMessage()
 		resp.SetPacketID(msg.PacketID())
 
@@ -125,7 +125,7 @@ func (s *Type) onPublish(msg *message.PublishMessage) error {
 		// Remote then will send same message with DUP flag set
 		s.conn.writeMessage(resp) // nolint: errcheck
 		fallthrough
-	case message.QosAtMostOnce: // QoS 0
+	case message.QoS0: // QoS 0
 		err = s.publishToTopic(msg)
 	}
 
@@ -178,7 +178,7 @@ func (s *Type) onAck(msg message.Provider) error {
 		// PUBREL message has been acknowledged, release from queue
 		s.ack.pubOut.ack(msg) // nolint: errcheck
 	default:
-		s.log.prod.Error("Unsupported ack message type", zap.String("ClientID", s.config.id), zap.String("type", msg.Type().String()))
+		s.log.prod.Error("Unsupported ack message type", zap.String("ClientID", s.config.id), zap.String("type", msg.Type().Name()))
 	}
 
 	return err
@@ -230,7 +230,7 @@ func (s *Type) onSubscribe(msg *message.SubscribeMessage) error {
 		m.SetQoS(rm.QoS()) // nolint: errcheck
 		m.SetPayload(rm.Payload())
 		m.SetTopic(rm.Topic()) // nolint: errcheck
-		if m.PacketID() == 0 && (m.QoS() == message.QosAtLeastOnce || m.QoS() == message.QosExactlyOnce) {
+		if m.PacketID() == 0 && (m.QoS() == message.QoS1 || m.QoS() == message.QoS2) {
 			m.SetPacketID(s.newPacketID())
 		}
 

@@ -16,7 +16,6 @@ package message
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/troian/surgemq/buffer"
 )
@@ -43,14 +42,9 @@ var _ Provider = (*ConnAckMessage)(nil)
 // NewConnAckMessage creates a new CONNACK message
 func NewConnAckMessage() *ConnAckMessage {
 	msg := &ConnAckMessage{}
-	msg.SetType(CONNACK) // nolint: errcheck
+	msg.setType(CONNACK) // nolint: errcheck
 
 	return msg
-}
-
-// String returns a string representation of the CONNACK message
-func (msg ConnAckMessage) String() string {
-	return fmt.Sprintf("%s, Session Present=%t, Return code=%q\n", msg.header, msg.sessionPresent, msg.returnCode)
 }
 
 // SessionPresent returns the session present flag value
@@ -78,15 +72,15 @@ func (msg *ConnAckMessage) SetReturnCode(ret ConnAckCode) {
 func (msg *ConnAckMessage) Len() int {
 	ml := msg.msgLen()
 
-	if err := msg.SetRemainingLength(int32(ml)); err != nil {
+	if err := msg.setRemainingLength(int32(ml)); err != nil {
 		return 0
 	}
 
 	return msg.header.msgLen() + ml
 }
 
-// Decode message
-func (msg *ConnAckMessage) Decode(src []byte) (int, error) {
+// decode message
+func (msg *ConnAckMessage) decode(src []byte) (int, error) {
 	total := 0
 
 	n, err := msg.header.decode(src)
@@ -98,7 +92,7 @@ func (msg *ConnAckMessage) Decode(src []byte) (int, error) {
 	// [MQTT-3.2.2.1]
 	b := src[total]
 	if b&(^connAckSessionPresentMask) != 0 {
-		return 0, errors.New("connack/Decode: Bits 7-1 in Connack Acknowledge Flags byte (1) are not 0")
+		return 0, errors.New("connack/decode: Bits 7-1 in Connack Acknowledge Flags byte (1) are not 0")
 	}
 	msg.sessionPresent = b&connAckSessionPresentMask != 0
 	total++
@@ -122,7 +116,7 @@ func (msg *ConnAckMessage) preEncode(dst []byte) (int, error) {
 		return total, ErrInvalidReturnCode
 	}
 
-	if err = msg.SetRemainingLength(int32(msg.msgLen())); err != nil {
+	if err = msg.setRemainingLength(int32(msg.msgLen())); err != nil {
 		return 0, err
 	}
 

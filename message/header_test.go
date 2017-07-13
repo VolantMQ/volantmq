@@ -23,23 +23,23 @@ import (
 func TestMessageHeaderFields(t *testing.T) {
 	header := &header{}
 
-	header.SetRemainingLength(33) // nolint: errcheck
+	header.setRemainingLength(33) // nolint: errcheck
 
 	require.Equal(t, int32(33), header.RemainingLength())
 
-	err := header.SetRemainingLength(268435456)
+	err := header.setRemainingLength(268435456)
 
 	require.Error(t, err)
 
-	err = header.SetRemainingLength(-1)
+	err = header.setRemainingLength(-1)
 
 	require.Error(t, err)
 
-	err = header.SetType(RESERVED)
+	err = header.setType(RESERVED)
 
 	require.Error(t, err)
 
-	err = header.SetType(PUBREL)
+	err = header.setType(PUBREL)
 
 	require.NoError(t, err)
 	require.Equal(t, PUBREL, header.Type())
@@ -76,7 +76,7 @@ func TestMessageHeaderDecode3(t *testing.T) {
 func TestMessageHeaderDecode4(t *testing.T) {
 	buf := []byte{0x62, 0xff, 0xff, 0xff, 0x7f}
 	header := &header{
-		mTypeFlags: []byte{6<<4 | 2},
+		mTypeFlags: byte(6<<4 | 2),
 		//mtype:      6,
 		//flags:      2,
 	}
@@ -91,7 +91,7 @@ func TestMessageHeaderDecode4(t *testing.T) {
 func TestMessageHeaderDecode5(t *testing.T) {
 	buf := []byte{0x62, 0xff, 0x7f}
 	header := &header{
-		mTypeFlags: []byte{6<<4 | 2},
+		mTypeFlags: (6<<4 | 2),
 		//mType:      6,
 		//flags:      2,
 	}
@@ -105,11 +105,11 @@ func TestMessageHeaderEncode1(t *testing.T) {
 	header := &header{}
 	headerBytes := []byte{0x62, 193, 2}
 
-	err := header.SetType(PUBREL)
+	err := header.setType(PUBREL)
 
 	require.NoError(t, err)
 
-	err = header.SetRemainingLength(321)
+	err = header.setRemainingLength(321)
 
 	require.NoError(t, err)
 
@@ -124,7 +124,7 @@ func TestMessageHeaderEncode1(t *testing.T) {
 func TestMessageHeaderEncode2(t *testing.T) {
 	header := &header{}
 
-	err := header.SetType(PUBREL)
+	err := header.setType(PUBREL)
 	require.NoError(t, err)
 
 	header.remLen = 268435456
@@ -139,11 +139,11 @@ func TestMessageHeaderEncode3(t *testing.T) {
 	header := &header{}
 	headerBytes := []byte{0x62, 0xff, 0xff, 0xff, 0x7f}
 
-	err := header.SetType(PUBREL)
+	err := header.setType(PUBREL)
 
 	require.NoError(t, err)
 
-	err = header.SetRemainingLength(maxRemainingLength)
+	err = header.setRemainingLength(maxRemainingLength)
 
 	require.NoError(t, err)
 
@@ -157,7 +157,7 @@ func TestMessageHeaderEncode3(t *testing.T) {
 
 func TestMessageHeaderEncode4(t *testing.T) {
 	header := &header{
-		mTypeFlags: []byte{byte(RESERVED2) << 4},
+		mTypeFlags: byte(byte(RESERVED2) << 4),
 		//mType:      6,
 		//flags:      2,
 	}

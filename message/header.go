@@ -16,22 +16,15 @@ package message
 
 import (
 	"encoding/binary"
-	"fmt"
 )
 
 // Fixed header
 // - 1 byte for control packet type (bits 7-4) and flags (bits 3-0)
 // - up to 4 byte for remaining length
 type header struct {
-	remLen   int32
-	packetID uint16
-	// mTypeFlags is the first byte of the buffer, 4 bits for mType, 4 bits for flags
-	mTypeFlags []byte
-}
-
-// String returns a string representation of the message.
-func (h header) String() string {
-	return fmt.Sprintf("Type=%q, Flags=%08b, Remaining Length=%d", h.Type().Name(), h.Flags(), h.remLen)
+	remLen     int32
+	packetID   uint16
+	mTypeFlags byte // is the first byte of the buffer, 4 bits for mType, 4 bits for flags
 }
 
 // Name returns a string representation of the message type. Examples include
@@ -52,37 +45,12 @@ func (h *header) Desc() string {
 // Type returns the MessageType of the Message. The retured value should be one
 // of the constants defined for MessageType.
 func (h *header) Type() Type {
-	//return this.mtype
-	if len(h.mTypeFlags) != 1 {
-		h.mTypeFlags = make([]byte, 1)
-	}
-
-	return Type(h.mTypeFlags[0] >> 4)
-}
-
-// SetType sets the message type of this message. It also correctly sets the
-// default flags for the message type. It returns an error if the type is invalid.
-func (h *header) SetType(mType Type) error {
-	if !mType.Valid() {
-		return ErrInvalidMessageType
-	}
-
-	// Notice we don't set the message to be dirty when we are not allocating a new
-	// buffer. In this case, it means the buffer is probably a sub-slice of another
-	// slice. If that's the case, then during encoding we would have copied the whole
-	// backing buffer anyway.
-	if len(h.mTypeFlags) != 1 {
-		h.mTypeFlags = make([]byte, 1)
-	}
-
-	h.mTypeFlags[0] = byte(mType)<<4 | (mType.DefaultFlags() & 0xf)
-
-	return nil
+	return Type(h.mTypeFlags >> 4)
 }
 
 // Flags returns the fixed header flags for this message.
 func (h *header) Flags() byte {
-	return h.mTypeFlags[0] & 0x0F
+	return h.mTypeFlags & 0x0F
 }
 
 // RemainingLength returns the length of the non-fixed-header part of the message.
@@ -94,15 +62,31 @@ func (h *header) PacketID() uint16 {
 	return h.packetID
 }
 
-// SetRemainingLength sets the length of the non-fixed-header part of the message.
+// setType sets the message type of this message. It also correctly sets the
+// default flags for the message type. It returns an error if the type is invalid.
+func (h *header) setType(t Type) error {
+	if !t.Valid() {
+		return ErrInvalidMessageType
+	}
+
+	// Notice we don't set the message to be dirty when we are not allocating a new
+	// buffer. In this case, it means the buffer is probably a sub-slice of another
+	// slice. If that's the case, then during encoding we would have copied the whole
+	// backing buffer anyway.
+	h.mTypeFlags = byte(t)<<4 | (t.DefaultFlags() & 0xf)
+
+	return nil
+}
+
+// setRemainingLength sets the length of the non-fixed-header part of the message.
 // It returns error if the length is greater than 268435455, which is the max
 // message length as defined by the MQTT spec.
-func (h *header) SetRemainingLength(remlen int32) error {
-	if remlen > maxRemainingLength || remlen < 0 {
+func (h *header) setRemainingLength(remLen int32) error {
+	if remLen > maxRemainingLength || remLen < 0 {
 		return ErrInvalidLength
 	}
 
-	h.remLen = remlen
+	h.remLen = remLen
 
 	return nil
 }
@@ -128,7 +112,7 @@ func (h *header) encode(dst []byte) (int, error) {
 		return total, ErrInvalidMessageType
 	}
 
-	copy(dst[total:], h.mTypeFlags)
+	dst[total] = h.mTypeFlags
 	total++
 
 	n := binary.PutUvarint(dst[total:], uint64(h.remLen))
@@ -137,17 +121,15 @@ func (h *header) encode(dst []byte) (int, error) {
 	return total, nil
 }
 
-// Decode reads from the io.Reader parameter until a full message is decoded, or
+// decode reads from the io.Reader parameter until a full message is decoded, or
 // when io.Reader returns EOF or error. The first return value is the number of
-// bytes read from io.Reader. The second is error if Decode encounters any problems.
+// bytes read from io.Reader. The second is error if decode encounters any problems.
 func (h *header) decode(src []byte) (int, error) {
 	total := 0
 
-	// Decode fixed header
+	// decode fixed header
 	mType := h.Type()
-
-	h.mTypeFlags = make([]byte, 1)
-	copy(h.mTypeFlags, src[total:total+1])
+	h.mTypeFlags = src[total]
 	// [MQTT-2.2.1]
 	if !h.Type().Valid() {
 		return total, ErrInvalidMessageType
@@ -178,10 +160,6 @@ func (h *header) decode(src []byte) (int, error) {
 	if h.remLen > maxRemainingLength {
 		return total, ErrInvalidLength
 	}
-
-	//if h.remLen > maxRemainingLength || remLen < 0 {
-	//	return total, fmt.Errorf("header/Decode: Remaining length (%d) out of bound (max %d, min 0)", h.remLen, maxRemainingLength)
-	//}
 
 	if int(h.remLen) > len(src[total:]) {
 		return total, ErrInvalidLength

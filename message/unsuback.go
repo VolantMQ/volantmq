@@ -16,7 +16,6 @@ package message
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"github.com/troian/surgemq/buffer"
 )
@@ -32,14 +31,9 @@ var _ Provider = (*UnSubAckMessage)(nil)
 // NewUnSubAckMessage creates a new UNSUBACK message.
 func NewUnSubAckMessage() *UnSubAckMessage {
 	msg := &UnSubAckMessage{}
-	msg.SetType(UNSUBACK) // nolint: errcheck
+	msg.setType(UNSUBACK) // nolint: errcheck
 
 	return msg
-}
-
-// String message as string
-func (msg *UnSubAckMessage) String() string {
-	return fmt.Sprintf("%s, Packet ID=%d", msg.header, msg.packetID)
 }
 
 // SetPacketID sets the ID of the packet.
@@ -51,15 +45,15 @@ func (msg *UnSubAckMessage) SetPacketID(v uint16) {
 func (msg *UnSubAckMessage) Len() int {
 	ml := msg.msgLen()
 
-	if err := msg.SetRemainingLength(int32(ml)); err != nil {
+	if err := msg.setRemainingLength(int32(ml)); err != nil {
 		return 0
 	}
 
 	return msg.header.msgLen() + ml
 }
 
-// Decode message
-func (msg *UnSubAckMessage) Decode(src []byte) (int, error) {
+// decode message
+func (msg *UnSubAckMessage) decode(src []byte) (int, error) {
 	total := 0
 
 	n, err := msg.header.decode(src[total:])

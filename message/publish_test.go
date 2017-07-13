@@ -22,7 +22,7 @@ import (
 
 func TestPublishMessageHeaderFields(t *testing.T) {
 	msg := NewPublishMessage()
-	msg.mTypeFlags[0] |= 11
+	msg.mTypeFlags |= 11
 
 	require.True(t, msg.Dup(), "Incorrect DUP flag.")
 	require.True(t, msg.Retain(), "Incorrect RETAIN flag.")
@@ -91,8 +91,9 @@ func TestPublishMessageDecode1(t *testing.T) {
 		's', 'e', 'n', 'd', ' ', 'm', 'e', ' ', 'h', 'o', 'm', 'e',
 	}
 
-	msg := NewPublishMessage()
-	n, err := msg.Decode(msgBytes)
+	m, n, err := Decode(msgBytes)
+	msg, ok := m.(*PublishMessage)
+	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
@@ -114,8 +115,7 @@ func TestPublishMessageDecode2(t *testing.T) {
 		's', 'e', 'n', 'd', ' ', 'm', 'e', ' ', 'h', 'o', 'm', 'e',
 	}
 
-	msg := NewPublishMessage()
-	_, err := msg.Decode(msgBytes)
+	_, _, err := Decode(msgBytes)
 
 	require.Error(t, err)
 }
@@ -131,8 +131,7 @@ func TestPublishMessageDecode3(t *testing.T) {
 		's', 'e', 'n', 'd', ' ', 'm', 'e', ' ', 'h', 'o', 'm', 'e',
 	}
 
-	msg := NewPublishMessage()
-	_, err := msg.Decode(msgBytes)
+	_, _, err := Decode(msgBytes)
 
 	require.NoError(t, err, "Error decoding message.")
 }
@@ -232,8 +231,9 @@ func TestPublishMessageEncode4(t *testing.T) {
 func TestPublishDecodeEncodeEquiv2(t *testing.T) {
 	msgBytes := []byte{50, 18, 0, 9, 103, 114, 101, 101, 116, 105, 110, 103, 115, 0, 1, 72, 101, 108, 108, 111}
 
-	msg := NewPublishMessage()
-	n, err := msg.Decode(msgBytes)
+	m, n, err := Decode(msgBytes)
+	msg, ok := m.(*PublishMessage)
+	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
@@ -260,9 +260,9 @@ func TestPublishDecodeEncodeEquiv(t *testing.T) {
 		's', 'e', 'n', 'd', ' ', 'm', 'e', ' ', 'h', 'o', 'm', 'e',
 	}
 
-	msg := NewPublishMessage()
-
-	n, err := msg.Decode(msgBytes)
+	m, n, err := Decode(msgBytes)
+	msg, ok := m.(*PublishMessage)
+	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
@@ -274,7 +274,7 @@ func TestPublishDecodeEncodeEquiv(t *testing.T) {
 	require.Equal(t, len(msgBytes), n2, "Error decoding message.")
 	require.Equal(t, msgBytes, dst[:n2], "Error decoding message.")
 
-	n3, err := msg.Decode(dst)
+	_, n3, err := Decode(dst)
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n3, "Error decoding message.")

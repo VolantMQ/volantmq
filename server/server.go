@@ -378,7 +378,7 @@ func (l *ListenerBase) handleConnection(c types.Conn) {
 				}
 			}
 		default:
-			l.log.Prod.Error("Unexpected message type", zap.String("expected", "CONNECT"), zap.String("received", r.Type().String()))
+			l.log.Prod.Error("Unexpected message type", zap.String("expected", "CONNECT"), zap.String("received", r.Type().Name()))
 		}
 	}
 }

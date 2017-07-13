@@ -117,7 +117,7 @@ func TestMessageTypes(t *testing.T) {
 }
 
 func TestQosCodes(t *testing.T) {
-	if QosAtMostOnce != 0 || QosAtLeastOnce != 1 || QosExactlyOnce != 2 {
+	if QoS0 != 0 || QoS1 != 1 || QoS2 != 2 {
 		t.Errorf("QOS codes invalid")
 	}
 }
