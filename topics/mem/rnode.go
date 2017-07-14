@@ -26,27 +26,26 @@ func newRNode() *rNode {
 func (rn *rNode) insert(topic string, msg *message.PublishMessage) error {
 	// If there's no more topic levels, that means we are at the matching rnode.
 	if len(topic) == 0 {
-		l := msg.Len()
+		rn.msg = msg
 
-		// Let's reuse the buffer if there's enough space
-		if l > cap(rn.buf) {
-			rn.buf = make([]byte, l)
-		} else {
-			rn.buf = rn.buf[0:l]
-		}
-
-		if _, err := msg.Encode(rn.buf); err != nil {
-			return err
-		}
-
-		// Reuse the message if possible
-		if rn.msg == nil {
-			rn.msg = message.NewPublishMessage()
-		}
-
-		if _, err := rn.msg.Decode(rn.buf); err != nil {
-			return err
-		}
+		//l := msg.Len()
+		//
+		//// Let's reuse the buffer if there's enough space
+		//if l > cap(rn.buf) {
+		//	rn.buf = make([]byte, l)
+		//} else {
+		//	rn.buf = rn.buf[0:l]
+		//}
+		//
+		//if _, err := msg.Encode(rn.buf); err != nil {
+		//	return err
+		//}
+		//
+		//if m, _, err := message.Decode(rn.buf); err != nil {
+		//	return err
+		//} else {
+		//
+		//}
 
 		return nil
 	}

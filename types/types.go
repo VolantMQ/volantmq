@@ -47,9 +47,9 @@ type LogInterface struct {
 
 // Errors
 var (
-	ErrInvalidConnectionType error = errors.New("invalid connection type")
+	ErrInvalidConnectionType = errors.New("invalid connection type")
 	//ErrInvalidSubscriber      error = errors.New("service: Invalid subscriber")
-	ErrBufferNotReady error = errors.New("buffer is not ready")
+	ErrBufferNotReady = errors.New("buffer is not ready")
 )
 
 // Default configs

@@ -36,9 +36,9 @@ func TestPubRecMessageDecode(t *testing.T) {
 		7, // packet ID LSB (7)
 	}
 
-	msg := NewPubRecMessage()
-	n, err := msg.Decode(msgBytes)
-
+	m, n, err := Decode(msgBytes)
+	msg, ok := m.(*PubRecMessage)
+	require.Equal(t, true, ok, "Invalid message type")
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
 	require.Equal(t, PUBREC, msg.Type(), "Error decoding message.")
@@ -53,8 +53,7 @@ func TestPubRecMessageDecode2(t *testing.T) {
 		7, // packet ID LSB (7)
 	}
 
-	msg := NewPubRecMessage()
-	_, err := msg.Decode(msgBytes)
+	_, _, err := Decode(msgBytes)
 
 	require.Error(t, err)
 }
@@ -88,8 +87,9 @@ func TestPubRecDecodeEncodeEquiv(t *testing.T) {
 		7, // packet ID LSB (7)
 	}
 
-	msg := NewPubRecMessage()
-	n, err := msg.Decode(msgBytes)
+	m, n, err := Decode(msgBytes)
+	msg, ok := m.(*PubRecMessage)
+	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
@@ -101,7 +101,7 @@ func TestPubRecDecodeEncodeEquiv(t *testing.T) {
 	require.Equal(t, len(msgBytes), n2, "Error decoding message.")
 	require.Equal(t, msgBytes, dst[:n2], "Error decoding message.")
 
-	n3, err := msg.Decode(dst)
+	_, n3, err := Decode(dst)
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n3, "Error decoding message.")

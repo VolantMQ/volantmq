@@ -188,7 +188,7 @@ func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessag
 
 	select {
 	case <-m.quit:
-		resp.SetReturnCode(message.ErrServerUnavailable)
+		resp.SetReturnCode(message.ErrServerUnavailable) // nolint: errcheck
 		return errors.New("Not running")
 	default:
 	}
@@ -221,7 +221,7 @@ func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessag
 		// session already exists thus duplicate case happened
 		if !m.config.OnDup.Replace {
 			// duplicate prohibited. send identifier rejected
-			resp.SetReturnCode(message.ErrIdentifierRejected)
+			resp.SetReturnCode(message.ErrIdentifierRejected) // nolint: errcheck
 			err = ErrDupNotAllowed
 			replaced = false
 			alloc = false
@@ -343,7 +343,7 @@ func (m *Manager) allocSession(id string, msg *message.ConnectMessage, resp *mes
 
 		if ses, err = newSession(sConfig); err != nil {
 			ses = nil
-			resp.SetReturnCode(message.ErrServerUnavailable)
+			resp.SetReturnCode(message.ErrServerUnavailable) // nolint: errcheck
 		}
 	}
 
@@ -469,9 +469,13 @@ func (m *Manager) onDisconnect(id string, messages *persistenceTypes.SessionMess
 
 // WriteMessage into connection
 func (m *Manager) writeMessage(conn io.Closer, msg message.Provider) error {
-	buf := make([]byte, msg.Len())
-	_, err := msg.Encode(buf)
+	size, err := msg.Size()
 	if err != nil {
+		return err
+	}
+
+	buf := make([]byte, size)
+	if _, err = msg.Encode(buf); err != nil {
 		m.log.dev.Debug("Write error", zap.Error(err))
 		return err
 	}

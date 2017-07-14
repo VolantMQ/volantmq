@@ -343,7 +343,7 @@ func (l *ListenerBase) handleConnection(c types.Conn) {
 				l.inner.sysTree.Metric().Packets().Received(req.Type())
 			}
 
-			resp.SetReturnCode(code)
+			resp.SetReturnCode(code) // nolint: errcheck
 
 			if err = WriteMessage(c, resp); err != nil {
 				l.log.Prod.Error("Couldn't write CONNACK", zap.Error(err))
@@ -356,15 +356,15 @@ func (l *ListenerBase) handleConnection(c types.Conn) {
 		case *message.ConnectMessage:
 			if r.UsernameFlag() {
 				if err = l.AuthManager.Password(string(r.Username()), string(r.Password())); err == nil {
-					resp.SetReturnCode(message.ConnectionAccepted)
+					resp.SetReturnCode(message.ConnectionAccepted) // nolint: errcheck
 				} else {
-					resp.SetReturnCode(message.ErrBadUsernameOrPassword)
+					resp.SetReturnCode(message.ErrBadUsernameOrPassword) // nolint: errcheck
 				}
 			} else {
 				if l.inner.config.Anonymous {
-					resp.SetReturnCode(message.ConnectionAccepted)
+					resp.SetReturnCode(message.ConnectionAccepted) // nolint: errcheck
 				} else {
-					resp.SetReturnCode(message.ErrNotAuthorized)
+					resp.SetReturnCode(message.ErrNotAuthorized) // nolint: errcheck
 				}
 			}
 
@@ -378,7 +378,7 @@ func (l *ListenerBase) handleConnection(c types.Conn) {
 				}
 			}
 		default:
-			l.log.Prod.Error("Unexpected message type", zap.String("expected", "CONNECT"), zap.String("received", r.Type().String()))
+			l.log.Prod.Error("Unexpected message type", zap.String("expected", "CONNECT"), zap.String("received", r.Type().Name()))
 		}
 	}
 }

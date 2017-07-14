@@ -28,9 +28,13 @@ import (
 
 // WriteMessage write message into connection
 func WriteMessage(conn io.Closer, msg message.Provider) error {
-	buf := make([]byte, msg.Len())
-	_, err := msg.Encode(buf)
+	size, err := msg.Size()
 	if err != nil {
+		return err
+	}
+
+	buf := make([]byte, size)
+	if _, err = msg.Encode(buf); err != nil {
 		return err
 	}
 

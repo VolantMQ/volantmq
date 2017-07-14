@@ -25,12 +25,14 @@ var cfg config
 
 func init() {
 	logCfg := zap.NewProductionConfig()
-	logDebugCfg := zap.NewDevelopmentConfig()
+	logDebugCfg := zap.NewProductionConfig()
+	logDebugCfg.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
 
-	cfg.log.Prod, _ = logCfg.Build()
-	cfg.log.Dev, _ = logDebugCfg.Build()
-	cfg.log.Prod.Named("mqtt")
-	cfg.log.Dev.Named("mqtt")
+	log, _ := logCfg.Build()
+	dLog, _ := logDebugCfg.Build()
+
+	cfg.log.Prod = log.Named("mqtt")
+	cfg.log.Dev = dLog.Named("mqtt")
 }
 
 // Init global MQTT config with given options
@@ -39,6 +41,7 @@ func Init(ops Options) {
 	cfg.once.Do(func() {
 		logCfg := zap.NewProductionConfig()
 		logDebugCfg := zap.NewDevelopmentConfig()
+		logDebugCfg.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
 
 		if !ops.LogWithTs {
 			logCfg.EncoderConfig.TimeKey = ""

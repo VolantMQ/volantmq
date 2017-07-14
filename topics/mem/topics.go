@@ -160,7 +160,7 @@ func (mT *provider) Retain(msg *message.PublishMessage) error {
 	defer mT.rmu.Unlock()
 
 	// [MQTT-3.3.1-10]            [MQTT-3.3.1-7]
-	if len(msg.Payload()) == 0 || msg.QoS() == message.QosAtMostOnce {
+	if len(msg.Payload()) == 0 || msg.QoS() == message.QoS0 {
 		mT.rRoot.remove(msg.Topic()) // nolint: errcheck, gas
 
 		if len(msg.Payload()) == 0 {

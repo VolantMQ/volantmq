@@ -202,7 +202,6 @@ func (s *connection) processIncoming() {
 	for {
 		// 1. firstly lets peak message type and total length
 		mType, total, err := s.peekMessageSize()
-
 		if err != nil {
 			if err != io.EOF {
 				s.log.prod.Error("Error peeking next message size", zap.String("ClientID", s.config.id), zap.Error(err))
@@ -210,13 +209,21 @@ func (s *connection) processIncoming() {
 			return
 		}
 
+		if !mType.Valid() {
+			s.log.prod.Error("Invalid message type received", zap.String("ClientID", s.config.id))
+			return
+		}
+
 		var msg message.Provider
 
 		// 2. Now read message including fixed header
-		msg, _, err = s.readMessage(mType, total)
+		msg, _, err = s.readMessage(total)
 		if err != nil {
 			if err != io.EOF {
-				s.log.prod.Error("Error peeking next message", zap.String("ClientID", s.config.id), zap.Error(err), zap.Int("total len", total))
+				s.log.prod.Error("Couldn't read message",
+					zap.String("ClientID", s.config.id),
+					zap.Error(err),
+					zap.Int("total len", total))
 			}
 			return
 		}
@@ -254,7 +261,7 @@ func (s *connection) processIncoming() {
 			s.will = false
 			return
 		default:
-			s.log.prod.Error("Unsupported incoming message type", zap.String("ClientID", s.config.id), zap.String("type", msg.Type().String()))
+			s.log.prod.Error("Unsupported incoming message type", zap.String("ClientID", s.config.id), zap.String("type", msg.Type().Name()))
 			return
 		}
 
@@ -403,13 +410,13 @@ func (s *connection) peekMessageSize() (message.Type, int, error) {
 //		return nil, 0, err
 //	}
 //
-//	n, err = msg.Decode(b)
+//	n, err = msg.decode(b)
 //	return msg, n, err
 //}
 
 // readMessage reads and copies a message from the buffer. The buffer bytes are
 // committed as a result of the read.
-func (s *connection) readMessage(mType message.Type, total int) (message.Provider, int, error) {
+func (s *connection) readMessage(total int) (message.Provider, int, error) {
 	defer func() {
 		if int64(len(s.in.ExternalBuf)) > s.in.Size() {
 			s.in.ExternalBuf = make([]byte, s.in.Size())
@@ -441,15 +448,12 @@ func (s *connection) readMessage(mType message.Type, total int) (message.Provide
 		}
 	}
 
-	msg, err = mType.New()
-	if err != nil {
-		s.log.prod.Error("Error", zap.Error(err))
-		return msg, 0, err
-	}
-
-	n, err = msg.Decode(s.in.ExternalBuf[:total])
-	if err != nil {
-		s.log.prod.Error("Error", zap.Error(err))
+	var dTotal int
+	if msg, dTotal, err = message.Decode(s.in.ExternalBuf[:total]); err == nil && total != dTotal {
+		s.log.prod.Error("Incoming and outgoing length does not match",
+			zap.Int("in", total),
+			zap.Int("out", dTotal))
+		return nil, 0, types.ErrBufferNotReady
 	}
 
 	return msg, n, err
