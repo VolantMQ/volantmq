@@ -16,7 +16,6 @@ package message
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"github.com/troian/surgemq/buffer"
 )
@@ -37,14 +36,10 @@ var _ Provider = (*SubAckMessage)(nil)
 // NewSubAckMessage creates a new SUBACK message.
 func NewSubAckMessage() *SubAckMessage {
 	msg := &SubAckMessage{}
-	msg.SetType(SUBACK) // nolint: errcheck
+	msg.setType(SUBACK) // nolint: errcheck
+	msg.sizeCb = msg.size
 
 	return msg
-}
-
-// String returns a string representation of the message.
-func (msg *SubAckMessage) String() string {
-	return fmt.Sprintf("%s, Packet ID=%d, Return Codes=%v", msg.header, msg.packetID, msg.returnCodes)
 }
 
 // ReturnCodes returns the list of QoS returns from the subscriptions sent in the SUBSCRIBE message.
@@ -76,19 +71,8 @@ func (msg *SubAckMessage) SetPacketID(v uint16) {
 	msg.packetID = v
 }
 
-// Len of message
-func (msg *SubAckMessage) Len() int {
-	ml := msg.msgLen()
-
-	if err := msg.SetRemainingLength(int32(ml)); err != nil {
-		return 0
-	}
-
-	return msg.header.msgLen() + ml
-}
-
-// Decode message
-func (msg *SubAckMessage) Decode(src []byte) (int, error) {
+// decode message
+func (msg *SubAckMessage) decode(src []byte) (int, error) {
 	total := 0
 
 	hn, err := msg.header.decode(src[total:])
@@ -126,16 +110,9 @@ func (msg *SubAckMessage) preEncode(dst []byte) (int, error) {
 		return 0, ErrPackedIDZero
 	}
 
-	var err error
 	total := 0
 
-	var n int
-
-	n, err = msg.header.encode(dst[total:])
-	total += n
-	if err != nil {
-		return total, err
-	}
+	total += msg.header.encode(dst[total:])
 
 	binary.BigEndian.PutUint16(dst[total:], msg.packetID)
 	total += 2
@@ -144,12 +121,16 @@ func (msg *SubAckMessage) preEncode(dst []byte) (int, error) {
 		total++
 	}
 
-	return total, err
+	return total, nil
 }
 
 // Encode message
 func (msg *SubAckMessage) Encode(dst []byte) (int, error) {
-	expectedSize := msg.Len()
+	expectedSize, err := msg.Size()
+	if err != nil {
+		return 0, err
+	}
+
 	if len(dst) < expectedSize {
 		return expectedSize, ErrInsufficientBufferSize
 	}
@@ -159,7 +140,11 @@ func (msg *SubAckMessage) Encode(dst []byte) (int, error) {
 
 // Send encode and send message into ring buffer
 func (msg *SubAckMessage) Send(to *buffer.Type) (int, error) {
-	expectedSize := msg.Len()
+	expectedSize, err := msg.Size()
+	if err != nil {
+		return 0, err
+	}
+
 	if len(to.ExternalBuf) < expectedSize {
 		to.ExternalBuf = make([]byte, expectedSize)
 	}
@@ -172,6 +157,6 @@ func (msg *SubAckMessage) Send(to *buffer.Type) (int, error) {
 	return to.Send([][]byte{to.ExternalBuf[:total]})
 }
 
-func (msg *SubAckMessage) msgLen() int {
+func (msg *SubAckMessage) size() int {
 	return 2 + len(msg.returnCodes)
 }

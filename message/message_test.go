@@ -15,6 +15,7 @@
 package message
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -78,6 +79,16 @@ func TestReadLPBytes(t *testing.T) {
 
 		total += n
 	}
+
+	buf := make([]byte, 1)
+	_, _, err := readLPBytes(buf)
+	require.EqualError(t, ErrInsufficientBufferSize, err.Error())
+
+	buf = make([]byte, 3)
+	buf[0] = 2
+
+	_, _, err = readLPBytes(buf)
+	require.EqualError(t, ErrInsufficientBufferSize, err.Error())
 }
 
 func TestWriteLPBytes(t *testing.T) {
@@ -94,6 +105,16 @@ func TestWriteLPBytes(t *testing.T) {
 	}
 
 	require.Equal(t, lpstringBytes, buf[:total])
+
+	testString := []byte("blablabla")
+	buf = make([]byte, 4)
+
+	_, err := writeLPBytes(buf, testString)
+	require.EqualError(t, ErrInsufficientBufferSize, err.Error())
+
+	testString = make([]byte, int(maxLPString)+1)
+	_, err = writeLPBytes(buf, testString)
+	require.EqualError(t, ErrInvalidLPStringSize, err.Error())
 }
 
 func TestMessageTypes(t *testing.T) {
@@ -117,7 +138,7 @@ func TestMessageTypes(t *testing.T) {
 }
 
 func TestQosCodes(t *testing.T) {
-	if QosAtMostOnce != 0 || QosAtLeastOnce != 1 || QosExactlyOnce != 2 {
+	if QoS0 != 0 || QoS1 != 1 || QoS2 != 2 {
 		t.Errorf("QOS codes invalid")
 	}
 }
@@ -132,6 +153,25 @@ func TestConnackReturnCodes(t *testing.T) {
 	require.Equal(t, ErrBadUsernameOrPassword.Error(), ConnAckCode(4).Error(), "Incorrect ConnackCode error value.")
 
 	require.Equal(t, ErrNotAuthorized.Error(), ConnAckCode(5).Error(), "Incorrect ConnackCode error value.")
+
+	_, ok := ValidConnAckError(ErrInvalidProtocolVersion)
+	require.True(t, ok)
+
+	_, ok = ValidConnAckError(ErrIdentifierRejected)
+	require.True(t, ok)
+
+	_, ok = ValidConnAckError(ErrServerUnavailable)
+	require.True(t, ok)
+
+	_, ok = ValidConnAckError(ErrBadUsernameOrPassword)
+	require.True(t, ok)
+
+	_, ok = ValidConnAckError(ErrNotAuthorized)
+	require.True(t, ok)
+
+	_, ok = ValidConnAckError(errors.New("bla bla bla bla"))
+	require.False(t, ok)
+
 }
 
 func TestFixedHeaderFlags(t *testing.T) {
@@ -176,4 +216,23 @@ func TestSupportedVersions(t *testing.T) {
 			t.Errorf("Protocol version and name mismatch. Expect %s, got %s.", "MQIsdp", v)
 		}
 	}
+
+	require.True(t, ValidVersion(0x03))
+	require.True(t, ValidVersion(0x04))
+	require.False(t, ValidVersion(0x05))
+}
+
+func TestMessageDecode(t *testing.T) {
+	var buf []byte
+
+	_, n, err := Decode(buf)
+	require.Equal(t, 0, n)
+	require.EqualError(t, ErrInvalidLength, err.Error())
+
+	buf = make([]byte, 1)
+	buf[0] = 0x0F << offsetHeaderType
+
+	_, n, err = Decode(buf)
+	require.Error(t, err)
+	require.Equal(t, 0, n)
 }

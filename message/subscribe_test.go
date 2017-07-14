@@ -55,8 +55,10 @@ func TestSubscribeMessageDecode(t *testing.T) {
 		2, // QoS
 	}
 
-	msg := NewSubscribeMessage()
-	n, err := msg.Decode(msgBytes)
+	//msg := NewSubscribeMessage()
+	m, n, err := Decode(msgBytes)
+	msg, ok := m.(*SubscribeMessage)
+	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
@@ -79,8 +81,7 @@ func TestSubscribeMessageDecode2(t *testing.T) {
 		7, // packet ID LSB (7)
 	}
 
-	msg := NewSubscribeMessage()
-	_, err := msg.Decode(msgBytes)
+	_, _, err := Decode(msgBytes)
 
 	require.Error(t, err)
 }
@@ -116,8 +117,12 @@ func TestSubscribeMessageEncode(t *testing.T) {
 	require.NoError(t, err, "Error encoding message.")
 	require.Equal(t, len(msgBytes), n, "Error encoding message.")
 
-	msg1 := NewSubscribeMessage()
-	n, err = msg1.Decode(dst)
+	//msg1 := NewSubscribeMessage()
+	var m1 Provider
+	m1, n, err = Decode(dst)
+	msg1, ok := m1.(*SubscribeMessage)
+	require.Equal(t, true, ok, "Invalid message type")
+
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
 
@@ -162,8 +167,10 @@ func TestSubscribeDecodeEncodeEquiv(t *testing.T) {
 		2, // QoS
 	}
 
-	msg := NewSubscribeMessage()
-	n, err := msg.Decode(msgBytes)
+	//msg := NewSubscribeMessage()
+	m, n, err := Decode(msgBytes)
+	msg, ok := m.(*SubscribeMessage)
+	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message")
 	require.Equal(t, len(msgBytes), n, "Raw message length does not match")
@@ -189,7 +196,7 @@ func TestSubscribeDecodeEncodeEquiv(t *testing.T) {
 	qos = msg.TopicQos("/a/b/#/cdd")
 	require.Equal(t, QosType(2), qos, "Invalid QoS for topic")
 
-	n3, err := msg.Decode(dst)
+	_, n3, err := Decode(dst)
 
 	require.NoError(t, err, "Error decoding message")
 	require.Equal(t, len(msgBytes), n3, "Raw message length does not match")

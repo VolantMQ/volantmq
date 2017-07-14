@@ -32,50 +32,52 @@ var _ Provider = (*PingReqMessage)(nil)
 // NewPingReqMessage creates a new PINGREQ message.
 func NewPingReqMessage() *PingReqMessage {
 	msg := &PingReqMessage{}
-	msg.SetType(PINGREQ) // nolint: errcheck
+	msg.setType(PINGREQ) // nolint: errcheck
+	msg.sizeCb = msg.size
 
 	return msg
 }
 
-// Decode message
-func (msg *PingReqMessage) Decode(src []byte) (int, error) {
+// decode message
+func (msg *PingReqMessage) decode(src []byte) (int, error) {
 	return msg.header.decode(src)
 }
 
-func (msg *PingReqMessage) preEncode(dst []byte) (int, error) {
-	var err error
-	total := 0
-
-	var n int
-	if n, err = msg.header.encode(dst[total:]); err != nil {
-		return total, err
-	}
-	total += n
-
-	return total, err
+func (msg *PingReqMessage) preEncode(dst []byte) int {
+	return msg.header.encode(dst)
 }
 
 // Encode message
 func (msg *PingReqMessage) Encode(dst []byte) (int, error) {
-	expectedSize := msg.Len()
-	if len(dst) < expectedSize {
-		return expectedSize, ErrInsufficientBufferSize
-	}
-
-	return msg.preEncode(dst)
-}
-
-// Send encode and send message into ring buffer
-func (msg *PingReqMessage) Send(to *buffer.Type) (int, error) {
-	expectedSize := msg.Len()
-	if len(to.ExternalBuf) < expectedSize {
-		to.ExternalBuf = make([]byte, expectedSize)
-	}
-
-	total, err := msg.preEncode(to.ExternalBuf)
+	expectedSize, err := msg.Size()
 	if err != nil {
 		return 0, err
 	}
 
+	if len(dst) < expectedSize {
+		return expectedSize, ErrInsufficientBufferSize
+	}
+
+	return msg.preEncode(dst), nil
+}
+
+// Send encode and send message into ring buffer
+func (msg *PingReqMessage) Send(to *buffer.Type) (int, error) {
+	expectedSize, err := msg.Size()
+	if err != nil {
+		return 0, err
+	}
+
+	if len(to.ExternalBuf) < expectedSize {
+		to.ExternalBuf = make([]byte, expectedSize)
+	}
+
+	total := msg.preEncode(to.ExternalBuf)
+
 	return to.Send([][]byte{to.ExternalBuf[:total]})
+}
+
+// Len of message
+func (msg *PingReqMessage) size() int {
+	return 0
 }

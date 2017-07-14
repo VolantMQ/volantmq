@@ -29,7 +29,7 @@ var (
 
 var (
 	// ErrBufferInsufficientData buffer has insufficient data
-	ErrBufferInsufficientData error = errors.New("buffer has insufficient data")
+	ErrBufferInsufficientData = errors.New("buffer has insufficient data")
 )
 
 const (

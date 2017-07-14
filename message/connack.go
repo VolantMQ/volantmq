@@ -16,7 +16,6 @@ package message
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/troian/surgemq/buffer"
 )
@@ -34,23 +33,15 @@ type ConnAckMessage struct {
 	returnCode     ConnAckCode
 }
 
-const (
-	connAckSessionPresentMask byte = 0x01
-)
-
 var _ Provider = (*ConnAckMessage)(nil)
 
 // NewConnAckMessage creates a new CONNACK message
 func NewConnAckMessage() *ConnAckMessage {
 	msg := &ConnAckMessage{}
-	msg.SetType(CONNACK) // nolint: errcheck
+	msg.setType(CONNACK) // nolint: errcheck
+	msg.sizeCb = msg.size
 
 	return msg
-}
-
-// String returns a string representation of the CONNACK message
-func (msg ConnAckMessage) String() string {
-	return fmt.Sprintf("%s, Session Present=%t, Return code=%q\n", msg.header, msg.sessionPresent, msg.returnCode)
 }
 
 // SessionPresent returns the session present flag value
@@ -70,23 +61,18 @@ func (msg *ConnAckMessage) ReturnCode() ConnAckCode {
 }
 
 // SetReturnCode of conn
-func (msg *ConnAckMessage) SetReturnCode(ret ConnAckCode) {
-	msg.returnCode = ret
-}
-
-// Len of message
-func (msg *ConnAckMessage) Len() int {
-	ml := msg.msgLen()
-
-	if err := msg.SetRemainingLength(int32(ml)); err != nil {
-		return 0
+func (msg *ConnAckMessage) SetReturnCode(ret ConnAckCode) error {
+	if !ret.Valid() {
+		return ErrInvalidReturnCode
 	}
 
-	return msg.header.msgLen() + ml
+	msg.returnCode = ret
+
+	return nil
 }
 
-// Decode message
-func (msg *ConnAckMessage) Decode(src []byte) (int, error) {
+// decode message
+func (msg *ConnAckMessage) decode(src []byte) (int, error) {
 	total := 0
 
 	n, err := msg.header.decode(src)
@@ -97,10 +83,11 @@ func (msg *ConnAckMessage) Decode(src []byte) (int, error) {
 
 	// [MQTT-3.2.2.1]
 	b := src[total]
-	if b&(^connAckSessionPresentMask) != 0 {
-		return 0, errors.New("connack/Decode: Bits 7-1 in Connack Acknowledge Flags byte (1) are not 0")
+	if b&(^maskConnAckSessionPresent) != 0 {
+		return 0, errors.New("connack/decode: Bits 7-1 in Connack Acknowledge Flags byte (1) are not 0")
 	}
-	msg.sessionPresent = b&connAckSessionPresentMask != 0
+
+	msg.sessionPresent = b&maskConnAckSessionPresent != 0
 	total++
 
 	b = src[total]
@@ -114,24 +101,10 @@ func (msg *ConnAckMessage) Decode(src []byte) (int, error) {
 	return total, nil
 }
 
-func (msg *ConnAckMessage) preEncode(dst []byte) (int, error) {
-	var err error
+func (msg *ConnAckMessage) preEncode(dst []byte) int {
 	total := 0
 
-	if msg.returnCode >= ConnAckCodeReserved {
-		return total, ErrInvalidReturnCode
-	}
-
-	if err = msg.SetRemainingLength(int32(msg.msgLen())); err != nil {
-		return 0, err
-	}
-
-	var n int
-
-	if n, err = msg.header.encode(dst[total:]); err != nil {
-		return 0, err
-	}
-	total += n
+	total += msg.header.encode(dst[total:])
 
 	if msg.sessionPresent {
 		dst[total] = 1
@@ -143,35 +116,31 @@ func (msg *ConnAckMessage) preEncode(dst []byte) (int, error) {
 	dst[total] = msg.returnCode.Value()
 	total++
 
-	return total, err
+	return total
 }
 
 //Encode message
 func (msg *ConnAckMessage) Encode(dst []byte) (int, error) {
-	expectedSize := msg.Len()
+	expectedSize, _ := msg.Size()
 	if len(dst) < expectedSize {
 		return expectedSize, ErrInsufficientBufferSize
 	}
 
-	return msg.preEncode(dst)
+	return msg.preEncode(dst), nil
 }
 
 // Send encode and send message into ring buffer
 func (msg *ConnAckMessage) Send(to *buffer.Type) (int, error) {
-	expectedSize := msg.Len()
+	expectedSize, _ := msg.Size()
 	if len(to.ExternalBuf) < expectedSize {
 		to.ExternalBuf = make([]byte, expectedSize)
 	}
 
-	total, err := msg.preEncode(to.ExternalBuf)
-	if err != nil {
-		return 0, err
-	}
+	total := msg.preEncode(to.ExternalBuf)
 
 	return to.Send([][]byte{to.ExternalBuf[:total]})
 }
 
-func (msg *ConnAckMessage) msgLen() int {
-
+func (msg *ConnAckMessage) size() int {
 	return 2
 }

@@ -156,8 +156,9 @@ func TestConnectMessageDecode(t *testing.T) {
 		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e', 't',
 	}
 
-	msg := NewConnectMessage()
-	n, err := msg.Decode(msgBytes)
+	m, n, err := Decode(msgBytes)
+	msg, ok := m.(*ConnectMessage)
+	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
@@ -199,8 +200,7 @@ func TestConnectMessageDecode2(t *testing.T) {
 		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e',
 	}
 
-	msg := NewConnectMessage()
-	_, err := msg.Decode(msgBytes)
+	_, _, err := Decode(msgBytes)
 
 	require.Error(t, err)
 }
@@ -235,8 +235,7 @@ func TestConnectMessageDecode3(t *testing.T) {
 		'e', 'x', 't', 'r', 'a',
 	}
 
-	msg := NewConnectMessage()
-	n, err := msg.Decode(msgBytes)
+	_, n, err := Decode(msgBytes)
 
 	require.NoError(t, err)
 	require.Equal(t, 62, n)
@@ -270,8 +269,7 @@ func TestConnectMessageDecode4(t *testing.T) {
 		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e', 't',
 	}
 
-	msg := NewConnectMessage()
-	_, err := msg.Decode(msgBytes)
+	_, _, err := Decode(msgBytes)
 
 	require.Error(t, err)
 }
@@ -353,8 +351,9 @@ func TestConnectDecodeEncodeEquiv(t *testing.T) {
 		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e', 't',
 	}
 
-	msg := NewConnectMessage()
-	n, err := msg.Decode(msgBytes)
+	m, n, err := Decode(msgBytes)
+	msg, ok := m.(*ConnectMessage)
+	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
@@ -366,7 +365,7 @@ func TestConnectDecodeEncodeEquiv(t *testing.T) {
 	require.Equal(t, len(msgBytes), n2, "Error decoding message.")
 	require.Equal(t, msgBytes, dst[:n2], "Error decoding message.")
 
-	n3, err := msg.Decode(dst)
+	_, n3, err := Decode(dst)
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n3, "Error decoding message.")

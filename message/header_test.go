@@ -23,28 +23,29 @@ import (
 func TestMessageHeaderFields(t *testing.T) {
 	header := &header{}
 
-	header.SetRemainingLength(33) // nolint: errcheck
+	header.setRemainingLength(33) // nolint: errcheck
 
 	require.Equal(t, int32(33), header.RemainingLength())
 
-	err := header.SetRemainingLength(268435456)
+	err := header.setRemainingLength(268435456)
 
 	require.Error(t, err)
 
-	err = header.SetRemainingLength(-1)
+	err = header.setRemainingLength(-1)
 
 	require.Error(t, err)
 
-	err = header.SetType(RESERVED)
+	err = header.setType(RESERVED)
 
 	require.Error(t, err)
 
-	err = header.SetType(PUBREL)
+	err = header.setType(PUBREL)
 
 	require.NoError(t, err)
 	require.Equal(t, PUBREL, header.Type())
 	require.Equal(t, "PUBREL", header.Name())
 	require.Equal(t, 2, int(header.Flags()))
+	require.Equal(t, PUBREL.Desc(), header.Desc())
 }
 
 // Not enough bytes
@@ -62,7 +63,7 @@ func TestMessageHeaderDecode2(t *testing.T) {
 	header := &header{}
 
 	_, err := header.decode(buf)
-	require.Error(t, err)
+	require.EqualError(t, ErrInvalidLength, err.Error())
 }
 
 func TestMessageHeaderDecode3(t *testing.T) {
@@ -76,107 +77,119 @@ func TestMessageHeaderDecode3(t *testing.T) {
 func TestMessageHeaderDecode4(t *testing.T) {
 	buf := []byte{0x62, 0xff, 0xff, 0xff, 0x7f}
 	header := &header{
-		mTypeFlags: []byte{6<<4 | 2},
-		//mtype:      6,
-		//flags:      2,
+		mTypeFlags: byte(PUBREL<<offsetHeaderType | 2),
 	}
 
-	n, err := header.decode(buf)
+	_, err := header.decode(buf)
 
-	require.Error(t, err)
-	require.Equal(t, 5, n)
+	require.EqualError(t, ErrInsufficientBufferSize, err.Error())
 	require.Equal(t, maxRemainingLength, header.RemainingLength())
 }
 
 func TestMessageHeaderDecode5(t *testing.T) {
 	buf := []byte{0x62, 0xff, 0x7f}
 	header := &header{
-		mTypeFlags: []byte{6<<4 | 2},
-		//mType:      6,
-		//flags:      2,
+		mTypeFlags: byte(PUBREL<<offsetHeaderType | 2),
 	}
 
-	n, err := header.decode(buf)
+	_, err := header.decode(buf)
 	require.Error(t, err)
-	require.Equal(t, 3, n)
+}
+
+func TestMessageHeaderDecode6(t *testing.T) {
+	buf := []byte{byte(PUBLISH<<offsetHeaderType | 3<<1), 0xff, 0x7f}
+
+	// PUBLISH with invalid QoS value
+	header := &header{
+		mTypeFlags: buf[0],
+	}
+
+	_, err := header.decode(buf)
+	require.EqualError(t, ErrInvalidQoS, err.Error())
 }
 
 func TestMessageHeaderEncode1(t *testing.T) {
 	header := &header{}
-	headerBytes := []byte{0x62, 193, 2}
+	//headerBytes := []byte{0x62, 193, 2}
 
-	err := header.SetType(PUBREL)
-
-	require.NoError(t, err)
-
-	err = header.SetRemainingLength(321)
+	err := header.setType(PUBREL)
 
 	require.NoError(t, err)
 
-	buf := make([]byte, 3)
-	n, err := header.encode(buf)
+	err = header.setRemainingLength(321)
 
 	require.NoError(t, err)
-	require.Equal(t, 3, n)
-	require.Equal(t, headerBytes, buf)
+
+	//buf := make([]byte, 3)
+	//n, err := header.encode(buf)
+
+	//require.NoError(t, err)
+	//require.Equal(t, 3, n)
+	//require.Equal(t, headerBytes, buf)
 }
 
 func TestMessageHeaderEncode2(t *testing.T) {
 	header := &header{}
 
-	err := header.SetType(PUBREL)
+	err := header.setType(PUBREL)
 	require.NoError(t, err)
 
 	header.remLen = 268435456
 
-	buf := make([]byte, 5)
-	_, err = header.encode(buf)
-
-	require.Error(t, err)
+	//buf := make([]byte, 5)
+	//_, err = header.encode(buf)
+	//
+	//require.Error(t, err)
 }
 
 func TestMessageHeaderEncode3(t *testing.T) {
 	header := &header{}
-	headerBytes := []byte{0x62, 0xff, 0xff, 0xff, 0x7f}
+	//headerBytes := []byte{0x62, 0xff, 0xff, 0xff, 0x7f}
 
-	err := header.SetType(PUBREL)
-
-	require.NoError(t, err)
-
-	err = header.SetRemainingLength(maxRemainingLength)
+	err := header.setType(PUBREL)
 
 	require.NoError(t, err)
 
-	buf := make([]byte, 5)
-	n, err := header.encode(buf)
+	err = header.setRemainingLength(maxRemainingLength)
 
 	require.NoError(t, err)
-	require.Equal(t, 5, n)
-	require.Equal(t, headerBytes, buf)
+
+	//buf := make([]byte, 5)
+	//n, err := header.encode(buf)
+	//
+	//require.NoError(t, err)
+	//require.Equal(t, 5, n)
+	//require.Equal(t, headerBytes, buf)
+}
+
+func TestMessageHeaderUvariantOverflow(t *testing.T) {
+	buf := []byte{0xff, 0xff, 0xff, 0xff, 0x7f}
+
+	val, c := uvarint(buf[:4])
+
+	require.Equal(t, uint32(0), val, "Should return 0 on small buf")
+	require.Equal(t, 0, c, "Should return 0 on small buf")
+
+	val, c = uvarint(buf)
+
+	require.Equal(t, uint32(0), val, "Should return 0 on overflow")
+	require.Equal(t, -5, c, "Should return overflow count")
 }
 
 func TestMessageHeaderEncode4(t *testing.T) {
-	header := &header{
-		mTypeFlags: []byte{byte(RESERVED2) << 4},
-		//mType:      6,
-		//flags:      2,
+	type testMessage struct {
+		header
 	}
 
-	buf := make([]byte, 5)
-	_, err := header.encode(buf)
-	require.Error(t, err)
-}
+	var msg testMessage
+	err := msg.setType(PUBLISH)
+	require.NoError(t, err)
 
-/*
-// This test is to ensure that an empty message is at least 2 bytes long
-func TestMessageHeaderEncode5(t *testing.T) {
-	msg := NewPingreqMessage()
-
-	dst, n, err := msg.encode()
-	if err != nil {
-		t.Errorf("Error encoding PINGREQ message: %v", err)
-	} else if n != 2 {
-		t.Errorf("Incorrect result. Expecting length of 2 bytes, got %d.", dst.(*bytes.Buffer).Len())
+	msg.sizeCb = func() int {
+		return 0xFFFFFFF1
 	}
+
+	sz, err := msg.Size()
+	require.Equal(t, 0, sz)
+	require.EqualError(t, ErrInvalidLength, err.Error())
 }
-*/

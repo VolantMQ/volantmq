@@ -36,11 +36,12 @@ func TestPubAckMessageDecode(t *testing.T) {
 		7, // packet ID LSB (7)
 	}
 
-	msg := NewPubAckMessage()
-	n, err := msg.Decode(msgBytes)
+	m, n, err := Decode(msgBytes)
+	msg, ok := m.(*PubAckMessage)
+	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n, "Decode length does not match")
+	require.Equal(t, len(msgBytes), n, "decode length does not match")
 	require.Equal(t, PUBACK, msg.Type(), "Message type does not match")
 	require.Equal(t, 7, int(msg.PacketID()), "PacketID does not match")
 }
@@ -53,8 +54,7 @@ func TestPubAckMessageDecode2(t *testing.T) {
 		7, // packet ID LSB (7)
 	}
 
-	msg := NewPubAckMessage()
-	_, err := msg.Decode(msgBytes)
+	_, _, err := Decode(msgBytes)
 
 	require.Error(t, err)
 }
@@ -88,8 +88,9 @@ func TestPubAckDecodeEncodeEquiv(t *testing.T) {
 		7, // packet ID LSB (7)
 	}
 
-	msg := NewPubAckMessage()
-	n, err := msg.Decode(msgBytes)
+	m, n, err := Decode(msgBytes)
+	msg, ok := m.(*PubAckMessage)
+	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
@@ -101,7 +102,7 @@ func TestPubAckDecodeEncodeEquiv(t *testing.T) {
 	require.Equal(t, len(msgBytes), n2, "Error decoding message.")
 	require.Equal(t, msgBytes, dst[:n2], "Error decoding message.")
 
-	n3, err := msg.Decode(dst)
+	_, n3, err := Decode(dst)
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n3, "Error decoding message.")

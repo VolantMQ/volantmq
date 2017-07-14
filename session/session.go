@@ -303,7 +303,7 @@ func (s *Type) onSubscribedPublish(msg *message.PublishMessage) error {
 	m.SetDup(false)
 
 	// If this is Fire and Forget firstly check is client online
-	if msg.QoS() == message.QosAtMostOnce {
+	if msg.QoS() == message.QoS0 {
 		// By checking s.publisher.quit channel we can effectively detect is client is connected or not
 		select {
 		case <-s.publisher.quit:
@@ -356,7 +356,7 @@ func (s *Type) publishToTopic(msg *message.PublishMessage) error {
 		}
 
 		// [MQTT-3.3.1-7]
-		if msg.QoS() == message.QosAtMostOnce {
+		if msg.QoS() == message.QoS0 {
 			m := message.NewPublishMessage()
 			m.SetQoS(msg.QoS())     // nolint: errcheck
 			m.SetTopic(msg.Topic()) // nolint: errcheck
@@ -394,7 +394,7 @@ func (s *Type) onAckOut(msg message.Provider, status error) {
 	//	switch m := msg.(type) {
 	//	case *message.PublishMessage:
 	//		// if ack for QoS 1 or 2 has been timed out put this message back to the publish queue
-	//		if m.QoS() == message.QosAtLeastOnce {
+	//		if m.QoS() == message.QoS1 {
 	//			m.SetDup(true)
 	//		}
 	//		s.publisher.lock.Lock()
@@ -419,7 +419,7 @@ func (s *Type) publishWorker() {
 			next = elem.Next()
 			switch m := elem.Value.(type) {
 			case *message.PublishMessage:
-				if m.QoS() == message.QosAtMostOnce {
+				if m.QoS() == message.QoS0 {
 					s.publisher.messages.Remove(elem)
 				}
 			}
@@ -460,9 +460,9 @@ func (s *Type) publishWorker() {
 				s.ack.pubOut.put(msg)
 			case *message.PublishMessage:
 				switch m.QoS() {
-				case message.QosAtLeastOnce:
+				case message.QoS1:
 					fallthrough
-				case message.QosExactlyOnce:
+				case message.QoS2:
 					if m.PacketID() == 0 {
 						m.SetPacketID(s.newPacketID())
 					}
@@ -476,9 +476,9 @@ func (s *Type) publishWorker() {
 					s.ack.pubOut.ack(msg) // nolint: errcheck
 				case *message.PublishMessage:
 					switch m.QoS() {
-					case message.QosAtLeastOnce:
+					case message.QoS1:
 						fallthrough
-					case message.QosExactlyOnce:
+					case message.QoS2:
 						m.SetDup(true)
 						s.ack.pubOut.ack(msg) // nolint: errcheck
 					}

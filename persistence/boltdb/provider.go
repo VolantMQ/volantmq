@@ -632,7 +632,7 @@ func getMsgs(b *bolt.Bucket) ([]message.Provider, error) {
 		// firstly get id to decide what message type this is
 		tmp := packBuk.Get([]byte("type"))
 
-		mT, err := message.Type(tmp[0]).New()
+		mT, err := message.Type(tmp[0]).NewMessage()
 		if err != nil {
 			return nil, err
 		}
