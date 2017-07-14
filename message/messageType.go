@@ -115,24 +115,6 @@ var typeDefaultFlags = [RESERVED2 + 1]byte{
 	0, // RESERVED2
 }
 
-var typeNewMessage = [RESERVED2 + 1]Provider{
-	nil,
-	NewConnectMessage(),
-	NewConnAckMessage(),
-	NewPublishMessage(),
-	NewPubAckMessage(),
-	NewPubRecMessage(),
-	NewPubRelMessage(),
-	NewPubCompMessage(),
-	NewSubscribeMessage(),
-	NewSubAckMessage(),
-	NewUnSubscribeMessage(),
-	NewUnSubAckMessage(),
-	NewPingReqMessage(),
-	NewPingRespMessage(),
-	NewDisconnectMessage(),
-}
-
 // Name returns the name of the message type. It should correspond to one of the
 // constant values defined for MessageType. It is statically defined and cannot
 // be changed.
@@ -163,22 +145,49 @@ func (t Type) DefaultFlags() byte {
 	return typeDefaultFlags[t]
 }
 
-// New creates a new message based on the message type. It is a shortcut to call
+// NewMessage creates a new message based on the message type. It is a shortcut to call
 // one of the New*Message functions. If an error is returned then the message type
 // is invalid.
-func (t Type) New() (Provider, error) {
-	if t < CONNECT && t > DISCONNECT {
+func (t Type) NewMessage() (Provider, error) {
+	switch t {
+	case CONNECT:
+		return NewConnectMessage(), nil
+	case CONNACK:
+		return NewConnAckMessage(), nil
+	case PUBLISH:
+		return NewPublishMessage(), nil
+	case PUBACK:
+		return NewPubAckMessage(), nil
+	case PUBREC:
+		return NewPubRecMessage(), nil
+	case PUBREL:
+		return NewPubRelMessage(), nil
+	case PUBCOMP:
+		return NewPubCompMessage(), nil
+	case SUBSCRIBE:
+		return NewSubscribeMessage(), nil
+	case SUBACK:
+		return NewSubAckMessage(), nil
+	case UNSUBSCRIBE:
+		return NewUnSubscribeMessage(), nil
+	case UNSUBACK:
+		return NewUnSubAckMessage(), nil
+	case PINGREQ:
+		return NewPingReqMessage(), nil
+	case PINGRESP:
+		return NewPingRespMessage(), nil
+	case DISCONNECT:
+		return NewDisconnectMessage(), nil
+	default:
 		return nil, ErrInvalidMessageType
 	}
-
-	return typeNewMessage[t], nil
 }
 
-// New creates a new message based on the message type. It is a shortcut to call
+// NewMessage creates a new message based on the message type. It is a shortcut to call
 // one of the New*Message functions. If an error is returned then the message type
 // is invalid.
-func New(t Type) (Provider, error) {
-	return t.New()
+func NewMessage(t Type) (Provider, error) {
+	return t.NewMessage()
 }
 
 // Valid returns a boolean indicating whether the message type is valid or not.

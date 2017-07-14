@@ -36,6 +36,7 @@ func NewUnSubscribeMessage() *UnSubscribeMessage {
 		topics: make(TopicsQoS),
 	}
 	msg.setType(UNSUBSCRIBE) // nolint: errcheck
+	msg.sizeCb = msg.size
 
 	return msg
 }
@@ -80,17 +81,6 @@ func (msg *UnSubscribeMessage) TopicExists(topic string) bool {
 // SetPacketID sets the ID of the packet.
 func (msg *UnSubscribeMessage) SetPacketID(v uint16) {
 	msg.packetID = v
-}
-
-// Len of message
-func (msg *UnSubscribeMessage) Len() int {
-	ml := msg.msgLen()
-
-	if err := msg.setRemainingLength(int32(ml)); err != nil {
-		return 0
-	}
-
-	return msg.header.msgLen() + ml
 }
 
 // decode reads from the io.Reader parameter until a full message is decoded, or
@@ -138,10 +128,7 @@ func (msg *UnSubscribeMessage) preEncode(dst []byte) (int, error) {
 
 	var n int
 
-	if n, err = msg.header.encode(dst[total:]); err != nil {
-		return total, err
-	}
-	total += n
+	total += msg.header.encode(dst[total:])
 
 	binary.BigEndian.PutUint16(dst[total:], msg.packetID)
 	total += 2
@@ -163,7 +150,11 @@ func (msg *UnSubscribeMessage) preEncode(dst []byte) (int, error) {
 // should be considered invalid.
 // Any changes to the message after Encode() is called will invalidate the io.Reader.
 func (msg *UnSubscribeMessage) Encode(dst []byte) (int, error) {
-	expectedSize := msg.Len()
+	expectedSize, err := msg.Size()
+	if err != nil {
+		return 0, err
+	}
+
 	if len(dst) < expectedSize {
 		return expectedSize, ErrInsufficientBufferSize
 	}
@@ -173,7 +164,11 @@ func (msg *UnSubscribeMessage) Encode(dst []byte) (int, error) {
 
 // Send encode and send message into ring buffer
 func (msg *UnSubscribeMessage) Send(to *buffer.Type) (int, error) {
-	expectedSize := msg.Len()
+	expectedSize, err := msg.Size()
+	if err != nil {
+		return 0, err
+	}
+
 	if len(to.ExternalBuf) < expectedSize {
 		to.ExternalBuf = make([]byte, expectedSize)
 	}
@@ -186,7 +181,7 @@ func (msg *UnSubscribeMessage) Send(to *buffer.Type) (int, error) {
 	return to.Send([][]byte{to.ExternalBuf[:total]})
 }
 
-func (msg *UnSubscribeMessage) msgLen() int {
+func (msg *UnSubscribeMessage) size() int {
 	// packet ID
 	total := 2
 

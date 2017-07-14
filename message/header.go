@@ -18,6 +18,8 @@ import (
 	"encoding/binary"
 )
 
+type sizeCallback func() int
+
 // Fixed header
 // - 1 byte for control packet type (bits 7-4) and flags (bits 3-0)
 // - up to 4 byte for remaining length
@@ -25,6 +27,7 @@ type header struct {
 	remLen     int32
 	packetID   uint16
 	mTypeFlags byte // is the first byte of the buffer, 4 bits for mType, 4 bits for flags
+	sizeCb     sizeCallback
 }
 
 // Name returns a string representation of the message type. Examples include
@@ -42,8 +45,7 @@ func (h *header) Desc() string {
 	return h.Type().Desc()
 }
 
-// Type returns the MessageType of the Message. The retured value should be one
-// of the constants defined for MessageType.
+// Type returns the MessageType of the Message
 func (h *header) Type() Type {
 	return Type(h.mTypeFlags >> 4)
 }
@@ -60,6 +62,17 @@ func (h *header) RemainingLength() int32 {
 
 func (h *header) PacketID() uint16 {
 	return h.packetID
+}
+
+// Size of message
+func (h *header) Size() (int, error) {
+	ml := h.sizeCb()
+
+	if err := h.setRemainingLength(int32(ml)); err != nil {
+		return 0, err
+	}
+
+	return h.size() + ml, nil
 }
 
 // setType sets the message type of this message. It also correctly sets the
@@ -91,26 +104,11 @@ func (h *header) setRemainingLength(remLen int32) error {
 	return nil
 }
 
-func (h *header) Len() int {
-	return h.msgLen()
-}
-
-func (h *header) encode(dst []byte) (int, error) {
-	ml := h.msgLen()
-
-	if len(dst) < ml {
-		return 0, ErrInvalidLength
-	}
-
+// encode fixed header and remaining length into buffer
+// each message type must provide dst buffer with appropriate size
+// provided by header.Size()
+func (h *header) encode(dst []byte) int {
 	total := 0
-
-	if h.remLen > maxRemainingLength || h.remLen < 0 {
-		return total, ErrInvalidLength
-	}
-
-	if !h.Type().Valid() {
-		return total, ErrInvalidMessageType
-	}
 
 	dst[total] = h.mTypeFlags
 	total++
@@ -118,27 +116,17 @@ func (h *header) encode(dst []byte) (int, error) {
 	n := binary.PutUvarint(dst[total:], uint64(h.remLen))
 	total += n
 
-	return total, nil
+	return total
 }
 
-// decode reads from the io.Reader parameter until a full message is decoded, or
-// when io.Reader returns EOF or error. The first return value is the number of
-// bytes read from io.Reader. The second is error if decode encounters any problems.
+// decode reads fixed header and remaining length
+// if decode successful size of decoded data provided
+// if error happened offset points to error place
 func (h *header) decode(src []byte) (int, error) {
 	total := 0
 
-	// decode fixed header
-	mType := h.Type()
+	// decode and validate fixed header
 	h.mTypeFlags = src[total]
-	// [MQTT-2.2.1]
-	if !h.Type().Valid() {
-		return total, ErrInvalidMessageType
-	}
-
-	// This error seems meaningless
-	if mType != h.Type() {
-		return total, ErrInvalidMessageType
-	}
 
 	// [MQTT-2.2.2-1]
 	if h.Type() != PUBLISH {
@@ -153,34 +141,82 @@ func (h *header) decode(src []byte) (int, error) {
 
 	total++
 
-	remLen, m := binary.Uvarint(src[total:])
-	total += m
-	h.remLen = int32(remLen)
-
-	if h.remLen > maxRemainingLength {
+	remLen, m := uvarint(src[total:])
+	if m == 0 {
 		return total, ErrInvalidLength
 	}
 
+	total += m
+	h.remLen = int32(remLen)
+
+	// we don't check remaining length max here as uvariant will return count 0 in case of
+	// returned value bigger than 256MB
+
+	//if h.remLen > maxRemainingLength {
+	//	return total, ErrInvalidLength
+	//}
+
+	// verify if buffer has enough space for whole message
+	// if not return expected size
 	if int(h.remLen) > len(src[total:]) {
-		return total, ErrInvalidLength
+		return total + int(h.remLen), ErrInsufficientBufferSize
 	}
 
 	return total, nil
 }
 
-func (h *header) msgLen() int {
-	// message type and flag byte
+// size of header
+// this function must be invoked after successful call to setRemainingLength
+func (h *header) size() int {
+	// message type and flags byte
 	total := 1
 
-	if h.remLen <= 127 {
-		total++
-	} else if h.remLen <= 16383 {
-		total += 2
-	} else if h.remLen <= 2097151 {
-		total += 3
-	} else {
-		total += 4
-	}
+	return total + uvarintCalc(uint32(h.remLen))
+	//if h.remLen <= 127 {
+	//	total++
+	//} else if h.remLen <= 16383 {
+	//	total += 2
+	//} else if h.remLen <= 2097151 {
+	//	total += 3
+	//} else {
+	//	total += 4
+	//}
 
-	return total
+	//return total
+}
+
+// uvarint decodes a uint64 from buf and returns that value and the
+// number of bytes read (> 0). If an error occurred, the value is 0
+// and the number of bytes n is <= 0 meaning:
+//
+//	n == 0: buf too small
+//	n  < 0: value larger than 32 bits (overflow)
+//              and -n is the number of bytes read
+//
+// copied from binary.Uvariant
+func uvarint(buf []byte) (uint32, int) {
+	var x uint32
+	var s uint
+	for i, b := range buf {
+		if b < 0x80 {
+			if i > 4 || i == 4 && b > 1 {
+				return 0, -(i + 1) // overflow
+			}
+			return x | uint32(b)<<s, i + 1
+		}
+		x |= uint32(b&0x7f) << s
+		s += 7
+	}
+	return 0, 0
+}
+
+func uvarintCalc(x uint32) int {
+	i := 0
+	for x >= 0x80 {
+		//buf[i] = byte(x) | 0x80
+		x >>= 7
+		i++
+	}
+	//buf[i] = byte(x)
+	return i + 1
 }

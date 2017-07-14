@@ -41,6 +41,7 @@ var _ Provider = (*PublishMessage)(nil)
 func NewPublishMessage() *PublishMessage {
 	msg := &PublishMessage{}
 	msg.setType(PUBLISH) // nolint: errcheck
+	msg.sizeCb = msg.size
 
 	return msg
 }
@@ -134,17 +135,6 @@ func (msg *PublishMessage) SetPacketID(v uint16) {
 	msg.packetID = v
 }
 
-// Len of message
-func (msg *PublishMessage) Len() int {
-	ml := msg.msgLen()
-
-	if err := msg.setRemainingLength(int32(ml)); err != nil {
-		return 0
-	}
-
-	return msg.header.msgLen() + ml
-}
-
 // decode message
 func (msg *PublishMessage) decode(src []byte) (int, error) {
 	total := 0
@@ -202,13 +192,9 @@ func (msg *PublishMessage) preEncode(dst []byte) (int, error) {
 		return 0, ErrPackedIDZero
 	}
 
+	total += msg.header.encode(dst[total:])
+
 	var n int
-
-	if n, err = msg.header.encode(dst[total:]); err != nil {
-		return total, err
-	}
-	total += n
-
 	if n, err = writeLPBytes(dst[total:], []byte(msg.topic)); err != nil {
 		return total, err
 	}
@@ -224,7 +210,11 @@ func (msg *PublishMessage) preEncode(dst []byte) (int, error) {
 
 // Encode message
 func (msg *PublishMessage) Encode(dst []byte) (int, error) {
-	expectedSize := msg.Len()
+	expectedSize, err := msg.Size()
+	if err != nil {
+		return 0, err
+	}
+
 	if len(dst) < expectedSize {
 		return expectedSize, ErrInsufficientBufferSize
 	}
@@ -241,10 +231,9 @@ func (msg *PublishMessage) Encode(dst []byte) (int, error) {
 
 // Send encode and send message into ring buffer
 func (msg *PublishMessage) Send(to *buffer.Type) (int, error) {
-	msg.Len()
-	expectedSize := 2 + len(msg.topic)
-	if msg.QoS() != QoS0 {
-		expectedSize += 2
+	expectedSize, err := msg.Size()
+	if err != nil {
+		return 0, err
 	}
 
 	if len(to.ExternalBuf) < expectedSize {
@@ -261,8 +250,9 @@ func (msg *PublishMessage) Send(to *buffer.Type) (int, error) {
 	return total, err
 }
 
-func (msg *PublishMessage) msgLen() int {
+func (msg *PublishMessage) size() int {
 	total := 2 + len(msg.topic) + len(msg.payload)
+
 	if msg.QoS() != 0 {
 		total += 2
 	}

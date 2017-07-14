@@ -32,6 +32,7 @@ var _ Provider = (*UnSubAckMessage)(nil)
 func NewUnSubAckMessage() *UnSubAckMessage {
 	msg := &UnSubAckMessage{}
 	msg.setType(UNSUBACK) // nolint: errcheck
+	msg.sizeCb = msg.size
 
 	return msg
 }
@@ -39,17 +40,6 @@ func NewUnSubAckMessage() *UnSubAckMessage {
 // SetPacketID sets the ID of the packet.
 func (msg *UnSubAckMessage) SetPacketID(v uint16) {
 	msg.packetID = v
-}
-
-// Len of message
-func (msg *UnSubAckMessage) Len() int {
-	ml := msg.msgLen()
-
-	if err := msg.setRemainingLength(int32(ml)); err != nil {
-		return 0
-	}
-
-	return msg.header.msgLen() + ml
 }
 
 // decode message
@@ -74,25 +64,23 @@ func (msg *UnSubAckMessage) preEncode(dst []byte) (int, error) {
 		return 0, ErrPackedIDZero
 	}
 
-	var err error
 	total := 0
 
-	var n int
-
-	if n, err = msg.header.encode(dst[total:]); err != nil {
-		return total, err
-	}
-	total += n
+	total += msg.header.encode(dst[total:])
 
 	binary.BigEndian.PutUint16(dst[total:], msg.packetID)
 	total += 2
 
-	return total, err
+	return total, nil
 }
 
 // Encode message
 func (msg *UnSubAckMessage) Encode(dst []byte) (int, error) {
-	expectedSize := msg.Len()
+	expectedSize, err := msg.Size()
+	if err != nil {
+		return 0, err
+	}
+
 	if len(dst) < expectedSize {
 		return expectedSize, ErrInsufficientBufferSize
 	}
@@ -102,7 +90,11 @@ func (msg *UnSubAckMessage) Encode(dst []byte) (int, error) {
 
 // Send encode and send message into ring buffer
 func (msg *UnSubAckMessage) Send(to *buffer.Type) (int, error) {
-	expectedSize := msg.Len()
+	expectedSize, err := msg.Size()
+	if err != nil {
+		return 0, err
+	}
+
 	if len(to.ExternalBuf) < expectedSize {
 		to.ExternalBuf = make([]byte, expectedSize)
 	}
@@ -115,7 +107,7 @@ func (msg *UnSubAckMessage) Send(to *buffer.Type) (int, error) {
 	return to.Send([][]byte{to.ExternalBuf[:total]})
 }
 
-func (msg *UnSubAckMessage) msgLen() int {
+func (msg *UnSubAckMessage) size() int {
 	// packet ID
 	return 2
 }

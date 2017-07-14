@@ -217,14 +217,16 @@ func TestPublishMessageEncode4(t *testing.T) {
 	msg.SetQoS(0)           // nolint: errcheck
 	msg.SetPayload(payload)
 
-	require.Equal(t, len(msgBytes), msg.Len())
+	size, err := msg.Size()
+	require.NoError(t, err, "Error getting message size")
+	require.Equal(t, len(msgBytes), size)
 
 	dst := make([]byte, 1100)
 	n, err := msg.Encode(dst)
 
-	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n, "Error decoding message.")
-	require.Equal(t, msgBytes, dst[:n], "Error decoding message.")
+	require.NoError(t, err, "Error decoding message")
+	require.Equal(t, len(msgBytes), n, "Error decoding message")
+	require.Equal(t, msgBytes, dst[:n], "Error decoding message")
 }
 
 // test from github issue #2, @mrdg
@@ -235,15 +237,15 @@ func TestPublishDecodeEncodeEquiv2(t *testing.T) {
 	msg, ok := m.(*PublishMessage)
 	require.Equal(t, true, ok, "Invalid message type")
 
-	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n, "Error decoding message.")
+	require.NoError(t, err, "Error decoding message")
+	require.Equal(t, len(msgBytes), n, "Error decoding message")
 
 	dst := make([]byte, 100)
 	n2, err := msg.Encode(dst)
 
-	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n2, "Error decoding message.")
-	require.Equal(t, msgBytes, dst[:n], "Error decoding message.")
+	require.NoError(t, err, "Error decoding message")
+	require.Equal(t, len(msgBytes), n2, "Error decoding message")
+	require.Equal(t, msgBytes, dst[:n], "Error decoding message")
 }
 
 // test to ensure encoding and decoding are the same

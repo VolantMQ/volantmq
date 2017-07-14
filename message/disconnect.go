@@ -30,6 +30,7 @@ var _ Provider = (*DisconnectMessage)(nil)
 func NewDisconnectMessage() *DisconnectMessage {
 	msg := &DisconnectMessage{}
 	msg.setType(DISCONNECT) // nolint: errcheck
+	msg.sizeCb = msg.size
 
 	return msg
 }
@@ -39,40 +40,40 @@ func (msg *DisconnectMessage) decode(src []byte) (int, error) {
 	return msg.header.decode(src)
 }
 
-func (msg *DisconnectMessage) preEncode(dst []byte) (int, error) {
-	var err error
-	total := 0
-
-	var n int
-
-	if n, err = msg.header.encode(dst[total:]); err != nil {
-		return total, err
-	}
-	total += n
-
-	return total, err
+func (msg *DisconnectMessage) preEncode(dst []byte) int {
+	return msg.header.encode(dst)
 }
 
 // Encode message
 func (msg *DisconnectMessage) Encode(dst []byte) (int, error) {
-	expectedSize := msg.Len()
-	if len(dst) < expectedSize {
-		return expectedSize, ErrInsufficientBufferSize
-	}
-
-	return msg.preEncode(dst)
-}
-
-// Send encode and send message into ring buffer
-func (msg *DisconnectMessage) Send(to *buffer.Type) (int, error) {
-	expectedSize := msg.Len()
-	if len(to.ExternalBuf) < expectedSize {
-		to.ExternalBuf = make([]byte, expectedSize)
-	}
-	total, err := msg.preEncode(to.ExternalBuf)
+	expectedSize, err := msg.Size()
 	if err != nil {
 		return 0, err
 	}
 
+	if len(dst) < expectedSize {
+		return expectedSize, ErrInsufficientBufferSize
+	}
+
+	return msg.preEncode(dst), nil
+}
+
+// Send encode and send message into ring buffer
+func (msg *DisconnectMessage) Send(to *buffer.Type) (int, error) {
+	expectedSize, err := msg.Size()
+	if err != nil {
+		return 0, err
+	}
+
+	if len(to.ExternalBuf) < expectedSize {
+		to.ExternalBuf = make([]byte, expectedSize)
+	}
+	total := msg.preEncode(to.ExternalBuf)
+
 	return to.Send([][]byte{to.ExternalBuf[:total]})
+}
+
+// Len of message
+func (msg *DisconnectMessage) size() int {
+	return 0
 }

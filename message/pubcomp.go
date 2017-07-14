@@ -32,6 +32,7 @@ var _ Provider = (*PubCompMessage)(nil)
 func NewPubCompMessage() *PubCompMessage {
 	msg := &PubCompMessage{}
 	msg.setType(PUBCOMP) // nolint: errcheck
+	msg.sizeCb = msg.size
 
 	return msg
 }
@@ -39,17 +40,6 @@ func NewPubCompMessage() *PubCompMessage {
 // SetPacketID sets the ID of the packet.
 func (msg *PubCompMessage) SetPacketID(v uint16) {
 	msg.packetID = v
-}
-
-// Len of message
-func (msg *PubCompMessage) Len() int {
-	ml := msg.msgLen()
-
-	if err := msg.setRemainingLength(int32(ml)); err != nil {
-		return 0
-	}
-
-	return msg.header.msgLen() + ml
 }
 
 // decode message
@@ -74,29 +64,23 @@ func (msg *PubCompMessage) preEncode(dst []byte) (int, error) {
 		return 0, ErrPackedIDZero
 	}
 
-	var err error
 	total := 0
 
-	if err = msg.setRemainingLength(int32(msg.msgLen())); err != nil {
-		return 0, err
-	}
-
-	var n int
-
-	if n, err = msg.header.encode(dst[total:]); err != nil {
-		return total, err
-	}
-	total += n
+	total += msg.header.encode(dst[total:])
 
 	binary.BigEndian.PutUint16(dst[total:], msg.packetID)
 	total += 2
 
-	return total, err
+	return total, nil
 }
 
 // Encode message
 func (msg *PubCompMessage) Encode(dst []byte) (int, error) {
-	expectedSize := msg.Len()
+	expectedSize, err := msg.Size()
+	if err != nil {
+		return 0, err
+	}
+
 	if len(dst) < expectedSize {
 		return expectedSize, ErrInsufficientBufferSize
 	}
@@ -106,7 +90,11 @@ func (msg *PubCompMessage) Encode(dst []byte) (int, error) {
 
 // Send encode and send message into ring buffer
 func (msg *PubCompMessage) Send(to *buffer.Type) (int, error) {
-	expectedSize := msg.Len()
+	expectedSize, err := msg.Size()
+	if err != nil {
+		return 0, err
+	}
+
 	if len(to.ExternalBuf) < expectedSize {
 		to.ExternalBuf = make([]byte, expectedSize)
 	}
@@ -119,7 +107,7 @@ func (msg *PubCompMessage) Send(to *buffer.Type) (int, error) {
 	return to.Send([][]byte{to.ExternalBuf[:total]})
 }
 
-func (msg *PubCompMessage) msgLen() int {
+func (msg *PubCompMessage) size() int {
 	// packet ID
 	return 2
 }

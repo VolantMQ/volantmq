@@ -34,6 +34,8 @@ const (
 	ErrInvalidReturnCode
 	// ErrUnimplemented method not implemented
 	ErrUnimplemented
+	// ErrInvalidLPStringSize LP string size is bigger than expected
+	ErrInvalidLPStringSize
 )
 
 // Error returns the corresponding error string for the ConnAckCode
@@ -69,6 +71,8 @@ func (e Error) Error() string {
 		return "Invalid return code"
 	case ErrUnimplemented:
 		return "Function not implemented yet"
+	case ErrInvalidLPStringSize:
+		return "Invalid LP string size"
 	}
 
 	return "Unknown error"

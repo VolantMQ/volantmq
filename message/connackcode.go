@@ -68,7 +68,7 @@ func (cac ConnAckCode) Desc() string {
 
 // Valid checks to see if the ConnAckCode is valid. Currently valid codes are <= 5
 func (cac ConnAckCode) Valid() bool {
-	return cac <= 5
+	return cac <= ErrNotAuthorized
 }
 
 // Error returns the corresponding error string for the ConnAckCode

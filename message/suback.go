@@ -37,6 +37,7 @@ var _ Provider = (*SubAckMessage)(nil)
 func NewSubAckMessage() *SubAckMessage {
 	msg := &SubAckMessage{}
 	msg.setType(SUBACK) // nolint: errcheck
+	msg.sizeCb = msg.size
 
 	return msg
 }
@@ -68,17 +69,6 @@ func (msg *SubAckMessage) AddReturnCode(ret QosType) error {
 // SetPacketID sets the ID of the packet.
 func (msg *SubAckMessage) SetPacketID(v uint16) {
 	msg.packetID = v
-}
-
-// Len of message
-func (msg *SubAckMessage) Len() int {
-	ml := msg.msgLen()
-
-	if err := msg.setRemainingLength(int32(ml)); err != nil {
-		return 0
-	}
-
-	return msg.header.msgLen() + ml
 }
 
 // decode message
@@ -120,16 +110,9 @@ func (msg *SubAckMessage) preEncode(dst []byte) (int, error) {
 		return 0, ErrPackedIDZero
 	}
 
-	var err error
 	total := 0
 
-	var n int
-
-	n, err = msg.header.encode(dst[total:])
-	total += n
-	if err != nil {
-		return total, err
-	}
+	total += msg.header.encode(dst[total:])
 
 	binary.BigEndian.PutUint16(dst[total:], msg.packetID)
 	total += 2
@@ -138,12 +121,16 @@ func (msg *SubAckMessage) preEncode(dst []byte) (int, error) {
 		total++
 	}
 
-	return total, err
+	return total, nil
 }
 
 // Encode message
 func (msg *SubAckMessage) Encode(dst []byte) (int, error) {
-	expectedSize := msg.Len()
+	expectedSize, err := msg.Size()
+	if err != nil {
+		return 0, err
+	}
+
 	if len(dst) < expectedSize {
 		return expectedSize, ErrInsufficientBufferSize
 	}
@@ -153,7 +140,11 @@ func (msg *SubAckMessage) Encode(dst []byte) (int, error) {
 
 // Send encode and send message into ring buffer
 func (msg *SubAckMessage) Send(to *buffer.Type) (int, error) {
-	expectedSize := msg.Len()
+	expectedSize, err := msg.Size()
+	if err != nil {
+		return 0, err
+	}
+
 	if len(to.ExternalBuf) < expectedSize {
 		to.ExternalBuf = make([]byte, expectedSize)
 	}
@@ -166,6 +157,6 @@ func (msg *SubAckMessage) Send(to *buffer.Type) (int, error) {
 	return to.Send([][]byte{to.ExternalBuf[:total]})
 }
 
-func (msg *SubAckMessage) msgLen() int {
+func (msg *SubAckMessage) size() int {
 	return 2 + len(msg.returnCodes)
 }

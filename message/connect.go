@@ -75,6 +75,7 @@ var _ Provider = (*ConnectMessage)(nil)
 func NewConnectMessage() *ConnectMessage {
 	msg := &ConnectMessage{}
 	msg.setType(CONNECT) // nolint: errcheck
+	msg.sizeCb = msg.size
 
 	return msg
 }
@@ -300,17 +301,6 @@ func (msg *ConnectMessage) SetPassword(v []byte) {
 	}
 }
 
-// Len of message
-func (msg *ConnectMessage) Len() int {
-	ml := msg.msgLen()
-
-	if err := msg.setRemainingLength(int32(ml)); err != nil {
-		return 0
-	}
-
-	return msg.header.msgLen() + ml
-}
-
 // decode For the CONNECT message, the error returned could be a ConnAckReturnCode, so
 // be sure to check that. Otherwise it's a generic error. If a generic error is
 // returned, this Message should be considered invalid.
@@ -348,17 +338,9 @@ func (msg *ConnectMessage) preEncode(dst []byte) (int, error) {
 		return 0, ErrInvalidProtocolVersion
 	}
 
-	if err = msg.setRemainingLength(int32(msg.msgLen())); err != nil {
-		return 0, err
-	}
+	total += msg.header.encode(dst[total:])
 
 	var n int
-
-	if n, err = msg.header.encode(dst[total:]); err != nil {
-		return total, err
-	}
-	total += n
-
 	if n, err = msg.encodeMessage(dst[total:]); err != nil {
 		return total, err
 	}
@@ -369,7 +351,11 @@ func (msg *ConnectMessage) preEncode(dst []byte) (int, error) {
 
 // Encode message
 func (msg *ConnectMessage) Encode(dst []byte) (int, error) {
-	expectedSize := msg.Len()
+	expectedSize, err := msg.Size()
+	if err != nil {
+		return 0, err
+	}
+
 	if len(dst) < expectedSize {
 		return expectedSize, ErrInsufficientBufferSize
 	}
@@ -379,7 +365,11 @@ func (msg *ConnectMessage) Encode(dst []byte) (int, error) {
 
 // Send encode and send message into ring buffer
 func (msg *ConnectMessage) Send(to *buffer.Type) (int, error) {
-	expectedSize := msg.Len()
+	expectedSize, err := msg.Size()
+	if err != nil {
+		return 0, err
+	}
+
 	if len(to.ExternalBuf) < expectedSize {
 		to.ExternalBuf = make([]byte, expectedSize)
 	}
@@ -560,10 +550,10 @@ func (msg *ConnectMessage) decodeMessage(src []byte) (int, error) {
 	return total, nil
 }
 
-func (msg *ConnectMessage) msgLen() int {
+func (msg *ConnectMessage) size() int {
 	total := 0
 
-	verstr, ok := SupportedVersions[msg.version]
+	version, ok := SupportedVersions[msg.version]
 	if !ok {
 		return total
 	}
@@ -573,7 +563,7 @@ func (msg *ConnectMessage) msgLen() int {
 	// 1 byte protocol version
 	// 1 byte connect flags
 	// 2 bytes keep alive timer
-	total += 2 + len(verstr) + 1 + 1 + 2
+	total += 2 + len(version) + 1 + 1 + 2
 
 	// Add the clientID length, 2 is the length prefix
 	total += 2 + len(msg.clientID)
@@ -607,11 +597,6 @@ func (msg *ConnectMessage) msgLen() int {
 //
 //		"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 func (msg *ConnectMessage) validClientID(cid []byte) bool {
-	// Fixed https://github.com/surgemq/surgemq/issues/4
-	//if len(cid) > 23 {
-	//	return false
-	//}
-
 	if msg.Version() == 0x3 {
 		return true
 	}

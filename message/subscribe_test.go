@@ -81,7 +81,6 @@ func TestSubscribeMessageDecode2(t *testing.T) {
 		7, // packet ID LSB (7)
 	}
 
-	//msg := NewSubscribeMessage()
 	_, _, err := Decode(msgBytes)
 
 	require.Error(t, err)

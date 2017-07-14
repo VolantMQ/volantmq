@@ -16,7 +16,6 @@ package message
 
 import (
 	"encoding/binary"
-	"fmt"
 	"strings"
 
 	"github.com/troian/surgemq/buffer"
@@ -26,6 +25,19 @@ const (
 	maxLPString uint16 = 65535
 	//maxFixedHeaderLength int    = 5
 	maxRemainingLength int32 = (256 * 1024 * 1024) - 1 // 256 MB
+)
+
+const (
+	//	maskHeaderType  byte = 0xF0
+	//	maskHeaderFlags byte = 0x0F
+	//	maskHeaderFlagQoS
+	maskConnAckSessionPresent byte = 0x01
+)
+
+const (
+	offsetHeaderType byte = 4
+
+//	offsetHeaderFlags byte = 0
 )
 
 // Topics slice of topics
@@ -65,14 +77,16 @@ type Provider interface {
 	// Send
 	Send(to *buffer.Type) (int, error)
 
+	// Size of whole message
+	Size() (int, error)
+
+	size() int
 	// decode reads the bytes in the byte slice from the argument. It returns the
 	// total number of bytes decoded, and whether there's any errors during the
 	// process. The byte slice MUST NOT be modified during the duration of this
 	// message being available since the byte slice is internally stored for
 	// references.
 	decode([]byte) (int, error)
-
-	Len() int
 }
 
 // ValidTopic checks the topic, which is a slice of bytes, to see if it's valid. Topic is
@@ -106,8 +120,10 @@ func Decode(buf []byte) (Provider, int, error) {
 	}
 
 	// [MQTT-2.2]
-	mType := Type(buf[0] >> 4)
-	msg, err := mType.New()
+	mType := Type(buf[0] >> offsetHeaderType)
+
+	// [MQTT-2.2.1] Type.NewMessage validates message type
+	msg, err := mType.NewMessage()
 	if err != nil {
 		return nil, 0, err
 	}
@@ -115,13 +131,13 @@ func Decode(buf []byte) (Provider, int, error) {
 	var total int
 
 	if total, err = msg.decode(buf); err != nil {
-		return nil, 0, err
+		return nil, total, err
 	}
 
 	return msg, total, nil
 }
 
-// Read length prefixed bytes
+// readLPBytes read length prefixed bytes
 func readLPBytes(buf []byte) ([]byte, int, error) {
 	if len(buf) < 2 {
 		return nil, 0, ErrInsufficientBufferSize
@@ -142,12 +158,12 @@ func readLPBytes(buf []byte) ([]byte, int, error) {
 	return buf[2:total], total, nil
 }
 
-// Write length prefixed bytes
+// writeLPBytes write length prefixed bytes
 func writeLPBytes(buf []byte, b []byte) (int, error) {
 	total, n := 0, len(b)
 
 	if n > int(maxLPString) {
-		return 0, fmt.Errorf("utils/writeLPBytes: Length (%d) greater than %d bytes", n, maxLPString)
+		return 0, ErrInvalidLPStringSize
 	}
 
 	if len(buf) < 2+n {
