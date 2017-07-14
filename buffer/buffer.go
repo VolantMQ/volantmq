@@ -19,7 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -154,11 +153,6 @@ func (b *Type) Size() int64 {
 
 // ReadFrom from reader
 func (b *Type) ReadFrom(r io.Reader) (int64, error) {
-	//defer func () {
-	//	// nolint: errcheck
-	//	b.Close()
-	//}()
-
 	total := int64(0)
 
 	for {
@@ -171,13 +165,13 @@ func (b *Type) ReadFrom(r io.Reader) (int64, error) {
 			return 0, err
 		}
 
-		pstart := start & b.mask
-		pend := pstart + int64(cnt)
-		if pend > b.size {
-			pend = b.size
+		pStart := start & b.mask
+		pEnd := pStart + int64(cnt)
+		if pEnd > b.size {
+			pEnd = b.size
 		}
 
-		n, err := r.Read(b.buf[pstart:pend])
+		n, err := r.Read(b.buf[pStart:pEnd])
 		if n > 0 {
 			total += int64(n)
 			if _, err = b.WriteCommit(n); err != nil {
@@ -208,11 +202,6 @@ func (b *Type) WriteTo(w io.Writer) (int64, error) {
 			total += int64(n)
 
 			if err != nil {
-				if strings.Contains(err.Error(), "use of closed network connection") {
-					return total, io.EOF
-				} else if strings.Contains(err.Error(), "broken pipe") {
-					return total, io.EOF
-				}
 				return total, err
 			}
 
@@ -233,30 +222,29 @@ func (b *Type) WriteTo(w io.Writer) (int64, error) {
 // Read data
 func (b *Type) Read(p []byte) (int, error) {
 	if b.isDone() && b.Len() == 0 {
-		//glog.Debugf("isDone and len = %d", this.Len())
 		return 0, io.EOF
 	}
 
 	pl := int64(len(p))
 
 	for {
-		cpos := b.cSeq.get()
-		ppos := b.pSeq.get()
-		cindex := cpos & b.mask
+		cPos := b.cSeq.get()
+		pPos := b.pSeq.get()
+		cIndex := cPos & b.mask
 
 		// If consumer position is at least len(p) less than producer position, that means
 		// we have enough data to fill p. There are two scenarios that could happen:
-		// 1. cindex + len(p) < buffer size, in this case, we can just copy() data from
+		// 1. cIndex + len(p) < buffer size, in this case, we can just copy() data from
 		//    buffer to p, and copy will just copy enough to fill p and stop.
 		//    The number of bytes copied will be len(p).
-		// 2. cindex + len(p) > buffer size, this means the data will wrap around to the
+		// 2. cIndex + len(p) > buffer size, this means the data will wrap around to the
 		//    the beginning of the buffer. In thise case, we can also just copy data from
 		//    buffer to p, and copy will just copy until the end of the buffer and stop.
 		//    The number of bytes will NOT be len(p) but less than that.
-		if cpos+pl < ppos {
-			n := copy(p, b.buf[cindex:])
+		if cPos+pl < pPos {
+			n := copy(p, b.buf[cIndex:])
 
-			b.cSeq.set(cpos + int64(n))
+			b.cSeq.set(cPos + int64(n))
 			b.pCond.L.Lock()
 			b.pCond.Broadcast()
 			b.pCond.L.Unlock()
@@ -267,36 +255,36 @@ func (b *Type) Read(p []byte) (int, error) {
 		// If we got here, that means there's not len(p) data available, but there might
 		// still be data.
 
-		// If cpos < ppos, that means there's at least ppos-cpos bytes to read. Let's just
+		// If cPos < pPos, that means there's at least pPos-cPos bytes to read. Let's just
 		// send that back for now.
-		if cpos < ppos {
+		if cPos < pPos {
 			// n bytes available
-			avail := ppos - cpos
+			avail := pPos - cPos
 
 			// bytes copied
 			var n int
 
-			// if cindex+n < size, that means we can copy all n bytes into p.
+			// if cIndex+n < size, that means we can copy all n bytes into p.
 			// No wrapping in this case.
-			if cindex+avail < b.size {
-				n = copy(p, b.buf[cindex:cindex+avail])
+			if cIndex+avail < b.size {
+				n = copy(p, b.buf[cIndex:cIndex+avail])
 			} else {
-				// If cindex+n >= size, that means we can copy to the end of buffer
-				n = copy(p, b.buf[cindex:])
+				// If cIndex+n >= size, that means we can copy to the end of buffer
+				n = copy(p, b.buf[cIndex:])
 			}
 
-			b.cSeq.set(cpos + int64(n))
+			b.cSeq.set(cPos + int64(n))
 			b.pCond.L.Lock()
 			b.pCond.Broadcast()
 			b.pCond.L.Unlock()
 			return n, nil
 		}
 
-		// If we got here, that means cpos >= ppos, which means there's no data available.
+		// If we got here, that means cPos >= pPos, which means there's no data available.
 		// If so, let's wait...
 
 		b.cCond.L.Lock()
-		for ppos = b.pSeq.get(); cpos >= ppos; ppos = b.pSeq.get() {
+		for pPos = b.pSeq.get(); cPos >= pPos; pPos = b.pSeq.get() {
 			if b.isDone() {
 				b.cCond.L.Unlock()
 				return 0, io.EOF
@@ -349,12 +337,12 @@ func (b *Type) ReadPeek(n int) ([]byte, error) {
 		return nil, bufio.ErrNegativeCount
 	}
 
-	cpos := b.cSeq.get()
-	ppos := b.pSeq.get()
+	cPos := b.cSeq.get()
+	pPos := b.pSeq.get()
 
 	// If there's no data, then let's wait until there is some data
 	b.cCond.L.Lock()
-	for ; cpos >= ppos; ppos = b.pSeq.get() {
+	for ; cPos >= pPos; pPos = b.pSeq.get() {
 		if b.isDone() {
 			b.cCond.L.Unlock()
 			return nil, io.EOF
@@ -367,7 +355,7 @@ func (b *Type) ReadPeek(n int) ([]byte, error) {
 
 	// m = the number of bytes available. If m is more than what's requested (n),
 	// then we make m = n, basically peek max n bytes
-	m := ppos - cpos
+	m := pPos - cPos
 	err := error(nil)
 
 	if m >= int64(n) {
@@ -377,8 +365,8 @@ func (b *Type) ReadPeek(n int) ([]byte, error) {
 	}
 
 	// There's data to peek. The size of the data could be <= n.
-	if cpos+m <= ppos {
-		cindex := cpos & b.mask
+	if cPos+m <= pPos {
+		cindex := cPos & b.mask
 
 		// If cindex (index relative to buffer) + n is more than buffer size, that means
 		// the data wrapped
@@ -410,16 +398,16 @@ func (b *Type) ReadWait(n int) ([]byte, error) {
 		return nil, bufio.ErrNegativeCount
 	}
 
-	cpos := b.cSeq.get()
-	ppos := b.pSeq.get()
+	cPos := b.cSeq.get()
+	pPos := b.pSeq.get()
 
 	// This is the magic read-to position. The producer position must be equal or
 	// greater than the next position we read to.
-	next := cpos + int64(n)
+	next := cPos + int64(n)
 
 	// If there's no data, then let's wait until there is some data
 	b.cCond.L.Lock()
-	for ; next > ppos; ppos = b.pSeq.get() {
+	for ; next > pPos; pPos = b.pSeq.get() {
 		if b.isDone() {
 			b.cCond.L.Unlock()
 			return nil, io.EOF
@@ -434,21 +422,21 @@ func (b *Type) ReadWait(n int) ([]byte, error) {
 	//}
 
 	// If we are here that means we have at least n bytes of data available.
-	cindex := cpos & b.mask
+	cIndex := cPos & b.mask
 
-	// If cindex (index relative to buffer) + n is more than buffer size, that means
+	// If cIndex (index relative to buffer) + n is more than buffer size, that means
 	// the data wrapped
-	if cindex+int64(n) > b.size {
+	if cIndex+int64(n) > b.size {
 		// reset the tmp buffer
 		b.tmp = b.tmp[0:0]
 
-		l := len(b.buf[cindex:])
-		b.tmp = append(b.tmp, b.buf[cindex:]...)
+		l := len(b.buf[cIndex:])
+		b.tmp = append(b.tmp, b.buf[cIndex:]...)
 		b.tmp = append(b.tmp, b.buf[0:n-l]...)
 		return b.tmp[:n], nil
 	}
 
-	return b.buf[cindex : cindex+int64(n)], nil
+	return b.buf[cIndex : cIndex+int64(n)], nil
 }
 
 // ReadCommit Commit moves the cursor forward by n bytes. It behaves like Read() except it doesn't
@@ -464,8 +452,8 @@ func (b *Type) ReadCommit(n int) (int, error) {
 		return 0, bufio.ErrNegativeCount
 	}
 
-	cpos := b.cSeq.get()
-	ppos := b.pSeq.get()
+	cPos := b.cSeq.get()
+	pPos := b.pSeq.get()
 
 	// If consumer position is at least n less than producer position, that means
 	// we have enough data to fill p. There are two scenarios that could happen:
@@ -476,8 +464,8 @@ func (b *Type) ReadCommit(n int) (int, error) {
 	//    the beginning of the buffer. In thise case, we can also just copy data from
 	//    buffer to p, and copy will just copy until the end of the buffer and stop.
 	//    The number of bytes will NOT be len(p) but less than that.
-	if cpos+int64(n) <= ppos {
-		b.cSeq.set(cpos + int64(n))
+	if cPos+int64(n) <= pPos {
+		b.cSeq.set(cPos + int64(n))
 		b.pCond.L.Lock()
 		b.pCond.Broadcast()
 		b.pCond.L.Unlock()
@@ -497,12 +485,12 @@ func (b *Type) WriteWait(n int) ([]byte, bool, error) {
 		return nil, false, err
 	}
 
-	pstart := start & b.mask
-	if pstart+int64(cnt) > b.size {
-		return b.buf[pstart:], true, nil
+	pStart := start & b.mask
+	if pStart+int64(cnt) > b.size {
+		return b.buf[pStart:], true, nil
 	}
 
-	return b.buf[pstart : pstart+int64(cnt)], false, nil
+	return b.buf[pStart : pStart+int64(cnt)], false, nil
 }
 
 // WriteCommit write with commit
@@ -564,10 +552,10 @@ func (b *Type) waitForWriteSpace(n int) (int64, int, error) {
 
 	// The current producer position, remember it's a forever inreasing int64,
 	// NOT the position relative to the buffer
-	ppos := b.pSeq.get()
+	pPos := b.pSeq.get()
 
 	// The next producer position we will get to if we write len(p)
-	next := ppos + int64(n)
+	next := pPos + int64(n)
 
 	// For the producer, gate is the previous consumer sequence.
 	gate := b.pSeq.gate
@@ -579,42 +567,42 @@ func (b *Type) waitForWriteSpace(n int) (int64, int, error) {
 	// into the buffer, we would overwrite some of the unread data. It means we
 	// cannot do anything until the customers have passed it. So we wait...
 	//
-	// Let's say size = 16, block = 4, ppos = 0, gate = 0
+	// Let's say size = 16, block = 4, pPos = 0, gate = 0
 	//   then next = 4 (0+4), and wrap = -12 (4-16)
 	//   _______________________________________________________________________
 	//   | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 |
 	//   -----------------------------------------------------------------------
 	//    ^                ^
-	//    ppos,            next
+	//    pPos,            next
 	//    gate
 	//
-	// So wrap (-12) > gate (0) = false, and gate (0) > ppos (0) = false also,
+	// So wrap (-12) > gate (0) = false, and gate (0) > pPos (0) = false also,
 	// so we move on (no waiting)
 	//
-	// Now if we get to ppos = 14, gate = 12,
+	// Now if we get to pPos = 14, gate = 12,
 	// then next = 18 (4+14) and wrap = 2 (18-16)
 	//
-	// So wrap (2) > gate (12) = false, and gate (12) > ppos (14) = false aos,
+	// So wrap (2) > gate (12) = false, and gate (12) > pPos (14) = false aos,
 	// so we move on again
 	//
-	// Now let's say we have ppos = 14, gate = 0 still (nothing read),
+	// Now let's say we have pPos = 14, gate = 0 still (nothing read),
 	// then next = 18 (4+14) and wrap = 2 (18-16)
 	//
 	// So wrap (2) > gate (0) = true, which means we have to wait because if we
 	// put data into the slice to the wrap point, it would overwrite the 2 bytes
 	// that are currently unread.
 	//
-	// Another scenario, let's say ppos = 100, gate = 80,
+	// Another scenario, let's say pPos = 100, gate = 80,
 	// then next = 104 (100+4) and wrap = 88 (104-16)
 	//
 	// So wrap (88) > gate (80) = true, which means we have to wait because if we
 	// put data into the slice to the wrap point, it would overwrite the 8 bytes
 	// that are currently unread.
 	//
-	if wrap > gate || gate > ppos {
-		var cpos int64
+	if wrap > gate || gate > pPos {
+		var cPos int64
 		b.pCond.L.Lock()
-		for cpos = b.cSeq.get(); wrap > cpos; cpos = b.cSeq.get() {
+		for cPos = b.cSeq.get(); wrap > cPos; cPos = b.cSeq.get() {
 			if b.isDone() {
 				return 0, 0, io.EOF
 			}
@@ -623,11 +611,11 @@ func (b *Type) waitForWriteSpace(n int) (int64, int, error) {
 			b.pCond.Wait()
 		}
 
-		b.pSeq.gate = cpos
+		b.pSeq.gate = cPos
 		b.pCond.L.Unlock()
 	}
 
-	return ppos, n, nil
+	return pPos, n, nil
 }
 
 func (b *Type) isDone() bool {
