@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"bufio"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -80,6 +82,51 @@ func TestBufferPeek(t *testing.T) {
 
 	peekBuffer(t, buf, 100)
 	peekBuffer(t, buf, 1000)
+}
+
+func TestBufferNew(t *testing.T) {
+	_, err := New(-1)
+	require.EqualError(t, bufio.ErrNegativeCount, err.Error())
+
+	_, err = New(863)
+	require.Error(t, err)
+
+	_, err = New(1024)
+	require.Error(t, err)
+
+	_, err = New(39666)
+	require.Error(t, err)
+}
+
+func TestBufferID(t *testing.T) {
+	buf, err := New(0)
+	require.NoError(t, err)
+
+	require.NotEqual(t, 0, buf.ID())
+}
+
+func TestBufferSize(t *testing.T) {
+	buf, err := New(0)
+	require.NoError(t, err)
+
+	require.NotEqual(t, 0, buf.Size())
+}
+
+func TestBufferClosed(t *testing.T) {
+	buf, err := New(0)
+	require.NoError(t, err)
+
+	p := make([]byte, 1024)
+	for i := range p {
+		p[i] = 'a'
+	}
+
+	_, err = buf.ReadFrom(bytes.NewBuffer(p))
+	require.EqualError(t, io.EOF, err.Error())
+
+	go func() {
+		buf.Close() // nolint: errcheck
+	}()
 }
 
 func BenchmarkBufferConsumerProducerRead(b *testing.B) {
