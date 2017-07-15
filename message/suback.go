@@ -14,11 +14,7 @@
 
 package message
 
-import (
-	"encoding/binary"
-
-	"github.com/troian/surgemq/buffer"
-)
+import "encoding/binary"
 
 // SubAckMessage A SUBACK Packet is sent by the Server to the Client to confirm receipt and processing
 // of a SUBSCRIBE Packet.
@@ -136,25 +132,6 @@ func (msg *SubAckMessage) Encode(dst []byte) (int, error) {
 	}
 
 	return msg.preEncode(dst)
-}
-
-// Send encode and send message into ring buffer
-func (msg *SubAckMessage) Send(to *buffer.Type) (int, error) {
-	expectedSize, err := msg.Size()
-	if err != nil {
-		return 0, err
-	}
-
-	if len(to.ExternalBuf) < expectedSize {
-		to.ExternalBuf = make([]byte, expectedSize)
-	}
-
-	total, err := msg.preEncode(to.ExternalBuf)
-	if err != nil {
-		return 0, err
-	}
-
-	return to.Send([][]byte{to.ExternalBuf[:total]})
 }
 
 func (msg *SubAckMessage) size() int {

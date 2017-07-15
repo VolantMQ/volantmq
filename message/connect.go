@@ -19,8 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-
-	"github.com/troian/surgemq/buffer"
 )
 
 var clientIDRegexp *regexp.Regexp
@@ -361,25 +359,6 @@ func (msg *ConnectMessage) Encode(dst []byte) (int, error) {
 	}
 
 	return msg.preEncode(dst)
-}
-
-// Send encode and send message into ring buffer
-func (msg *ConnectMessage) Send(to *buffer.Type) (int, error) {
-	expectedSize, err := msg.Size()
-	if err != nil {
-		return 0, err
-	}
-
-	if len(to.ExternalBuf) < expectedSize {
-		to.ExternalBuf = make([]byte, expectedSize)
-	}
-
-	total, err := msg.preEncode(to.ExternalBuf)
-	if err != nil {
-		return 0, err
-	}
-
-	return to.Send([][]byte{to.ExternalBuf[:total]})
 }
 
 func (msg *ConnectMessage) encodeMessage(dst []byte) (int, error) {

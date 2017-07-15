@@ -14,10 +14,6 @@
 
 package message
 
-import (
-	"github.com/troian/surgemq/buffer"
-)
-
 // PingRespMessage A PINGRESP Packet is sent by the Server to the Client in response to a PINGREQ
 // Packet. It indicates that the Server is alive.
 type PingRespMessage struct {
@@ -56,22 +52,6 @@ func (msg *PingRespMessage) Encode(dst []byte) (int, error) {
 	}
 
 	return msg.preEncode(dst), nil
-}
-
-// Send encode and send message into ring buffer
-func (msg *PingRespMessage) Send(to *buffer.Type) (int, error) {
-	expectedSize, err := msg.Size()
-	if err != nil {
-		return 0, err
-	}
-
-	if len(to.ExternalBuf) < expectedSize {
-		to.ExternalBuf = make([]byte, expectedSize)
-	}
-
-	total := msg.preEncode(to.ExternalBuf)
-
-	return to.Send([][]byte{to.ExternalBuf[:total]})
 }
 
 // Len of message

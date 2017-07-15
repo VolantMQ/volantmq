@@ -14,10 +14,6 @@
 
 package message
 
-import (
-	"github.com/troian/surgemq/buffer"
-)
-
 // DisconnectMessage The DISCONNECT Packet is the final Control Packet sent from the Client to the Server.
 // It indicates that the Client is disconnecting cleanly.
 type DisconnectMessage struct {
@@ -56,21 +52,6 @@ func (msg *DisconnectMessage) Encode(dst []byte) (int, error) {
 	}
 
 	return msg.preEncode(dst), nil
-}
-
-// Send encode and send message into ring buffer
-func (msg *DisconnectMessage) Send(to *buffer.Type) (int, error) {
-	expectedSize, err := msg.Size()
-	if err != nil {
-		return 0, err
-	}
-
-	if len(to.ExternalBuf) < expectedSize {
-		to.ExternalBuf = make([]byte, expectedSize)
-	}
-	total := msg.preEncode(to.ExternalBuf)
-
-	return to.Send([][]byte{to.ExternalBuf[:total]})
 }
 
 // Len of message

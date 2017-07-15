@@ -14,11 +14,7 @@
 
 package message
 
-import (
-	"errors"
-
-	"github.com/troian/surgemq/buffer"
-)
+import "errors"
 
 // ConnAckMessage The CONNACK Packet is the packet sent by the Server in response to a CONNECT Packet
 // received from a Client. The first packet sent from the Server to the Client MUST
@@ -127,18 +123,6 @@ func (msg *ConnAckMessage) Encode(dst []byte) (int, error) {
 	}
 
 	return msg.preEncode(dst), nil
-}
-
-// Send encode and send message into ring buffer
-func (msg *ConnAckMessage) Send(to *buffer.Type) (int, error) {
-	expectedSize, _ := msg.Size()
-	if len(to.ExternalBuf) < expectedSize {
-		to.ExternalBuf = make([]byte, expectedSize)
-	}
-
-	total := msg.preEncode(to.ExternalBuf)
-
-	return to.Send([][]byte{to.ExternalBuf[:total]})
 }
 
 func (msg *ConnAckMessage) size() int {

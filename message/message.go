@@ -74,9 +74,6 @@ type Provider interface {
 	// considered invalid.
 	Encode([]byte) (int, error)
 
-	// Send
-	Send(to *buffer.Type) (int, error)
-
 	// Size of whole message
 	Size() (int, error)
 
@@ -135,6 +132,25 @@ func Decode(buf []byte) (Provider, int, error) {
 	}
 
 	return msg, total, nil
+}
+
+// WriteToBuffer encode and send message into ring buffer
+func WriteToBuffer(msg Provider, to *buffer.Type) (int, error) {
+	expectedSize, err := msg.Size()
+	if err != nil {
+		return 0, err
+	}
+
+	if len(to.ExternalBuf) < expectedSize {
+		to.ExternalBuf = make([]byte, expectedSize)
+	}
+
+	total, err := msg.Encode(to.ExternalBuf)
+	if err != nil {
+		return 0, err
+	}
+
+	return to.Send([][]byte{to.ExternalBuf[:total]})
 }
 
 // readLPBytes read length prefixed bytes

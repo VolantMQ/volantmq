@@ -14,11 +14,7 @@
 
 package message
 
-import (
-	"encoding/binary"
-
-	"github.com/troian/surgemq/buffer"
-)
+import "encoding/binary"
 
 const (
 	publishFlagDupMask    byte = 0x08
@@ -225,27 +221,6 @@ func (msg *PublishMessage) Encode(dst []byte) (int, error) {
 	}
 
 	total += copy(dst[total:], msg.payload)
-
-	return total, err
-}
-
-// Send encode and send message into ring buffer
-func (msg *PublishMessage) Send(to *buffer.Type) (int, error) {
-	expectedSize, err := msg.Size()
-	if err != nil {
-		return 0, err
-	}
-
-	if len(to.ExternalBuf) < expectedSize {
-		to.ExternalBuf = make([]byte, expectedSize)
-	}
-
-	total, err := msg.preEncode(to.ExternalBuf)
-	if err != nil {
-		return 0, err
-	}
-
-	total, err = to.Send([][]byte{to.ExternalBuf[0:total], msg.payload})
 
 	return total, err
 }
