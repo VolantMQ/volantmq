@@ -15,16 +15,14 @@
 package mem
 
 import (
-	"reflect"
 	"sync"
 
 	"errors"
 
-	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/message"
 	persistenceTypes "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/systree"
-	"github.com/troian/surgemq/topics"
+	"github.com/troian/surgemq/topics/types"
 	"github.com/troian/surgemq/types"
 	"go.uber.org/zap"
 )
@@ -33,6 +31,13 @@ import (
 //	// MaxQosAllowed is the maximum QOS supported by this server
 //	MaxQosAllowed = message.QosExactlyOnce
 //)
+
+type subscriber struct {
+	entry *types.Subscriber
+	qos   message.QosType
+}
+
+type subscribers map[uintptr]*subscriber
 
 type provider struct {
 	// Sub/unSub mutex
@@ -57,48 +62,41 @@ type provider struct {
 	}
 }
 
-var _ topics.Provider = (*provider)(nil)
-
-func init() {
-	topics.Register("mem", NewMemProvider())
-}
+var _ topicsTypes.Provider = (*provider)(nil)
 
 // NewMemProvider returns an new instance of the provider, which is implements the
 // TopicsProvider interface. provider is a hidden struct that stores the topic
 // subscriptions and retained messages in memory. The content is not persistend so
 // when the server goes, everything will be gone. Use with care.
-func NewMemProvider() topics.Provider {
+func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error) {
 	p := &provider{
-		sRoot: newSNode(),
-		rRoot: newRNode(),
+		sRoot:   newSNode(),
+		rRoot:   newRNode(),
+		stat:    config.Stat,
+		persist: config.Persist,
 	}
 
-	p.log.prod = surgemq.GetProdLogger().Named("topics.mem")
-	p.log.dev = surgemq.GetDevLogger().Named("topics.mem")
+	//p.log.prod = surgemq.GetProdLogger().Named("topics.mem")
+	//p.log.dev = surgemq.GetDevLogger().Named("topics.mem")
 
-	return p
-}
-
-func (mT *provider) Configure(stat systree.TopicsStat, persist persistenceTypes.Retained) error {
-	mT.stat = stat
-	mT.persist = persist
-
-	entries, err := persist.Load()
-	if err != nil && err != persistenceTypes.ErrNotFound {
-		return err
-	}
-
-	for _, msg := range entries {
-		// Loading retained messages
-		if m, ok := msg.(*message.PublishMessage); ok {
-			mT.log.dev.Debug("Loading retained message", zap.String("topic", m.Topic()), zap.Int8("QoS", int8(m.QoS())))
-			mT.Retain(m) // nolint: errcheck
+	if p.persist != nil {
+		entries, err := p.persist.Load()
+		if err != nil && err != persistenceTypes.ErrNotFound {
+			return nil, err
 		}
+
+		for _, msg := range entries {
+			// Loading retained messages
+			if m, ok := msg.(*message.PublishMessage); ok {
+				p.log.dev.Debug("Loading retained message", zap.String("topic", m.Topic()), zap.Int8("QoS", int8(m.QoS())))
+				p.Retain(m) // nolint: errcheck
+			}
+		}
+
+		p.persist.Delete() // nolint: errcheck
 	}
 
-	persist.Delete() // nolint: errcheck
-
-	return nil
+	return p, nil
 }
 
 func (mT *provider) Subscribe(topic string, qos message.QosType, sub *types.Subscriber) (message.QosType, error) {
@@ -107,21 +105,29 @@ func (mT *provider) Subscribe(topic string, qos message.QosType, sub *types.Subs
 	}
 
 	if sub == nil {
-		return message.QosFailure, errors.New("Subscriber cannot be nil")
+		return message.QosFailure, topicsTypes.ErrInvalidSubscriber
 	}
 
 	mT.smu.Lock()
 	defer mT.smu.Unlock()
-
-	//if qos > MaxQosAllowed {
-	//	qos = MaxQosAllowed
-	//}
 
 	if err := mT.sRoot.insert(topic, qos, sub); err != nil {
 		return message.QosFailure, err
 	}
 
 	return qos, nil
+}
+
+func (mT *provider) Subscribers(topic string, qos message.QosType, subs *types.Subscribers) error {
+	mT.smu.RLock()
+
+	if err := mT.sRoot.match(topic, qos, subs); err != nil {
+		mT.smu.RUnlock()
+		return err
+	}
+	mT.smu.RUnlock()
+
+	return nil
 }
 
 func (mT *provider) UnSubscribe(topic string, sub *types.Subscriber) error {
@@ -142,13 +148,13 @@ func (mT *provider) Publish(msg *message.PublishMessage) error {
 	}
 	mT.smu.RUnlock()
 
-	for _, s := range subs {
-		if s != nil {
-			if err := s.Publish(msg); err != nil {
+	for _, e := range subs {
+		if e != nil {
+			if err := e.Publish(msg); err != nil {
 				mT.log.prod.Error("Error", zap.Error(err))
 			}
 
-			s.WgWriters.Done()
+			e.WgWriters.Done()
 		}
 	}
 
@@ -189,9 +195,11 @@ func (mT *provider) Close() error {
 		toStore = append(toStore, m)
 	}
 
-	if len(toStore) > 0 {
-		mT.log.dev.Debug("Storing retained messages", zap.Int("amount", len(toStore)))
-		mT.persist.Store(toStore) // nolint: errcheck
+	if mT.persist != nil {
+		if len(toStore) > 0 {
+			mT.log.dev.Debug("Storing retained messages", zap.Int("amount", len(toStore)))
+			mT.persist.Store(toStore) // nolint: errcheck
+		}
 	}
 
 	mT.sRoot = nil
@@ -204,8 +212,8 @@ const (
 	stateCHR byte = iota // Regular character
 	stateMWC             // Multi-level wildcard
 	stateSWC             // Single-level wildcard
-	stateSEP             // Topic level separator
-	stateSYS             // System level topic ($)
+	//stateSEP             // Topic level separator
+	stateSYS // System level topic ($)
 )
 
 // Returns topic level, remaining topic levels and any errors
@@ -216,25 +224,24 @@ func nextTopicLevel(topic string) (string, string, error) {
 		switch c {
 		case '/':
 			if s == stateMWC {
-				return "", "", errors.New("memtopics/nextTopicLevel: Multi-level wildcard found in topic and it's not at the last level")
+				return "", "", topicsTypes.ErrMultiLevel
 			}
 
 			if i == 0 {
-				return topics.SWC, topic[i+1:], nil
+				return topicsTypes.SWC, topic[i+1:], nil
 			}
 
 			return topic[:i], topic[i+1:], nil
-
 		case '#':
 			if i != 0 {
-				return "", "", errors.New("memtopics/nextTopicLevel: Wildcard character '#' must occupy entire topic level")
+				return "", "", topicsTypes.ErrInvalidWildcardPlus
 			}
 
 			s = stateMWC
 
 		case '+':
 			if i != 0 {
-				return "", "", errors.New("memtopics/nextTopicLevel: Wildcard character '+' must occupy entire topic level")
+				return "", "", topicsTypes.ErrInvalidWildcardSharp
 			}
 
 			s = stateSWC
@@ -248,7 +255,7 @@ func nextTopicLevel(topic string) (string, string, error) {
 
 		default:
 			if s == stateMWC || s == stateSWC {
-				return "", "", errors.New("memtopics/nextTopicLevel: Wildcard characters '#' and '+' must occupy entire topic level")
+				return "", "", topicsTypes.ErrInvalidWildcard
 			}
 
 			s = stateCHR
@@ -271,58 +278,58 @@ func nextTopicLevel(topic string) (string, string, error) {
 // if the client is granted only QoS 0, and the publish message is QoS 1, then this
 // client is not to be send the published message.
 func (sn *sNode) matchQos(qos message.QosType, subs *types.Subscribers) {
-	for i, sub := range sn.subs {
+	for _, sub := range sn.subs {
 		// If the published QoS is higher than the subscriber QoS, then we skip the
 		// subscriber. Otherwise, add to the list.
-		if qos <= sn.qos[i] {
-			sub.WgWriters.Add(1)
-			*subs = append(*subs, sub)
+		if qos <= sub.qos {
+			sub.entry.WgWriters.Add(1)
+			*subs = append(*subs, sub.entry)
 		}
 	}
 }
 
-func equal(k1, k2 interface{}) bool {
-	if reflect.TypeOf(k1) != reflect.TypeOf(k2) {
-		return false
-	}
-
-	if reflect.ValueOf(k1).Kind() == reflect.Func {
-		return &k1 == &k2
-	}
-
-	if k1 == k2 {
-		return true
-	}
-
-	switch k1 := k1.(type) {
-	case string:
-		return k1 == k2.(string)
-	case int64:
-		return k1 == k2.(int64)
-	case int32:
-		return k1 == k2.(int32)
-	case int16:
-		return k1 == k2.(int16)
-	case int8:
-		return k1 == k2.(int8)
-	case int:
-		return k1 == k2.(int)
-	case float32:
-		return k1 == k2.(float32)
-	case float64:
-		return k1 == k2.(float64)
-	case uint:
-		return k1 == k2.(uint)
-	case uint8:
-		return k1 == k2.(uint8)
-	case uint16:
-		return k1 == k2.(uint16)
-	case uint32:
-		return k1 == k2.(uint32)
-	case uint64:
-		return k1 == k2.(uint64)
-	case uintptr:
-		return k1 == k2.(uintptr)
-	}
-	return false
-}
+//func equal(k1, k2 interface{}) bool {
+//	if reflect.TypeOf(k1) != reflect.TypeOf(k2) {
+//		return false
+//	}
+//
+//	if reflect.ValueOf(k1).Kind() == reflect.Func {
+//		return &k1 == &k2
+//	}
+//
+//	if k1 == k2 {
+//		return true
+//	}
+//
+//	switch k1 := k1.(type) {
+//	case string:
+//		return k1 == k2.(string)
+//	case int64:
+//		return k1 == k2.(int64)
+//	case int32:
+//		return k1 == k2.(int32)
+//	case int16:
+//		return k1 == k2.(int16)
+//	case int8:
+//		return k1 == k2.(int8)
+//	case int:
+//		return k1 == k2.(int)
+//	case float32:
+//		return k1 == k2.(float32)
+//	case float64:
+//		return k1 == k2.(float64)
+//	case uint:
+//		return k1 == k2.(uint)
+//	case uint8:
+//		return k1 == k2.(uint8)
+//	case uint16:
+//		return k1 == k2.(uint16)
+//	case uint32:
+//		return k1 == k2.(uint32)
+//	case uint64:
+//		return k1 == k2.(uint64)
+//	case uintptr:
+//		return k1 == k2.(uintptr)
+//	}
+//	return false
+//}

@@ -1,18 +1,17 @@
 package mem
 
 import (
-	"errors"
+	"unsafe"
 
 	"github.com/troian/surgemq/message"
-	"github.com/troian/surgemq/topics"
+	"github.com/troian/surgemq/topics/types"
 	"github.com/troian/surgemq/types"
 )
 
 // subscription nodes
 type sNode struct {
 	// If this is the end of the topic string, then add subscribers here
-	subs types.Subscribers
-	qos  []message.QosType
+	subs subscribers
 
 	// Otherwise add the next topic level here
 	nodes map[string]*sNode
@@ -20,6 +19,7 @@ type sNode struct {
 
 func newSNode() *sNode {
 	return &sNode{
+		subs:  make(subscribers),
 		nodes: make(map[string]*sNode),
 	}
 }
@@ -31,16 +31,14 @@ func (sn *sNode) insert(topic string, qos message.QosType, sub *types.Subscriber
 	if len(topic) == 0 {
 		// Let's see if the subscriber is already on the list. If yes, update
 		// QoS and then return.
-		for i := range sn.subs {
-			if equal(sn.subs[i], sub) {
-				sn.qos[i] = qos
-				return nil
+		if e, ok := sn.subs[uintptr(unsafe.Pointer(sub))]; ok {
+			e.qos = qos
+		} else {
+			sn.subs[uintptr(unsafe.Pointer(sub))] = &subscriber{
+				entry: sub,
+				qos:   qos,
 			}
 		}
-
-		// Otherwise add.
-		sn.subs = append(sn.subs, sub)
-		sn.qos = append(sn.qos, qos)
 
 		return nil
 	}
@@ -74,22 +72,18 @@ func (sn *sNode) remove(topic string, sub *types.Subscriber) error {
 	if len(topic) == 0 {
 		// If subscriber == nil, then it's signal to remove ALL subscribers
 		if sub == nil {
-			sn.subs = sn.subs[0:0]
-			sn.qos = sn.qos[0:0]
+			sn.subs = make(subscribers)
 			return nil
 		}
 
 		// If we find the subscriber then remove it from the list. Technically
 		// we just overwrite the slot by shifting all other items up by one.
-		for i := range sn.subs {
-			if equal(sn.subs[i], sub) {
-				sn.subs = append(sn.subs[:i], sn.subs[i+1:]...)
-				sn.qos = append(sn.qos[:i], sn.qos[i+1:]...)
-				return nil
-			}
+		if _, ok := sn.subs[uintptr(unsafe.Pointer(sub))]; ok {
+			delete(sn.subs, uintptr(unsafe.Pointer(sub)))
+			return nil
 		}
 
-		return errors.New("memtopics/remove: No topic found for subscriber")
+		return types.ErrNotFound
 	}
 
 	// Not the last level, so let's find the next level snode, and recursively
@@ -106,7 +100,7 @@ func (sn *sNode) remove(topic string, sub *types.Subscriber) error {
 	// Find the sNode that matches the topic level
 	n, ok := sn.nodes[level]
 	if !ok {
-		return errors.New("memtopics/remove: No topic found")
+		return types.ErrNotFound
 	}
 
 	// Remove the subscriber from the next level snode
@@ -145,9 +139,9 @@ func (sn *sNode) match(topic string, qos message.QosType, subs *types.Subscriber
 
 	for k, n := range sn.nodes {
 		// If the key is "#", then these subscribers are added to the result set
-		if k == topics.MWC {
+		if k == topicsTypes.MWC {
 			n.matchQos(qos, subs)
-		} else if k == topics.SWC || k == level {
+		} else if k == topicsTypes.SWC || k == level {
 			if err := n.match(rem, qos, subs); err != nil {
 				return err
 			}

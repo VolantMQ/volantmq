@@ -25,7 +25,7 @@ import (
 	"github.com/troian/surgemq/message"
 	persistenceTypes "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/systree"
-	"github.com/troian/surgemq/topics"
+	"github.com/troian/surgemq/topics/types"
 	"github.com/troian/surgemq/types"
 	"go.uber.org/zap"
 )
@@ -42,7 +42,7 @@ type managerCallbacks struct {
 // Config is system wide configuration parameters for every session
 type config struct {
 	// Topics manager for all the client subscriptions
-	topicsMgr *topics.Manager
+	topicsMgr topicsTypes.Provider
 
 	// The number of seconds to wait for the CONNACK message before disconnecting.
 	// If not set then default to 2 seconds.
