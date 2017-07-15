@@ -482,7 +482,7 @@ func (s *connection) writeMessage(msg message.Provider) (int, error) {
 	var total int
 	var err error
 
-	total, err = msg.Send(s.out)
+	total, err = message.WriteToBuffer(msg, s.out)
 
 	if err == nil {
 		s.config.packetsMetric.Sent(msg.Type())

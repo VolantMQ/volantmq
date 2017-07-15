@@ -14,11 +14,7 @@
 
 package message
 
-import (
-	"encoding/binary"
-
-	"github.com/troian/surgemq/buffer"
-)
+import "encoding/binary"
 
 // PubRecMessage PUBREC
 type PubRecMessage struct {
@@ -87,25 +83,6 @@ func (msg *PubRecMessage) Encode(dst []byte) (int, error) {
 	}
 
 	return msg.preEncode(dst)
-}
-
-// Send encode and send message into ring buffer
-func (msg *PubRecMessage) Send(to *buffer.Type) (int, error) {
-	expectedSize, err := msg.Size()
-	if err != nil {
-		return 0, err
-	}
-
-	if len(to.ExternalBuf) < expectedSize {
-		to.ExternalBuf = make([]byte, expectedSize)
-	}
-
-	total, err := msg.preEncode(to.ExternalBuf)
-	if err != nil {
-		return 0, err
-	}
-
-	return to.Send([][]byte{to.ExternalBuf[:total]})
 }
 
 func (msg *PubRecMessage) size() int {

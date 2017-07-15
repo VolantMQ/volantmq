@@ -14,11 +14,7 @@
 
 package message
 
-import (
-	"encoding/binary"
-
-	"github.com/troian/surgemq/buffer"
-)
+import "encoding/binary"
 
 // PubRelMessage A PUBREL Packet is the response to a PUBREC Packet. It is the third packet of the
 // QoS 2 protocol exchange.
@@ -87,25 +83,6 @@ func (msg *PubRelMessage) Encode(dst []byte) (int, error) {
 	}
 
 	return msg.preEncode(dst)
-}
-
-// Send encode and send message into ring buffer
-func (msg *PubRelMessage) Send(to *buffer.Type) (int, error) {
-	expectedSize, err := msg.Size()
-	if err != nil {
-		return 0, err
-	}
-
-	if len(to.ExternalBuf) < expectedSize {
-		to.ExternalBuf = make([]byte, expectedSize)
-	}
-
-	total, err := msg.preEncode(to.ExternalBuf)
-	if err != nil {
-		return 0, err
-	}
-
-	return to.Send([][]byte{to.ExternalBuf[:total]})
 }
 
 func (msg *PubRelMessage) size() int {

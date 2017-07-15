@@ -179,6 +179,6 @@ func TestConnAckCodeWrite(t *testing.T) {
 	err = msg.SetReturnCode(ConnectionAccepted)
 	require.NoError(t, err)
 
-	_, err = msg.Send(buf)
+	_, err = WriteToBuffer(msg, buf)
 	require.NoError(t, err)
 }

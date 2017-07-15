@@ -17,8 +17,6 @@ package message
 import (
 	"encoding/binary"
 	"errors"
-
-	"github.com/troian/surgemq/buffer"
 )
 
 // SubscribeMessage The SUBSCRIBE Packet is sent from the Client to the Server to create one or more
@@ -194,25 +192,6 @@ func (msg *SubscribeMessage) Encode(dst []byte) (int, error) {
 	}
 
 	return msg.preEncode(dst)
-}
-
-// Send encode and send message into ring buffer
-func (msg *SubscribeMessage) Send(to *buffer.Type) (int, error) {
-	expectedSize, err := msg.Size()
-	if err != nil {
-		return 0, err
-	}
-
-	if len(to.ExternalBuf) < expectedSize {
-		to.ExternalBuf = make([]byte, expectedSize)
-	}
-
-	total, err := msg.preEncode(to.ExternalBuf)
-	if err != nil {
-		return 0, err
-	}
-
-	return to.Send([][]byte{to.ExternalBuf[:total]})
 }
 
 func (msg *SubscribeMessage) size() int {
