@@ -29,6 +29,7 @@ SurgeMQ is a high performance MQTT broker that aims to be fully compliant with M
 
 * $SYS topics
 * Cluster
+* Bridge
 * Ack timeout/retry
 
 ### Performance

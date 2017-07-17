@@ -2,9 +2,16 @@ language: go
 go:
   - 1.8.1
 
+env:
+  global:
+    - CC_TEST_REPORTER_ID=b817009bd68009989cb57539502ea86e0bf70cd24f0364952238b5b46aef96f5
+    - GIT_COMMITTED_AT=$(if [ "$TRAVIS_PULL_REQUEST" == "false" ]; then git log -1 --pretty=format:%ct; else git log -1 --skip 1 --pretty=format:%ct; fi)
+
 before_script:
   - go get github.com/alecthomas/gometalinter
   - gometalinter --install
+  - curl -L https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64 > ./cc-test-reporter
+  - chmod +x ./cc-test-reporter
 
 script:
   - go build -race -v -gcflags "-N -l" ./...
@@ -14,3 +21,4 @@ script:
 
 after_success:
   - bash <(curl -s https://codecov.io/bash)
+  - ./cc-test-reporter after-build --exit-code $TRAVIS_TEST_RESULT
