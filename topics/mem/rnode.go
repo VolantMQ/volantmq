@@ -1,10 +1,9 @@
 package mem
 
 import (
-	"errors"
-
 	"github.com/troian/surgemq/message"
 	topicsTypes "github.com/troian/surgemq/topics/types"
+	"github.com/troian/surgemq/types"
 )
 
 // retained message nodes
@@ -27,26 +26,6 @@ func (rn *rNode) insert(topic string, msg *message.PublishMessage) error {
 	// If there's no more topic levels, that means we are at the matching rnode.
 	if len(topic) == 0 {
 		rn.msg = msg
-
-		//l := msg.Len()
-		//
-		//// Let's reuse the buffer if there's enough space
-		//if l > cap(rn.buf) {
-		//	rn.buf = make([]byte, l)
-		//} else {
-		//	rn.buf = rn.buf[0:l]
-		//}
-		//
-		//if _, err := msg.Encode(rn.buf); err != nil {
-		//	return err
-		//}
-		//
-		//if m, _, err := message.Decode(rn.buf); err != nil {
-		//	return err
-		//} else {
-		//
-		//}
-
 		return nil
 	}
 
@@ -95,7 +74,7 @@ func (rn *rNode) remove(topic string) error {
 	// Find the rNode that matches the topic level
 	n, ok := rn.nodes[level]
 	if !ok {
-		return errors.New("memtopics/rremove: No topic found")
+		return types.ErrNotFound
 	}
 
 	// Remove the subscriber from the next level rnode
