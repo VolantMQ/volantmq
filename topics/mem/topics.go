@@ -19,6 +19,7 @@ import (
 
 	"errors"
 
+	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/message"
 	persistenceTypes "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/systree"
@@ -76,8 +77,8 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 		persist: config.Persist,
 	}
 
-	//p.log.prod = surgemq.GetProdLogger().Named("topics.mem")
-	//p.log.dev = surgemq.GetDevLogger().Named("topics.mem")
+	p.log.prod = surgemq.GetProdLogger().Named("topics").Named("mem")
+	p.log.dev = surgemq.GetDevLogger().Named("topics").Named("mem")
 
 	if p.persist != nil {
 		entries, err := p.persist.Load()
