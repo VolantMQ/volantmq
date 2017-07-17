@@ -32,6 +32,7 @@ import (
 	"github.com/troian/surgemq/session"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics"
+	topicsTypes "github.com/troian/surgemq/topics/types"
 	types "github.com/troian/surgemq/types"
 )
 
@@ -86,7 +87,7 @@ type listenerInner struct {
 	sessionsMgr *session.Manager
 
 	// topicsMgr is the topics manager for keeping track of subscriptions
-	topicsMgr *topics.Manager
+	topicsMgr topicsTypes.Provider
 
 	persist persistTypes.Provider
 
@@ -191,12 +192,12 @@ func New(config Config) (Type, error) {
 
 	persisRetained, _ = s.inner.persist.Retained()
 
-	tConfig := topics.Config{
+	tConfig := &topicsTypes.MemConfig{
 		Name:    s.inner.config.TopicsProvider,
 		Stat:    s.inner.sysTree.Topics(),
 		Persist: persisRetained,
 	}
-	if s.inner.topicsMgr, err = topics.NewManager(tConfig); err != nil {
+	if s.inner.topicsMgr, err = topics.New(tConfig); err != nil {
 		return nil, err
 	}
 

@@ -15,8 +15,6 @@
 package main
 
 import (
-	//"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	_ "runtime/debug"
@@ -28,7 +26,6 @@ import (
 	authTypes "github.com/troian/surgemq/auth/types"
 	persistType "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/server"
-	_ "github.com/troian/surgemq/topics/mem"
 	"github.com/troian/surgemq/types"
 	"go.uber.org/zap"
 )

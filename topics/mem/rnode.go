@@ -4,7 +4,7 @@ import (
 	"errors"
 
 	"github.com/troian/surgemq/message"
-	"github.com/troian/surgemq/topics"
+	topicsTypes "github.com/troian/surgemq/topics/types"
 )
 
 // retained message nodes
@@ -132,10 +132,10 @@ func (rn *rNode) match(topic string, msgs *[]*message.PublishMessage) error {
 
 	level := ntl
 
-	if level == topics.MWC {
+	if level == topicsTypes.MWC {
 		// If '#', add all retained messages starting this node
 		rn.allRetained(msgs)
-	} else if level == topics.SWC {
+	} else if level == topicsTypes.SWC {
 		// If '+', check all nodes at this level. Next levels must be matched.
 		for _, n := range rn.nodes {
 			if err := n.match(rem, msgs); err != nil {

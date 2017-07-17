@@ -23,124 +23,21 @@
 package topics
 
 import (
-	"fmt"
-
-	"github.com/troian/surgemq/message"
-	persistenceTypes "github.com/troian/surgemq/persistence/types"
-	"github.com/troian/surgemq/systree"
+	"github.com/troian/surgemq/topics/mem"
+	"github.com/troian/surgemq/topics/types"
 	"github.com/troian/surgemq/types"
 )
 
-const (
-	// MWC is the multi-level wildcard
-	MWC = "#"
-
-	// SWC is the single level wildcard
-	SWC = "+"
-
-	// SEP is the topic level separator
-	//SEP = "/"
-
-	// SYS is the starting character of the system level topics
-	//SYS = "$"
-
-	// Both wildcards
-	//BWC = "#+"
-)
-
-var (
-	// ErrAuthFailure is returned when the user/pass supplied are invalid
-	//ErrAuthFailure = errors.New("auth: Authentication failure")
-
-	// ErrAuthProviderNotFound is returned when the requested provider does not exist.
-	// It probably hasn't been registered yet.
-	//ErrAuthProviderNotFound = errors.New("auth: Authentication provider not found")
-
-	providers = make(map[string]Provider)
-)
-
-// Provider interface
-type Provider interface {
-	Configure(stat systree.TopicsStat, persist persistenceTypes.Retained) error
-	Subscribe(topic string, qos message.QosType, subscriber *types.Subscriber) (message.QosType, error)
-	UnSubscribe(topic string, subscriber *types.Subscriber) error
-	Publish(msg *message.PublishMessage) error
-	Retain(msg *message.PublishMessage) error
-	Retained(topic string, msgs *[]*message.PublishMessage) error
-	Close() error
-}
-
-// Register topic provider
-func Register(name string, provider Provider) {
-	if provider == nil {
-		panic("topics: Register provide is nil")
+// New topic provider
+func New(config topicsTypes.ProviderConfig) (topicsTypes.Provider, error) {
+	if config == nil {
+		return nil, types.ErrInvalidArgs
 	}
 
-	if _, dup := providers[name]; dup {
-		panic("topics: Register called twice for provider " + name)
+	switch cfg := config.(type) {
+	case *topicsTypes.MemConfig:
+		return mem.NewMemProvider(cfg)
+	default:
+		return nil, types.ErrUnknownProvider
 	}
-
-	providers[name] = provider
-}
-
-// UnRegister topic provider
-func UnRegister(name string) {
-	delete(providers, name)
-}
-
-// Config of topics manager
-type Config struct {
-	Name    string
-	Stat    systree.TopicsStat
-	Persist persistenceTypes.Retained
-}
-
-// Manager of topics
-type Manager struct {
-	//config *Config
-	p Provider
-}
-
-// NewManager add new manager
-func NewManager(config Config) (*Manager, error) {
-	p, ok := providers[config.Name]
-	if !ok {
-		return nil, fmt.Errorf("session: unknown provider %q", config.Name)
-	}
-
-	if err := p.Configure(config.Stat, config.Persist); err != nil {
-		return nil, err
-	}
-
-	return &Manager{p: p}, nil
-}
-
-// Subscribe to topic
-func (m *Manager) Subscribe(topic string, qos message.QosType, subscriber *types.Subscriber) (message.QosType, error) {
-	return m.p.Subscribe(topic, qos, subscriber)
-}
-
-// UnSubscribe from topic
-func (m *Manager) UnSubscribe(topic string, subscriber *types.Subscriber) error {
-	return m.p.UnSubscribe(topic, subscriber)
-}
-
-// Publish message
-func (m *Manager) Publish(msg *message.PublishMessage) error {
-	return m.p.Publish(msg)
-}
-
-// Retain messages
-func (m *Manager) Retain(msg *message.PublishMessage) error {
-	return m.p.Retain(msg)
-}
-
-// Retained messages
-func (m *Manager) Retained(topic string, msgs *[]*message.PublishMessage) error {
-	return m.p.Retained(topic, msgs)
-}
-
-// Close manager
-func (m *Manager) Close() error {
-	return m.p.Close()
 }

@@ -50,6 +50,21 @@ var (
 	ErrInvalidConnectionType = errors.New("invalid connection type")
 	//ErrInvalidSubscriber      error = errors.New("service: Invalid subscriber")
 	ErrBufferNotReady = errors.New("buffer is not ready")
+
+	// ErrInvalidArgs invalid arguments provided
+	ErrInvalidArgs = errors.New("invalid arguments")
+
+	// ErrUnknownProvider if provider is unknown
+	ErrUnknownProvider = errors.New("Unknown provider")
+
+	// ErrAlreadyExists object already exists
+	ErrAlreadyExists = errors.New("Already exists")
+
+	// ErrNotFound object not found
+	ErrNotFound = errors.New("Not found")
+
+	// ErrNotOpen storage is not open
+	ErrNotOpen = errors.New("not open")
 )
 
 // Default configs
