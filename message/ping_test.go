@@ -26,7 +26,7 @@ func TestPingReqMessageDecode(t *testing.T) {
 		0,
 	}
 
-	m, n, err := Decode(msgBytes)
+	m, n, err := Decode(ProtocolV311, msgBytes)
 	msg, ok := m.(*PingReqMessage)
 	require.Equal(t, true, ok, "Invalid message type")
 
@@ -41,7 +41,11 @@ func TestPingReqMessageEncode(t *testing.T) {
 		0,
 	}
 
-	msg := NewPingReqMessage()
+	m, err := NewMessage(ProtocolV311, PINGREQ)
+	require.NoError(t, err)
+
+	msg, ok := m.(*PingReqMessage)
+	require.True(t, ok, "Couldn't cast message type")
 
 	dst := make([]byte, 10)
 	n, err := msg.Encode(dst)
@@ -57,7 +61,7 @@ func TestPingRespMessageDecode(t *testing.T) {
 		0,
 	}
 
-	msg, n, err := Decode(msgBytes)
+	msg, n, err := Decode(ProtocolV311, msgBytes)
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
@@ -70,8 +74,11 @@ func TestPingRespMessageEncode(t *testing.T) {
 		0,
 	}
 
-	msg := NewPingRespMessage()
+	m, err := NewMessage(ProtocolV311, PINGRESP)
+	require.NoError(t, err)
 
+	msg, ok := m.(*PingRespMessage)
+	require.True(t, ok, "Couldn't cast message type")
 	dst := make([]byte, 10)
 	n, err := msg.Encode(dst)
 
@@ -88,7 +95,7 @@ func TestPingReqDecodeEncodeEquiv(t *testing.T) {
 		0,
 	}
 
-	msg, n, err := Decode(msgBytes)
+	msg, n, err := Decode(ProtocolV311, msgBytes)
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
@@ -100,7 +107,7 @@ func TestPingReqDecodeEncodeEquiv(t *testing.T) {
 	require.Equal(t, len(msgBytes), n2, "Error decoding message.")
 	require.Equal(t, msgBytes, dst[:n2], "Error decoding message.")
 
-	_, n3, err := Decode(dst)
+	_, n3, err := Decode(ProtocolV311, dst)
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n3, "Error decoding message.")
@@ -114,7 +121,7 @@ func TestPingRespDecodeEncodeEquiv(t *testing.T) {
 		0,
 	}
 
-	msg, n, err := Decode(msgBytes)
+	msg, n, err := Decode(ProtocolV311, msgBytes)
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
@@ -126,7 +133,7 @@ func TestPingRespDecodeEncodeEquiv(t *testing.T) {
 	require.Equal(t, len(msgBytes), n2, "Error decoding message.")
 	require.Equal(t, msgBytes, dst[:n2], "Error decoding message.")
 
-	_, n3, err := Decode(dst)
+	_, n3, err := Decode(ProtocolV311, dst)
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n3, "Error decoding message.")

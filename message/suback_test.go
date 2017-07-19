@@ -21,15 +21,20 @@ import (
 )
 
 func TestSubAckMessageFields(t *testing.T) {
-	msg := NewSubAckMessage()
+	m, err := NewMessage(ProtocolV311, SUBACK)
+	require.NoError(t, err)
+
+	msg, ok := m.(*SubAckMessage)
+	require.True(t, ok, "Couldn't cast message type")
 
 	msg.SetPacketID(100)
-	require.Equal(t, 100, int(msg.PacketID()), "Error setting packet ID.")
+	id, _ := msg.PacketID()
+	require.Equal(t, PacketID(100), id, "Error setting packet ID.")
 
 	msg.AddReturnCode(1) // nolint: errcheck
 	require.Equal(t, 1, len(msg.ReturnCodes()), "Error adding return code.")
 
-	err := msg.AddReturnCode(0x90)
+	err = msg.AddReturnCode(0x90)
 	require.Error(t, err)
 }
 
@@ -45,7 +50,7 @@ func TestSubAckMessageDecode(t *testing.T) {
 		0x80, // return code 4
 	}
 
-	m, n, err := Decode(msgBytes)
+	m, n, err := Decode(ProtocolV311, msgBytes)
 	msg, ok := m.(*SubAckMessage)
 	require.Equal(t, true, ok, "Invalid message type")
 
@@ -71,7 +76,7 @@ func TestSubAckMessageDecode2(t *testing.T) {
 		0x81, // return code 4
 	}
 
-	_, _, err := Decode(msgBytes)
+	_, _, err := Decode(ProtocolV311, msgBytes)
 	require.Error(t, err)
 }
 
@@ -87,7 +92,12 @@ func TestSubAckMessageEncode(t *testing.T) {
 		0x80, // return code 4
 	}
 
-	msg := NewSubAckMessage()
+	m, err := NewMessage(ProtocolV311, SUBACK)
+	require.NoError(t, err)
+
+	msg, ok := m.(*SubAckMessage)
+	require.True(t, ok, "Couldn't cast message type")
+
 	msg.SetPacketID(7)
 	msg.AddReturnCode(0)    // nolint: errcheck
 	msg.AddReturnCode(1)    // nolint: errcheck
@@ -116,7 +126,7 @@ func TestSubAckDecodeEncodeEquiv(t *testing.T) {
 		0x80, // return code 4
 	}
 
-	m, n, err := Decode(msgBytes)
+	m, n, err := Decode(ProtocolV311, msgBytes)
 	msg, ok := m.(*SubAckMessage)
 	require.Equal(t, true, ok, "Invalid message type")
 
@@ -130,7 +140,7 @@ func TestSubAckDecodeEncodeEquiv(t *testing.T) {
 	require.Equal(t, len(msgBytes), n2, "Error encoding message.")
 	require.Equal(t, msgBytes, dst[:n2], "Error encoding message.")
 
-	_, n3, err := Decode(dst)
+	_, n3, err := Decode(ProtocolV311, dst)
 
 	require.NoError(t, err, "Error decoding message")
 	require.Equal(t, len(msgBytes), n3, "Error decoding message")

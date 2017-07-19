@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package routines
 
 import (
 	"encoding/binary"
@@ -23,7 +23,11 @@ import (
 	"errors"
 
 	"github.com/troian/surgemq/message"
-	"github.com/troian/surgemq/types"
+)
+
+var (
+	// ErrInvalidConnectionType connection object is invalid
+	ErrInvalidConnectionType = errors.New("connection object is invalid")
 )
 
 // WriteMessage write message into connection
@@ -44,12 +48,12 @@ func WriteMessage(conn io.Closer, msg message.Provider) error {
 // GetMessageBuffer read message from connection
 func GetMessageBuffer(c io.Closer) ([]byte, error) {
 	if c == nil {
-		return nil, types.ErrInvalidConnectionType
+		return nil, ErrInvalidConnectionType
 	}
 
 	conn, ok := c.(net.Conn)
 	if !ok {
-		return nil, types.ErrInvalidConnectionType
+		return nil, ErrInvalidConnectionType
 	}
 
 	var buf []byte
@@ -102,12 +106,12 @@ func GetMessageBuffer(c io.Closer) ([]byte, error) {
 // WriteMessageBuffer write buffered message into connection
 func WriteMessageBuffer(c io.Closer, b []byte) error {
 	if c == nil {
-		return types.ErrInvalidConnectionType
+		return ErrInvalidConnectionType
 	}
 
 	conn, ok := c.(net.Conn)
 	if !ok {
-		return types.ErrInvalidConnectionType
+		return ErrInvalidConnectionType
 	}
 
 	_, err := conn.Write(b)

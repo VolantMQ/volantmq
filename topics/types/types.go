@@ -3,8 +3,11 @@ package topicsTypes
 import (
 	"errors"
 
+	//"regexp"
+
+	"regexp"
+
 	"github.com/troian/surgemq/message"
-	"github.com/troian/surgemq/types"
 )
 
 //var (
@@ -29,15 +32,68 @@ const (
 	//BWC = "#+"
 )
 
+var TopicRegexp *regexp.Regexp
+
+func init() {
+	TopicRegexp = regexp.MustCompile(`^(([^+#]*|\+)(/([^+#]*|\+))*(/#)?|#)$`)
+}
+
+var (
+	//ErrInvalidConnectionType = errors.New("invalid connection type")
+	////ErrInvalidSubscriber      error = errors.New("service: Invalid subscriber")
+	//ErrBufferNotReady = errors.New("buffer is not ready")
+
+	// ErrInvalidArgs invalid arguments provided
+	ErrInvalidArgs = errors.New("topics: invalid arguments")
+
+	// ErrUnknownProvider if provider is unknown
+	ErrUnknownProvider = errors.New("topics: unknown provider")
+
+	// ErrAlreadyExists object already exists
+	ErrAlreadyExists = errors.New("topics: already exists")
+
+	// ErrNotFound object not found
+	ErrNotFound = errors.New("topics: not found")
+
+	// ErrNotOpen storage is not open
+	//ErrNotOpen = errors.New("not open")
+
+	//ErrOverflow = errors.New("overflow")
+)
+
+// Subscriber used inside each session as an object to provide to topic manager upon subscribe
+type Subscriber interface {
+	Acquire()
+	Release()
+	Publish(*message.PublishMessage, message.QosType) error
+	Hash() uintptr
+}
+
+// Subscribers used by topic manager to return list of subscribers matching topic
+type Subscribers []Subscriber
+
 // Provider interface
 type Provider interface {
-	Subscribe(topic string, qos message.QosType, subscriber *types.Subscriber) (message.QosType, error)
-	UnSubscribe(topic string, subscriber *types.Subscriber) error
-	Subscribers(topic string, qos message.QosType, subs *types.Subscribers) error
-	Publish(msg *message.PublishMessage) error
-	Retain(msg *message.PublishMessage) error
-	Retained(topic string) ([]*message.PublishMessage, error)
+	Subscribe(string, message.QosType, Subscriber) (message.QosType, []*message.PublishMessage, error)
+	UnSubscribe(string, Subscriber) error
+	//Subscribers(string, message.QosType) (Subscribers, error)
+	Publish(*message.PublishMessage) error
+	Retain(*message.PublishMessage) error
+	Retained(string) ([]*message.PublishMessage, error)
 	Close() error
+}
+
+type Topics interface {
+	Subscribe(string, message.QosType, Subscriber) (message.QosType, []*message.PublishMessage, error)
+	UnSubscribe(string, Subscriber) error
+	//Subscribers(string, message.QosType) (Subscribers, error)
+	Retain(*message.PublishMessage) error
+	Retained(string) ([]*message.PublishMessage, error)
+}
+
+type Messenger interface {
+	Publish(*message.PublishMessage) error
+	Retain(*message.PublishMessage) error
 }
 
 var (

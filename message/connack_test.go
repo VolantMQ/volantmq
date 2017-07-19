@@ -22,7 +22,11 @@ import (
 )
 
 func TestConnAckMessageFields(t *testing.T) {
-	msg := NewConnAckMessage()
+	m, err := NewMessage(ProtocolV311, CONNACK)
+	require.NoError(t, err)
+
+	msg, ok := m.(*ConnAckMessage)
+	require.True(t, ok, "Couldn't cast message type")
 
 	msg.SetSessionPresent(true)
 	require.True(t, msg.SessionPresent(), "Error setting session present flag.")
@@ -30,28 +34,29 @@ func TestConnAckMessageFields(t *testing.T) {
 	msg.SetSessionPresent(false)
 	require.False(t, msg.SessionPresent(), "Error setting session present flag.")
 
-	err := msg.SetReturnCode(ConnectionAccepted)
+	err = msg.SetReturnCode(CodeSuccess)
 	require.NoError(t, err)
 
-	require.Equal(t, ConnectionAccepted, msg.ReturnCode(), "Error setting return code.")
+	require.Equal(t, CodeSuccess, msg.ReturnCode(), "Error setting return code.")
 }
 
 func TestConnAckMessageDecode(t *testing.T) {
 	msgBytes := []byte{
 		byte(CONNACK << 4),
 		2,
-		0, // session not present
-		byte(ConnectionAccepted), // connection accepted
+		0,                 // session not present
+		byte(CodeSuccess), // connection accepted
 	}
 
-	m, n, err := Decode(msgBytes)
+	m, n, err := Decode(ProtocolV311, msgBytes)
+	require.NoError(t, err)
+
 	msg, ok := m.(*ConnAckMessage)
 	require.Equal(t, true, ok, "Invalid message type")
 
-	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
 	require.False(t, msg.SessionPresent(), "Error decoding session present flag.")
-	require.Equal(t, ConnectionAccepted, msg.ReturnCode(), "Error decoding return code.")
+	require.Equal(t, CodeSuccess, msg.ReturnCode(), "Error decoding return code.")
 }
 
 // testing wrong message length
@@ -59,11 +64,11 @@ func TestConnAckMessageDecode2(t *testing.T) {
 	msgBytes := []byte{
 		byte(CONNACK << 4),
 		3,
-		0, // session not present
-		byte(ConnectionAccepted), // connection accepted
+		0,                 // session not present
+		byte(CodeSuccess), // connection accepted
 	}
 
-	_, _, err := Decode(msgBytes)
+	_, _, err := Decode(ProtocolV311, msgBytes)
 	require.Error(t, err, "Error decoding message.")
 }
 
@@ -75,7 +80,7 @@ func TestConnAckMessageDecode3(t *testing.T) {
 		0, // session not present
 	}
 
-	_, _, err := Decode(msgBytes)
+	_, _, err := Decode(ProtocolV311, msgBytes)
 	require.Error(t, err, "Error decoding message.")
 }
 
@@ -88,7 +93,7 @@ func TestConnAckMessageDecode4(t *testing.T) {
 		0,  // connection accepted
 	}
 
-	_, _, err := Decode(msgBytes)
+	_, _, err := Decode(ProtocolV311, msgBytes)
 	require.Error(t, err, "Error decoding message.")
 }
 
@@ -101,7 +106,7 @@ func TestConnAckMessageDecode5(t *testing.T) {
 		6, // <- wrong code
 	}
 
-	_, _, err := Decode(msgBytes)
+	_, _, err := Decode(ProtocolV311, msgBytes)
 	require.Error(t, err, "Error decoding message.")
 }
 
@@ -113,10 +118,14 @@ func TestConnAckMessageEncode(t *testing.T) {
 		0, // connection accepted
 	}
 
-	msg := NewConnAckMessage()
+	m, err := NewMessage(ProtocolV311, CONNACK)
+	require.NoError(t, err)
 
-	require.NoError(t, msg.SetReturnCode(ConnectionAccepted), "Couldn't set return code")
-	require.Error(t, msg.SetReturnCode(ConnAckCodeReserved), "Should return invalid return code")
+	msg, ok := m.(*ConnAckMessage)
+	require.True(t, ok, "Couldn't cast message type")
+
+	require.NoError(t, msg.SetReturnCode(CodeSuccess), "Couldn't set return code")
+	require.Error(t, msg.SetReturnCode(CodeNoMatchingSubscribers), "Should return invalid return code")
 
 	msg.SetSessionPresent(true)
 
@@ -138,7 +147,7 @@ func TestConnAckDecodeEncodeEquiv(t *testing.T) {
 		0, // connection accepted
 	}
 
-	m, n, err := Decode(msgBytes)
+	m, n, err := Decode(ProtocolV311, msgBytes)
 	msg, ok := m.(*ConnAckMessage)
 	require.Equal(t, true, ok, "Invalid message type")
 
@@ -152,7 +161,7 @@ func TestConnAckDecodeEncodeEquiv(t *testing.T) {
 	require.Equal(t, len(msgBytes), n2, "Error decoding message.")
 	require.Equal(t, msgBytes, dst[:n2], "Error decoding message.")
 
-	_, n3, err := Decode(dst)
+	_, n3, err := Decode(ProtocolV311, dst)
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n3, "Error decoding message.")
@@ -161,8 +170,13 @@ func TestConnAckDecodeEncodeEquiv(t *testing.T) {
 func TestConnAckEncodeEnsureSize(t *testing.T) {
 	dst := make([]byte, 3)
 
-	msg := NewConnAckMessage()
-	err := msg.SetReturnCode(ConnectionAccepted)
+	m, err := NewMessage(ProtocolV311, CONNACK)
+	require.NoError(t, err)
+
+	msg, ok := m.(*ConnAckMessage)
+	require.True(t, ok, "Couldn't cast message type")
+
+	err = msg.SetReturnCode(CodeSuccess)
 	require.NoError(t, err)
 
 	_, err = msg.Encode(dst)
@@ -175,8 +189,14 @@ func TestConnAckCodeWrite(t *testing.T) {
 
 	buf.ExternalBuf = make([]byte, 1)
 
-	msg := NewConnAckMessage()
-	err = msg.SetReturnCode(ConnectionAccepted)
+	var m Provider
+	m, err = NewMessage(ProtocolV311, CONNACK)
+	require.NoError(t, err)
+
+	msg, ok := m.(*ConnAckMessage)
+	require.True(t, ok, "Couldn't cast message type")
+
+	err = msg.SetReturnCode(CodeSuccess)
 	require.NoError(t, err)
 
 	_, err = WriteToBuffer(msg, buf)

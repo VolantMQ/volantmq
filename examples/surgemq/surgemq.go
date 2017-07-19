@@ -16,18 +16,22 @@ package main
 
 import (
 	"os"
-	"os/signal"
 	_ "runtime/debug"
+
+	"os/signal"
 	"syscall"
 
 	"github.com/spf13/viper"
 	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/auth"
 	authTypes "github.com/troian/surgemq/auth/types"
+	"github.com/troian/surgemq/configuration"
+	"github.com/troian/surgemq/listener"
 	persistType "github.com/troian/surgemq/persistence/types"
-	"github.com/troian/surgemq/server"
-	"github.com/troian/surgemq/types"
 	"go.uber.org/zap"
+
+	"net/http"
+	_ "net/http/pprof"
 )
 
 type internalAuth struct {
@@ -53,19 +57,19 @@ func (a internalAuth) PskKey(hint, identity string, key []byte, maxKeyLen int) e
 }
 
 func main() {
-	ops := surgemq.Options{
+	ops := configuration.Options{
 		LogWithTs: false,
 	}
 
-	surgemq.Init(ops)
+	configuration.Init(ops)
 
-	logger := surgemq.GetProdLogger().Named("example")
+	logger := configuration.GetProdLogger().Named("example")
 
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Error("Recover from panic", zap.Any("recover", r))
-		}
-	}()
+	//defer func() {
+	//	if r := recover(); r != nil {
+	//		logger.Error("Recover from panic", zap.Any("recover", r))
+	//	}
+	//}()
 
 	var err error
 
@@ -104,33 +108,27 @@ func main() {
 		os.Exit(1)
 	}
 
-	var srv server.Type
+	var srv surgemq.Server
 
-	listenerStatus := func(id string, start bool) {
-		if start {
-			logger.Info("Started listener", zap.String("id", id))
-		} else {
-			logger.Info("Stopped listener", zap.String("id", id))
-		}
+	listenerStatus := func(id string, status string) {
+		logger.Info("Listener status", zap.String("id", id), zap.String("status", status))
 	}
 
-	srv, err = server.New(server.Config{
-		KeepAlive:      types.DefaultKeepAlive,
-		AckTimeout:     types.DefaultAckTimeout,
-		ConnectTimeout: 5,
-		TimeoutRetries: types.DefaultTimeoutRetries,
-		TopicsProvider: types.DefaultTopicsProvider,
-		Authenticators: "internal",
-		Anonymous:      true,
-		Persistence: &persistType.BoltDBConfig{
-			File: "./persist.db",
-		},
-		DupConfig: types.DuplicateConfig{
-			Replace:   true,
-			OnAttempt: nil,
-		},
-		ListenerStatus: listenerStatus,
-	})
+	serverConfig := surgemq.NewServerConfig()
+
+	serverConfig.Anonymous = true
+	serverConfig.OfflineQoS0 = true
+	//serverConfig.Persistence = &persistType.MemConfig{}
+	serverConfig.Persistence = &persistType.BoltDBConfig{
+		File: "./persist.db",
+	}
+	serverConfig.ListenerStatus = listenerStatus
+	serverConfig.AllowDuplicates = true
+
+	serverConfig.Authenticators = "internal"
+
+	srv, err = surgemq.NewServer(serverConfig)
+
 	if err != nil {
 		logger.Error("Couldn't create server", zap.Error(err))
 		os.Exit(1)
@@ -143,29 +141,29 @@ func main() {
 		return
 	}
 
-	config := &server.ListenerTCP{
-		Scheme: "tcp4",
-		Host:   "",
-		ListenerBase: server.ListenerBase{
-			Port:        1883,
-			AuthManager: authMng,
-		},
+	config := &listener.ConfigTCP{
+		Scheme:      "tcp",
+		Host:        "",
+		Port:        1883,
+		AuthManager: authMng,
 	}
 
 	if err = srv.ListenAndServe(config); err != nil {
 		logger.Error("Couldn't start listener", zap.Error(err))
 	}
 
-	configWs := &server.ListenerWS{
-		ListenerBase: server.ListenerBase{
-			Port:        8080,
-			AuthManager: authMng,
-		},
+	configWs := &listener.ConfigWS{
+		Port:        8080,
+		AuthManager: authMng,
 	}
 
 	if err = srv.ListenAndServe(configWs); err != nil {
 		logger.Error("Couldn't start listener", zap.Error(err))
 	}
+
+	go func() {
+		logger.Info(http.ListenAndServe("localhost:6061", nil).Error())
+	}()
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
@@ -175,4 +173,6 @@ func main() {
 	if err = srv.Close(); err != nil {
 		logger.Error("Couldn't shutdown server", zap.Error(err))
 	}
+
+	os.Remove("./persist.db") // nolint: errcheck
 }

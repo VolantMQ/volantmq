@@ -14,8 +14,6 @@
 
 package message
 
-import "errors"
-
 // ConnAckMessage The CONNACK Packet is the packet sent by the Server in response to a CONNECT Packet
 // received from a Client. The first packet sent from the Server to the Client MUST
 // be a CONNACK Packet [MQTT-3.2.0-1].
@@ -26,18 +24,14 @@ type ConnAckMessage struct {
 	header
 
 	sessionPresent bool
-	returnCode     ConnAckCode
+	returnCode     ReasonCode
 }
 
 var _ Provider = (*ConnAckMessage)(nil)
 
 // NewConnAckMessage creates a new CONNACK message
-func NewConnAckMessage() *ConnAckMessage {
-	msg := &ConnAckMessage{}
-	msg.setType(CONNACK) // nolint: errcheck
-	msg.sizeCb = msg.size
-
-	return msg
+func newConnAckMessage() *ConnAckMessage {
+	return &ConnAckMessage{}
 }
 
 // SessionPresent returns the session present flag value
@@ -52,13 +46,13 @@ func (msg *ConnAckMessage) SetSessionPresent(v bool) {
 
 // ReturnCode returns the return code received for the CONNECT message. The return
 // type is an error
-func (msg *ConnAckMessage) ReturnCode() ConnAckCode {
+func (msg *ConnAckMessage) ReturnCode() ReasonCode {
 	return msg.returnCode
 }
 
 // SetReturnCode of conn
-func (msg *ConnAckMessage) SetReturnCode(ret ConnAckCode) error {
-	if !ret.Valid() {
+func (msg *ConnAckMessage) SetReturnCode(ret ReasonCode) error {
+	if !ret.IsValidForType(msg.Type()) {
 		return ErrInvalidReturnCode
 	}
 
@@ -67,40 +61,54 @@ func (msg *ConnAckMessage) SetReturnCode(ret ConnAckCode) error {
 	return nil
 }
 
-// decode message
-func (msg *ConnAckMessage) decode(src []byte) (int, error) {
+func (msg *ConnAckMessage) decodeMessage(src []byte) (int, error) {
 	total := 0
-
-	n, err := msg.header.decode(src)
-	total += n
-	if err != nil {
-		return total, err
-	}
 
 	// [MQTT-3.2.2.1]
 	b := src[total]
 	if b&(^maskConnAckSessionPresent) != 0 {
-		return 0, errors.New("connack/decode: Bits 7-1 in Connack Acknowledge Flags byte (1) are not 0")
+		var rejectCode ReasonCode
+		if msg.version == ProtocolV50 {
+			rejectCode = CodeMalformedPacket
+		} else {
+			rejectCode = CodeRefusedServerUnavailable
+		}
+
+		return total, rejectCode
 	}
 
 	msg.sessionPresent = b&maskConnAckSessionPresent != 0
 	total++
 
 	b = src[total]
-	// [MQTT-3.2.2.3] Read return code
-	msg.returnCode = ConnAckCode(b)
-	if msg.returnCode >= ConnAckCodeReserved {
-		return 0, ErrInvalidReturnCode
+	msg.returnCode = ReasonCode(b)
+
+	if !msg.returnCode.IsValidForType(msg.mType) {
+		reason := CodeRefusedServerUnavailable
+		if msg.version == ProtocolV50 {
+			reason = CodeProtocolError
+		}
+		return total, reason
 	}
+
 	total++
+
+	// v5 [MQTT-3.1.2.11] specifies properties in variable header
+	if msg.version == ProtocolV50 {
+		var err error
+		var n int
+		msg.properties, n, err = decodeProperties(msg.mType, src[total:])
+		total += n
+		if err != nil {
+			return total, err
+		}
+	}
 
 	return total, nil
 }
 
-func (msg *ConnAckMessage) preEncode(dst []byte) int {
+func (msg *ConnAckMessage) encodeMessage(dst []byte) (int, error) {
 	total := 0
-
-	total += msg.header.encode(dst[total:])
 
 	if msg.sessionPresent {
 		dst[total] = 1
@@ -112,19 +120,29 @@ func (msg *ConnAckMessage) preEncode(dst []byte) int {
 	dst[total] = msg.returnCode.Value()
 	total++
 
-	return total
-}
+	var err error
+	// V5.0   [MQTT-3.1.2.11]
+	if msg.version == ProtocolV50 {
+		var n int
 
-//Encode message
-func (msg *ConnAckMessage) Encode(dst []byte) (int, error) {
-	expectedSize, _ := msg.Size()
-	if len(dst) < expectedSize {
-		return expectedSize, ErrInsufficientBufferSize
+		if n, err = encodeProperties(msg.properties, dst[total:]); err != nil {
+			return total + n, err
+		}
+
+		total += n
 	}
 
-	return msg.preEncode(dst), nil
+	return total, err
 }
 
 func (msg *ConnAckMessage) size() int {
-	return 2
+	total := 2
+
+	// v5.0 [MQTT-3.1.2.11]
+	if msg.version == ProtocolV50 {
+		pLen, _ := encodeProperties(msg.properties, []byte{})
+		total += pLen
+	}
+
+	return total
 }

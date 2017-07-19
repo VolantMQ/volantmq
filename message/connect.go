@@ -16,27 +16,17 @@ package message
 
 import (
 	"encoding/binary"
-	"errors"
-	"fmt"
 	"regexp"
+	"unicode/utf8"
 )
 
 var clientIDRegexp *regexp.Regexp
-
-const (
-	connFlagUsernameMask     byte = 0x80
-	connFlagPasswordMask     byte = 0x40
-	connFlagWillRetainMask   byte = 0x20
-	connFlagWillQosMask      byte = 0x18
-	connFlagWillMask         byte = 0x04
-	connFlagCleanSessionMask byte = 0x02
-)
 
 func init() {
 	// Added space for Paho compliance test
 	// Added underscore (_) for MQTT C client test
 	// Added coma(,) for MQTT C client test
-	clientIDRegexp = regexp.MustCompile("^[0-9a-zA-Z _,]*$")
+	clientIDRegexp = regexp.MustCompile(`^[0-9a-zA-Z -_,]*$`)
 }
 
 // ConnectMessage After a Network Connection is established by a Client to a Server, the first Packet
@@ -49,6 +39,7 @@ func init() {
 type ConnectMessage struct {
 	header
 
+	keepAlive uint16
 	// 7: username flag
 	// 6: password flag
 	// 5: will retain
@@ -57,23 +48,20 @@ type ConnectMessage struct {
 	// 1: clean session
 	// 0: reserved
 	connectFlags byte
-	version      byte
-	keepAlive    uint16
-	protoName    []byte
 	clientID     []byte
-	willTopic    string
-	willMessage  []byte
 	username     []byte
 	password     []byte
+
+	will struct {
+		topic   string
+		message []byte
+	}
 }
 
 var _ Provider = (*ConnectMessage)(nil)
 
-// NewConnectMessage creates a new CONNECT message.
-func NewConnectMessage() *ConnectMessage {
+func newConnectMessage() *ConnectMessage {
 	msg := &ConnectMessage{}
-	msg.setType(CONNECT) // nolint: errcheck
-	msg.sizeCb = msg.size
 
 	return msg
 }
@@ -81,119 +69,24 @@ func NewConnectMessage() *ConnectMessage {
 // Version returns the the 8 bit unsigned value that represents the revision level
 // of the protocol used by the Client. The value of the Protocol Level field for
 // the version 3.1.1 of the protocol is 4 (0x04).
-func (msg *ConnectMessage) Version() byte {
-	return msg.version
-}
+//func (msg *ConnectMessage) Version() byte {
+//	return msg.version
+//}
 
-// SetVersion sets the version value of the CONNECT message
-func (msg *ConnectMessage) SetVersion(v byte) error {
-	if _, ok := SupportedVersions[v]; !ok {
-		return fmt.Errorf("connect/SetVersion: Invalid version number %d", v)
-	}
-
-	msg.version = v
-	return nil
-}
-
-// CleanSession returns the bit that specifies the handling of the Session state.
+// CleanStart returns the bit that specifies the handling of the Session state.
 // The Client and Server can store Session state to enable reliable messaging to
 // continue across a sequence of Network Connections. This bit is used to control
 // the lifetime of the Session state.
-func (msg *ConnectMessage) CleanSession() bool {
-	return (msg.connectFlags & connFlagCleanSessionMask) != 0
+func (msg *ConnectMessage) CleanStart() bool {
+	return (msg.connectFlags & maskConnFlagCleanSession) != 0
 }
 
-// SetCleanSession sets the bit that specifies the handling of the Session state.
-func (msg *ConnectMessage) SetCleanSession(v bool) {
+// SetCleanStart sets the bit that specifies the handling of the Session state.
+func (msg *ConnectMessage) SetCleanStart(v bool) {
 	if v {
-		msg.connectFlags |= connFlagCleanSessionMask // 0x02 // 00000010
+		msg.connectFlags |= maskConnFlagCleanSession // 0x02 // 00000010
 	} else {
-		msg.connectFlags &= ^connFlagCleanSessionMask // 0xFD // 11111101
-	}
-}
-
-// WillFlag returns the bit that specifies whether a Will Message should be stored
-// on the server. If the Will Flag is set to 1 this indicates that, if the Connect
-// request is accepted, a Will Message MUST be stored on the Server and associated
-// with the Network Connection.
-func (msg *ConnectMessage) WillFlag() bool {
-	return (msg.connectFlags & connFlagWillMask) != 0
-}
-
-// SetWillFlag sets the bit that specifies whether a Will Message should be stored
-// on the server.
-func (msg *ConnectMessage) SetWillFlag(v bool) {
-	if v {
-		msg.connectFlags |= connFlagWillMask // 0x04 // 00000100
-	} else {
-		msg.connectFlags &= ^connFlagWillMask // 0xFB // 11111011
-	}
-}
-
-// WillQos returns the two bits that specify the QoS level to be used when publishing
-// the Will Message.
-func (msg *ConnectMessage) WillQos() QosType {
-	return QosType((msg.connectFlags & connFlagWillQosMask) >> 0x3)
-}
-
-// SetWillQos sets the two bits that specify the QoS level to be used when publishing
-// the Will Message.
-func (msg *ConnectMessage) SetWillQos(qos QosType) error {
-	if !qos.IsValid() {
-		return ErrInvalidQoS
-	}
-
-	msg.connectFlags &= ^connFlagWillQosMask
-	msg.connectFlags |= byte(qos) << 0x03
-
-	return nil
-}
-
-// WillRetain returns the bit specifies if the Will Message is to be Retained when it
-// is published.
-func (msg *ConnectMessage) WillRetain() bool {
-	return (msg.connectFlags & connFlagWillRetainMask) != 0
-}
-
-// SetWillRetain sets the bit specifies if the Will Message is to be Retained when it
-// is published.
-func (msg *ConnectMessage) SetWillRetain(v bool) {
-	if v {
-		msg.connectFlags |= connFlagWillRetainMask // 0x20 // 00100000
-	} else {
-		msg.connectFlags &= ^connFlagWillRetainMask // 0xDF // 11011111
-	}
-}
-
-// UsernameFlag returns the bit that specifies whether a user name is present in the
-// payload.
-func (msg *ConnectMessage) UsernameFlag() bool {
-	return (msg.connectFlags & connFlagUsernameMask) != 0
-}
-
-// SetUsernameFlag sets the bit that specifies whether a user name is present in the
-// payload.
-func (msg *ConnectMessage) SetUsernameFlag(v bool) {
-	if v {
-		msg.connectFlags |= connFlagUsernameMask // 0x80 // 10000000
-	} else {
-		msg.connectFlags &= ^connFlagUsernameMask // 0x7F // 01111111
-	}
-}
-
-// PasswordFlag returns the bit that specifies whether a password is present in the
-// payload.
-func (msg *ConnectMessage) PasswordFlag() bool {
-	return (msg.connectFlags & connFlagPasswordMask) != 0
-}
-
-// SetPasswordFlag sets the bit that specifies whether a password is present in the
-// payload.
-func (msg *ConnectMessage) SetPasswordFlag(v bool) {
-	if v {
-		msg.connectFlags |= connFlagPasswordMask // 0x40 // 01000000
-	} else {
-		msg.connectFlags &= ^connFlagPasswordMask // 0xBF // 10111111
+		msg.connectFlags &= ^maskConnFlagCleanSession // 0xFD // 11111101
 	}
 }
 
@@ -221,8 +114,8 @@ func (msg *ConnectMessage) ClientID() []byte {
 
 // SetClientID sets an ID that identifies the Client to the Server.
 func (msg *ConnectMessage) SetClientID(v []byte) error {
-	if len(v) > 0 && !msg.validClientID(v) {
-		return ErrIdentifierRejected
+	if !msg.validClientID(v) {
+		return ErrInvalid
 	}
 
 	msg.clientID = v
@@ -230,189 +123,194 @@ func (msg *ConnectMessage) SetClientID(v []byte) error {
 	return nil
 }
 
-// WillTopic returns the topic in which the Will Message should be published to.
+// Will returns the topic in which the Will Message should be published to.
 // If the Will Flag is set to 1, the Will Topic must be in the payload.
-func (msg *ConnectMessage) WillTopic() string {
-	return msg.willTopic
+// returns will topic, will message, will qos , will retain, will
+// if last param is false will is not set
+func (msg *ConnectMessage) Will() (string, []byte, QosType, bool, bool) {
+	return msg.will.topic,
+		msg.will.message,
+		QosType((msg.connectFlags & maskConnFlagWillQos) >> offsetConnFlagWillQoS),
+		(msg.connectFlags & maskConnFlagWillRetain) != 0,
+		(msg.connectFlags & maskConnFlagWill) != 0
 }
 
-// SetWillTopic sets the topic in which the Will Message should be published to.
-func (msg *ConnectMessage) SetWillTopic(v string) {
-	msg.willTopic = v
-
-	if len(v) > 0 {
-		msg.SetWillFlag(true)
-	} else if len(msg.willMessage) == 0 {
-		msg.SetWillFlag(false)
-	}
-}
-
-// WillMessage returns the Will Message that is to be published to the Will Topic.
-func (msg *ConnectMessage) WillMessage() []byte {
-	return msg.willMessage
-}
-
-// SetWillMessage sets the Will Message that is to be published to the Will Topic.
-func (msg *ConnectMessage) SetWillMessage(v []byte) {
-	msg.willMessage = v
-
-	if len(v) > 0 {
-		msg.SetWillFlag(true)
-	} else if len(msg.willTopic) == 0 {
-		msg.SetWillFlag(false)
-	}
-}
-
-// Username returns the username from the payload. If the User Name Flag is set to 1,
-// this must be in the payload. It can be used by the Server for authentication and
-// authorization.
-func (msg *ConnectMessage) Username() []byte {
-	return msg.username
-}
-
-// SetUsername sets the username for authentication.
-func (msg *ConnectMessage) SetUsername(v []byte) {
-	msg.username = v
-
-	if len(v) > 0 {
-		msg.SetUsernameFlag(true)
-	} else {
-		msg.SetUsernameFlag(false)
-	}
-}
-
-// Password returns the password from the payload. If the Password Flag is set to 1,
-// this must be in the payload. It can be used by the Server for authentication and
-// authorization.
-func (msg *ConnectMessage) Password() []byte {
-	return msg.password
-}
-
-// SetPassword sets the username for authentication.
-func (msg *ConnectMessage) SetPassword(v []byte) {
-	msg.password = v
-
-	if len(v) > 0 {
-		msg.SetPasswordFlag(true)
-	} else {
-		msg.SetPasswordFlag(false)
-	}
-}
-
-// decode For the CONNECT message, the error returned could be a ConnAckReturnCode, so
-// be sure to check that. Otherwise it's a generic error. If a generic error is
-// returned, this Message should be considered invalid.
-//
-// Caller should call ValidConnAckError(err) to see if the returned error is
-// a ConnAck error. If so, caller should send the Client back the corresponding
-// CONNACK message.
-func (msg *ConnectMessage) decode(src []byte) (int, error) {
-	total := 0
-
-	n, err := msg.header.decode(src[total:])
-	total += n
-	if err != nil {
-		return total, err
+// SetWill state of message
+func (msg *ConnectMessage) SetWill(t string, m []byte, qos QosType, retain bool) error {
+	will := true
+	if len(t) == 0 || len(m) == 0 || !qos.IsValid() {
+		will = false
 	}
 
-	n, err = msg.decodeMessage(src[total:])
-	total += n
-	if err != nil {
-		return total + n, err
+	// Reset all will flags
+	msg.ResetWill()
+
+	if !will {
+		return ErrInvalidArgs
 	}
 
-	return total, nil
+	if retain {
+		msg.connectFlags |= maskConnFlagWillRetain
+	}
+
+	msg.connectFlags |= byte(qos) << offsetConnFlagWillQoS
+	msg.connectFlags |= maskConnFlagWill
+	msg.will.topic = t
+	msg.will.message = m
+	return nil
 }
 
-func (msg *ConnectMessage) preEncode(dst []byte) (int, error) {
-	var err error
-	total := 0
+// ResetWill reset will state of message
+func (msg *ConnectMessage) ResetWill() {
+	msg.connectFlags &= ^maskConnFlagWill
+	msg.connectFlags &= ^maskConnFlagWillQos
+	msg.connectFlags &= ^maskConnFlagWillRetain
+	msg.will.topic = ""
+	msg.will.message = []byte{}
+}
 
-	if msg.Type() != CONNECT {
-		return 0, ErrInvalidMessageType
+// Credentials
+func (msg *ConnectMessage) Credentials() ([]byte, []byte) {
+	return msg.username, msg.password
+}
+
+// SetCredentials set username and password
+func (msg *ConnectMessage) SetCredentials(u []byte, p []byte) error {
+	msg.connectFlags &= ^maskConnFlagUsername
+	msg.connectFlags &= ^maskConnFlagPassword
+
+	// MQTT 3.1.1 does not allow password without user name
+	if (len(msg.username) == 0 && len(msg.password) != 0) && msg.version < ProtocolV50 {
+		return ErrInvalidArgs
 	}
 
+	if len(u) != 0 {
+		if !utf8.Valid(u) {
+			return ErrInvalidUtf8
+		}
+		msg.connectFlags |= maskConnFlagUsername
+		msg.username = u
+	}
+
+	if len(p) != 0 {
+		msg.connectFlags |= maskConnFlagPassword
+		msg.password = p
+	}
+
+	return nil
+}
+
+// willFlag returns the bit that specifies whether a Will Message should be stored
+// on the server. If the Will Flag is set to 1 this indicates that, if the Connect
+// request is accepted, a Will Message MUST be stored on the Server and associated
+// with the Network Connection.
+func (msg *ConnectMessage) willFlag() bool {
+	return (msg.connectFlags & maskConnFlagWill) != 0
+}
+
+// willQos returns the two bits that specify the QoS level to be used when publishing
+// the Will Message.
+func (msg *ConnectMessage) willQos() QosType {
+	return QosType((msg.connectFlags & maskConnFlagWillQos) >> offsetConnFlagWillQoS)
+}
+
+// willRetain returns the bit specifies if the Will Message is to be Retained when it
+// is published.
+func (msg *ConnectMessage) willRetain() bool {
+	return (msg.connectFlags & maskConnFlagWillRetain) != 0
+}
+
+// usernameFlag returns the bit that specifies whether a user name is present in the
+// payload.
+func (msg *ConnectMessage) usernameFlag() bool {
+	return (msg.connectFlags & maskConnFlagUsername) != 0
+}
+
+// passwordFlag returns the bit that specifies whether a password is present in the
+// payload.
+func (msg *ConnectMessage) passwordFlag() bool {
+	return (msg.connectFlags & maskConnFlagPassword) != 0
+}
+
+func (msg *ConnectMessage) encodeMessage(dst []byte) (int, error) {
 	if _, ok := SupportedVersions[msg.version]; !ok {
 		return 0, ErrInvalidProtocolVersion
 	}
 
-	total += msg.header.encode(dst[total:])
-
-	var n int
-	if n, err = msg.encodeMessage(dst[total:]); err != nil {
-		return total, err
-	}
-	total += n
-
-	return total, err
-}
-
-// Encode message
-func (msg *ConnectMessage) Encode(dst []byte) (int, error) {
-	expectedSize, err := msg.Size()
-	if err != nil {
-		return 0, err
-	}
-
-	if len(dst) < expectedSize {
-		return expectedSize, ErrInsufficientBufferSize
-	}
-
-	return msg.preEncode(dst)
-}
-
-func (msg *ConnectMessage) encodeMessage(dst []byte) (int, error) {
 	total := 0
 
-	n, err := writeLPBytes(dst[total:], []byte(SupportedVersions[msg.version]))
+	// V3.1.1 [MQTT-3.1.2.1]
+	// V5.0   [MQTT-3.1.2.1]
+	n, err := WriteLPBytes(dst[total:], []byte(SupportedVersions[msg.version]))
 	total += n
 	if err != nil {
 		return total, err
 	}
 
-	dst[total] = msg.version
+	// V3.1.1 [MQTT-3.1.2.2]
+	// V5.0   [MQTT-3.1.2.2]
+	dst[total] = byte(msg.version)
 	total++
 
+	// V3.1.1 [MQTT-3.1.2.3]
+	// V5.0   [MQTT-3.1.2.3]
 	dst[total] = msg.connectFlags
 	total++
 
+	// V3.1.1 [MQTT-3.1.2.10]
+	// V5.0   [MQTT-3.1.2.10]
 	binary.BigEndian.PutUint16(dst[total:], msg.keepAlive)
 	total += 2
 
-	n, err = writeLPBytes(dst[total:], msg.clientID)
+	// V5.0   [MQTT-3.1.2.11]
+	if msg.version == ProtocolV50 {
+		if n, err = encodeProperties(msg.properties, dst[total:]); err != nil {
+			return total + n, err
+		}
+
+		total += n
+	}
+
+	// V3.1.1 [MQTT-3.1.3.1]
+	// V5.0   [MQTT-3.1.3.1]
+	n, err = WriteLPBytes(dst[total:], msg.clientID)
 	total += n
 	if err != nil {
 		return total, err
 	}
 
-	if msg.WillFlag() {
-		n, err = writeLPBytes(dst[total:], []byte(msg.willTopic))
+	if msg.willFlag() {
+		// V3.1.1 [MQTT-3.1.3.2]
+		// V5.0   [MQTT-3.1.3.2]
+		n, err = WriteLPBytes(dst[total:], []byte(msg.will.topic))
 		total += n
 		if err != nil {
 			return total, err
 		}
 
-		n, err = writeLPBytes(dst[total:], msg.willMessage)
-		total += n
-		if err != nil {
-			return total, err
-		}
-	}
-
-	// According to the 3.1 spec, it's possible that the usernameFlag is set,
-	// but the username string is missing.
-	if msg.UsernameFlag() && len(msg.username) > 0 {
-		n, err = writeLPBytes(dst[total:], msg.username)
+		// V3.1.1 [MQTT-3.1.3.3]
+		// V5.0   [MQTT-3.1.3.3]
+		n, err = WriteLPBytes(dst[total:], msg.will.message)
 		total += n
 		if err != nil {
 			return total, err
 		}
 	}
 
-	// According to the 3.1 spec, it's possible that the passwordFlag is set,
-	// but the password string is missing.
-	if msg.PasswordFlag() && len(msg.password) > 0 {
-		n, err = writeLPBytes(dst[total:], msg.password)
+	if msg.usernameFlag() {
+		// v3.1.1 [MQTT-3.1.3.4]
+		// v5.0   [MQTT-3.1.3.4]
+		n, err = WriteLPBytes(dst[total:], msg.username)
+		total += n
+		if err != nil {
+			return total, err
+		}
+	}
+
+	if msg.passwordFlag() {
+		// v3.1.1 [MQTT-3.1.3.5]
+		// v5.0   [MQTT-3.1.3.5]
+		n, err = WriteLPBytes(dst[total:], msg.password)
 		total += n
 		if err != nil {
 			return total, err
@@ -427,103 +325,163 @@ func (msg *ConnectMessage) decodeMessage(src []byte) (int, error) {
 	var n int
 	total := 0
 
-	msg.protoName, n, err = readLPBytes(src[total:])
-	total += n
-	if err != nil {
+	var protoName []byte
+
+	// V3.1.1 [MQTT-3.1.2.1]
+	// V5.0   [MQTT-3.1.2.1]
+	if protoName, n, err = ReadLPBytes(src[total:]); err != nil {
 		return total, err
 	}
+	total += n
 
-	msg.version = src[total]
+	// V3.1.1 [MQTT-3.1.2-1]
+	// V5.0   [MQTT-3.1.2-1]
+	if !utf8.Valid(protoName) {
+		return total, ErrProtocolInvalidName
+	}
+
+	// V3.1.1 [MQTT-3.1.2.2]
+	// V5.0   [MQTT-3.1.2.2]
+	msg.version = ProtocolVersion(src[total])
 	total++
 
-	if verstr, ok := SupportedVersions[msg.version]; !ok {
+	// V3.1.1 [MQTT-3.1.2-2]
+	// V5.0   [MQTT-3.1.2-2]
+	if verStr, ok := SupportedVersions[msg.version]; !ok {
 		return total, ErrInvalidProtocolVersion
-	} else if verstr != string(msg.protoName) {
+	} else if verStr != string(protoName) {
 		return total, ErrInvalidProtocolVersion
 	}
 
+	// V3.1.1 [MQTT-3.1.2.3]
+	// V5.0   [MQTT-3.1.2.3]
 	msg.connectFlags = src[total]
 	total++
 
-	if msg.connectFlags&0x1 != 0 {
-		return total, errors.New("connect/decodeMessage: Connect Flags reserved bit 0 is not 0")
+	// V3.1.1 [MQTT-3.1.2-3]
+	// V5.0   [MQTT-3.1.2-3]
+	if msg.connectFlags&maskConnFlagReserved != 0 {
+		var rejectCode ReasonCode
+		if msg.version == ProtocolV50 {
+			rejectCode = CodeMalformedPacket
+		} else {
+			rejectCode = CodeRefusedServerUnavailable
+		}
+
+		return total, rejectCode
 	}
 
-	if !msg.WillQos().IsValid() {
-		return total, ErrInvalidQoS
+	// V3.1.1 [MQTT-3.1.2-14]
+	// V5.0   [MQTT-3.1.2-14]
+	if !msg.willQos().IsValid() {
+		var rejectCode ReasonCode
+		if msg.version == ProtocolV50 {
+			rejectCode = CodeMalformedPacket
+		} else {
+			rejectCode = CodeRefusedServerUnavailable
+		}
+
+		return total, rejectCode
 	}
 
-	if !msg.WillFlag() && (msg.WillRetain() || (msg.WillQos() != QoS0)) {
-		return total, ErrProtocolViolation
+	if !msg.willFlag() && (msg.willRetain() || (msg.willQos() != QoS0)) {
+		var rejectCode ReasonCode
+		if msg.version == ProtocolV50 {
+			rejectCode = CodeMalformedPacket
+		} else {
+			rejectCode = CodeRefusedServerUnavailable
+		}
+
+		return total, rejectCode
 	}
 
-	if !msg.UsernameFlag() && msg.PasswordFlag() {
-		return total, ErrBadUsernameOrPassword //errors.New("connect/decodeMessage: Username flag is set but Password flag is not set")
+	// V3.1.1 [MQTT-3.1.2-22].
+	if (!msg.usernameFlag() && msg.passwordFlag()) && msg.version < ProtocolV50 {
+		return total, CodeRefusedBadUsernameOrPassword
 	}
 
-	if len(src[total:]) < 2 {
-		return 0, ErrInsufficientBufferSize
-	}
-
+	// V3.1.1 [MQTT-3.1.2.10]
+	// V5.0   [MQTT-3.1.2.10]
 	msg.keepAlive = binary.BigEndian.Uint16(src[total:])
 	total += 2
 
-	msg.clientID, n, err = readLPBytes(src[total:])
+	// v5.0   [MQTT-3.1.2.11] specifies properties in variable header
+	if msg.version == ProtocolV50 {
+		if msg.properties, n, err = decodeProperties(msg.mType, src[total:]); err != nil {
+			return total + n, err
+		}
+		total += n
+	}
+
+	// V3.1.1 [MQTT-3.1.3.1]
+	msg.clientID, n, err = ReadLPBytes(src[total:])
 	total += n
 	if err != nil {
 		return total, err
 	}
 
+	// V3.1.1  [MQTT-3.1.3-7]
 	// If the Client supplies a zero-byte ClientId, the Client MUST also set CleanSession to 1
-	if len(msg.clientID) == 0 && !msg.CleanSession() {
-		return total, ErrIdentifierRejected
+	if (len(msg.clientID) == 0 && !msg.CleanStart()) && msg.version < ProtocolV50 {
+		return total, CodeRefusedIdentifierRejected
 	}
 
 	// The ClientId must contain only characters 0-9, a-z, and A-Z
 	// We also support ClientId longer than 23 encoded bytes
 	// We do not support ClientId outside of the above characters
-	if len(msg.clientID) > 0 && !msg.validClientID(msg.clientID) {
-		return total, ErrIdentifierRejected
+	if !msg.validClientID(msg.clientID) {
+		var rejectCode ReasonCode
+		if msg.version == ProtocolV50 {
+			rejectCode = CodeInvalidClientID
+		} else {
+			rejectCode = CodeRefusedIdentifierRejected
+		}
+
+		return total, rejectCode
 	}
 
-	if msg.WillFlag() {
+	if msg.willFlag() {
+		// V3.1.1 [MQTT-3.1.3.2]
+		// V5.0   [MQTT-3.1.3.2]
 		var buf []byte
-		buf, n, err = readLPBytes(src[total:])
-		total += n
-		if err != nil {
-			return total, err
+
+		if buf, n, err = ReadLPBytes(src[total:]); err != nil {
+			return total + n, err
 		}
-
-		msg.willTopic = string(buf)
-
-		buf, n, err = readLPBytes(src[total:])
 		total += n
-		if err != nil {
-			return total, err
-		}
 
-		msg.willMessage = make([]byte, len(buf))
-		copy(msg.willMessage, buf)
+		msg.will.topic = string(buf)
+
+		// V3.1.1 [3.1.3.3]
+		// V5.0   [3.1.3.3]
+		if buf, n, err = ReadLPBytes(src[total:]); err != nil {
+			return total + n, err
+		}
+		total += n
+
+		msg.will.message = make([]byte, len(buf))
+		copy(msg.will.message, buf)
 	}
 
 	// According to the 3.1 spec, it's possible that the usernameFlag is set,
 	// but the user string is missing.
-	if msg.UsernameFlag() && len(src[total:]) > 0 {
-		msg.username, n, err = readLPBytes(src[total:])
-		total += n
-		if err != nil {
-			return total, err
+
+	// v3.1.1 [MQTT-3.1.3.4]
+	// v5.0   [MQTT-3.1.3.4]
+	if msg.usernameFlag() {
+		if msg.username, n, err = ReadLPBytes(src[total:]); err != nil {
+			return total + n, err
 		}
+		total += n
 	}
 
-	// According to the 3.1 spec, it's possible that the passwordFlag is set,
-	// but the password string is missing.
-	if msg.PasswordFlag() && len(src[total:]) > 0 {
-		msg.password, n, err = readLPBytes(src[total:])
-		total += n
-		if err != nil {
-			return total, err
+	// v3.1.1 [MQTT-3.1.3.5]
+	// v5.0   [MQTT-3.1.3.5]
+	if msg.passwordFlag() {
+		if msg.password, n, err = ReadLPBytes(src[total:]); err != nil {
+			return total + n, err
 		}
+		total += n
 	}
 
 	return total, nil
@@ -537,32 +495,46 @@ func (msg *ConnectMessage) size() int {
 		return total
 	}
 
-	// 2 bytes protocol name length
-	// n bytes protocol name
-	// 1 byte protocol version
-	// 1 byte connect flags
-	// 2 bytes keep alive timer
+	//       2 bytes protocol name length
+	//       |         n bytes protocol name
+	//       |         |        1 byte protocol version
+	//       |         |        |   1 byte connect flags
+	//       |         |        |   |   2 bytes keep alive timer
+	//       |         |        |   |   |
 	total += 2 + len(version) + 1 + 1 + 2
 
-	// Add the clientID length, 2 is the length prefix
+	// v5.0 [MQTT-3.1.2.11]
+	if msg.version == ProtocolV50 {
+		pLen, _ := encodeProperties(msg.properties, []byte{})
+		total += pLen
+	}
+
+	//       the length prefix
+	//       |          length of client id
+	//       |          |
 	total += 2 + len(msg.clientID)
 
 	// Add the will topic and will message length, and the length prefixes
-	if msg.WillFlag() {
-		total += 2 + len(msg.willTopic) + 2 + len(msg.willMessage)
+	if msg.willFlag() {
+		//       the length prefix of will topic
+		//       |            length of will topic
+		//       |            |            the length prefix of will message
+		//       |            |            |            length of will message
+		//       |            |            |            |
+		total += 2 + len(msg.will.topic) + 2 + len(msg.will.message)
 	}
 
 	// Add the username length
 	// According to the 3.1 spec, it's possible that the usernameFlag is set,
 	// but the user name string is missing.
-	if msg.UsernameFlag() && len(msg.username) > 0 {
+	if msg.usernameFlag() {
 		total += 2 + len(msg.username)
 	}
 
 	// Add the password length
 	// According to the 3.1 spec, it's possible that the passwordFlag is set,
 	// but the password string is missing.
-	if msg.PasswordFlag() && len(msg.password) > 0 {
+	if msg.passwordFlag() {
 		total += 2 + len(msg.password)
 	}
 
@@ -576,9 +548,13 @@ func (msg *ConnectMessage) size() int {
 //
 //		"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 func (msg *ConnectMessage) validClientID(cid []byte) bool {
-	if msg.Version() == 0x3 {
+	// V3.1.1  [MQTT-3.1.3-6]
+	// V5.0    [MQTT-3.1.3-6]
+	if len(cid) == 0 {
 		return true
 	}
 
-	return clientIDRegexp.Match(cid)
+	// V3.1.1  [MQTT-3.1.3-4]      [MQTT-3.1.3-5]
+	// V5.0    [MQTT-3.1.3-4]      [MQTT-3.1.3-5]
+	return utf8.Valid(cid) && clientIDRegexp.Match(cid)
 }

@@ -26,13 +26,26 @@ func TestDisconnectMessageDecode(t *testing.T) {
 		0,
 	}
 
-	m, n, err := Decode(msgBytes)
+	m, n, err := Decode(ProtocolV311, msgBytes)
 	msg, ok := m.(*DisconnectMessage)
+	require.NoError(t, err, "Error decoding message.")
+
 	require.Equal(t, true, ok, "Invalid message type")
 
-	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
 	require.Equal(t, DISCONNECT, msg.Type(), "Error decoding message.")
+
+	msgBytes = []byte{
+		byte(DISCONNECT << 4),
+		1,
+		0,
+	}
+
+	_, _, err = Decode(ProtocolV50, msgBytes)
+	require.EqualError(t, CodeMalformedPacket, err.Error())
+
+	_, _, err = Decode(ProtocolV311, msgBytes)
+	require.EqualError(t, CodeRefusedServerUnavailable, err.Error())
 }
 
 func TestDisconnectMessageEncode(t *testing.T) {
@@ -41,7 +54,9 @@ func TestDisconnectMessageEncode(t *testing.T) {
 		0,
 	}
 
-	msg := NewDisconnectMessage()
+	msg, err := NewMessage(ProtocolV311, DISCONNECT)
+	require.NoError(t, err)
+	require.NotNil(t, msg)
 
 	dst := make([]byte, 10)
 	n, err := msg.Encode(dst)
@@ -59,7 +74,7 @@ func TestDisconnectDecodeEncodeEquiv(t *testing.T) {
 		0,
 	}
 
-	m, n, err := Decode(msgBytes)
+	m, n, err := Decode(ProtocolV311, msgBytes)
 	msg, ok := m.(*DisconnectMessage)
 	require.Equal(t, true, ok, "Invalid message type")
 
@@ -73,7 +88,7 @@ func TestDisconnectDecodeEncodeEquiv(t *testing.T) {
 	require.Equal(t, len(msgBytes), n2, "Error decoding message.")
 	require.Equal(t, msgBytes, dst[:n2], "Error decoding message.")
 
-	_, n3, err := Decode(dst)
+	_, n3, err := Decode(ProtocolV311, dst)
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n3, "Error decoding message.")

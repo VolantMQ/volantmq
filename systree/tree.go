@@ -23,8 +23,8 @@ type Metric interface {
 
 // PacketsMetric packets metric
 type PacketsMetric interface {
-	Sent(t message.Type)
-	Received(t message.Type)
+	Sent(t message.PacketType)
+	Received(t message.PacketType)
 }
 
 // BytesMetric bytes metric
@@ -241,7 +241,7 @@ func (t *topicsStat) Removed() {
 }
 
 // Sent add sent packet to metrics
-func (t *packetsMetric) Sent(mt message.Type) {
+func (t *packetsMetric) Sent(mt message.PacketType) {
 	atomic.AddUint64(&t.total.sent, 1)
 	switch mt {
 	case message.CONNECT:
@@ -268,7 +268,7 @@ func (t *packetsMetric) Sent(mt message.Type) {
 }
 
 // Received add received packet to metrics
-func (t *packetsMetric) Received(mt message.Type) {
+func (t *packetsMetric) Received(mt message.PacketType) {
 	atomic.AddUint64(&t.total.received, 1)
 	switch mt {
 	case message.CONNECT:

@@ -1,24 +1,8 @@
-// Copyright (c) 2014 The SurgeMQ Authors. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package message
 
 import (
-	"encoding/binary"
 	"strings"
-
-	"github.com/troian/surgemq/buffer"
+	"unicode/utf8"
 )
 
 const (
@@ -26,29 +10,58 @@ const (
 	//maxFixedHeaderLength int    = 5
 	maxRemainingLength int32 = (256 * 1024 * 1024) - 1 // 256 MB
 )
-
 const (
-	//	maskHeaderType  byte = 0xF0
-	//	maskHeaderFlags byte = 0x0F
-	//	maskHeaderFlagQoS
+	//  maskHeaderType  byte = 0xF0
+	//  maskHeaderFlags byte = 0x0F
+	//  maskHeaderFlagQoS
 	maskConnAckSessionPresent byte = 0x01
 )
 
 const (
-	offsetHeaderType byte = 4
+	offsetHeaderType byte = 0x04
 
-//	offsetHeaderFlags byte = 0
+//  offsetHeaderFlags byte = 0
 )
 
-// SupportedVersions is a map of the version number (0x3 or 0x4) to the version string,
-// "MQIsdp" for 0x3, and "MQTT" for 0x4.
-var SupportedVersions = map[byte]string{
-	0x3: "MQIsdp",
-	0x4: "MQTT",
+// SubscriptionOptions as per [MQTT-3.8.3.1]
+type SubscriptionOptions byte
+
+// TopicQos map containing topics as a keys with respective subscription options as value
+type TopicQos map[string]SubscriptionOptions
+
+// QoS quality of service
+func (s SubscriptionOptions) QoS() QosType {
+	return QosType(byte(s) & maskSubscriptionQoS)
 }
 
-// TopicQos map of topic filter with respective QoS value
-type TopicQos map[string]QosType
+// NL No Local option
+//   if true Application Messages MUST NOT be forwarded to a connection with a ClientID equal
+//   to the ClientID of the publishing connection
+// V5.0 ONLY
+func (s SubscriptionOptions) NL() bool {
+	return (byte(s) & maskSubscriptionNL >> offsetSubscriptionNL) != 0
+}
+
+// RAP Retain As Published option
+//   true: Application Messages forwarded using this subscription keep the RETAIN flag they were published with
+//   false : Application Messages forwarded using this subscription have the RETAIN flag set to 0.
+// Retained messages sent when the subscription is established have the RETAIN flag set to 1.
+// V5.0 ONLY
+func (s SubscriptionOptions) RAP() bool {
+	return (byte(s) & maskSubscriptionRAP >> offsetSubscriptionRAP) != 0
+}
+
+// RetainHandling specifies whether retained messages are sent when the subscription is established.
+// This does not affect the sending of retained messages at any point after the subscribe.
+// If there are no retained messages matching the Topic Filter, all of these values act the same.
+// The values are:
+//    0 = Send retained messages at the time of the subscribe
+//    1 = Send retained messages at subscribe only if the subscription does not currently exist
+//    2 = Do not send retained messages at the time of the subscribe
+// V5.0 ONLY
+func (s SubscriptionOptions) RetainHandling() byte {
+	return (byte(s) & maskSubscriptionRetainHandling) >> offsetSubscriptionRetainHandling
+}
 
 // Provider is an interface defined for all MQTT message types.
 type Provider interface {
@@ -60,10 +73,11 @@ type Provider interface {
 
 	// Type returns the MessageType of the Message. The returned value should be one
 	// of the constants defined for MessageType.
-	Type() Type
+	Type() PacketType
 
-	// PacketID
-	PacketID() uint16
+	// PacketID returns packet id
+	// if has not been set return ErrNotSet
+	PacketID() (PacketID, error)
 
 	// Encode writes the message bytes into the byte array from the argument. It
 	// returns the number of bytes encoded and whether there's any errors along
@@ -74,55 +88,132 @@ type Provider interface {
 	// Size of whole message
 	Size() (int, error)
 
-	size() int
+	// SetVersion set protocol version used by message
+	SetVersion(v ProtocolVersion)
+
+	// Version get protocol version used by message
+	Version() ProtocolVersion
+
+	// Property
+	Property() (Property, error)
+
 	// decode reads the bytes in the byte slice from the argument. It returns the
 	// total number of bytes decoded, and whether there's any errors during the
 	// process. The byte slice MUST NOT be modified during the duration of this
 	// message being available since the byte slice is internally stored for
 	// references.
+
+	// decode implemented by header and performs decode of the fixed header with remaining length
 	decode([]byte) (int, error)
+
+	// encodeMessage must be implemented by each packet implementation and used by Encode to perform encode of the
+	// variable header, payload and properties if any
+	encodeMessage([]byte) (int, error)
+
+	// decodeMessage must be implemented by each packet implementation and used by Decode to perform decode of the
+	// variable header, payload and properties if any
+	decodeMessage([]byte) (int, error)
+
+	// must be implemented by each packet implementation and returns remaining length
+	size() int
+
+	// getHeader
+	getHeader() *header
+
+	// setType
+	setType(t PacketType)
 }
 
-// ValidTopic checks the topic, which is a slice of bytes, to see if it's valid. Topic is
-// considered valid if it's longer than 0 bytes, and doesn't contain any wildcard characters
-// such as + and #.
-func ValidTopic(topic string) bool {
-	return len(topic) > 0 && !strings.Contains(topic, "#") && !strings.Contains(topic, "+")
-}
+// NewMessage creates a new message based on the message type. It is a shortcut to call
+// one of the New*Message functions. If an error is returned then the message type
+// is invalid.
+func NewMessage(v ProtocolVersion, t PacketType) (Provider, error) {
+	var m Provider
 
-// ValidVersion checks to see if the version is valid. Current supported versions include 0x3 and 0x4.
-func ValidVersion(v byte) bool {
-	_, ok := SupportedVersions[v]
-	return ok
-}
-
-// ValidConnAckError checks to see if the error is a ConnAck Error or not
-func ValidConnAckError(err error) (ConnAckCode, bool) {
-	if code, ok := err.(ConnAckCode); ok {
-		return code, true
+	switch t {
+	case CONNECT:
+		m = newConnectMessage()
+	case CONNACK:
+		m = newConnAckMessage()
+	case PUBLISH:
+		m = newPublishMessage()
+	case PUBACK:
+		m = newPubAckMessage()
+	case PUBREC:
+		m = newPubRecMessage()
+	case PUBREL:
+		m = newPubRelMessage()
+	case PUBCOMP:
+		m = newPubCompMessage()
+	case SUBSCRIBE:
+		m = newSubscribeMessage()
+	case SUBACK:
+		m = newSubAckMessage()
+	case UNSUBSCRIBE:
+		m = newUnSubscribeMessage()
+	case UNSUBACK:
+		m = newUnSubAckMessage()
+	case PINGREQ:
+		m = newPingReqMessage()
+	case PINGRESP:
+		m = newPingRespMessage()
+	case DISCONNECT:
+		m = newDisconnectMessage()
+	case AUTH:
+		if v != ProtocolV50 {
+			return nil, ErrInvalidMessageType
+		}
+		m = newAuthMessage()
+	default:
+		return nil, ErrInvalidMessageType
 	}
 
-	return 0, false
-	//return err == ErrInvalidProtocolVersion || err == ErrIdentifierRejected ||
-	//	err == ErrServerUnavailable || err == ErrBadUsernameOrPassword || err == ErrNotAuthorized
+	m.setType(t)
+
+	h := m.getHeader()
+
+	h.version = v
+	h.cb.encode = m.encodeMessage
+	h.cb.decode = m.decodeMessage
+	h.cb.size = m.size
+
+	return m, nil
 }
 
 // Decode buf into message and return Provider type
-func Decode(buf []byte) (Provider, int, error) {
+func Decode(v ProtocolVersion, buf []byte) (msg Provider, total int, err error) {
+	defer func() {
+		// TODO: this case might be improved
+		// Panic might be provided during message decode with malformed len
+		// For example on length-prefixed payloads/topics or properties:
+
+		//   length prefix of payload with size 4 but actual payload size is 2
+		//   |   payload
+		//   |   |
+		// 00040102
+		// in that case buf[lpEndOffset:lpEndOffset+lpLen] will panic due to out-of-bound
+		//
+		// Ideally such cases should be handled by each message implementation
+		// but it might be worth doing such checks (there might be many for each message) on each decode
+		// as it is abnormal and server must close connection
+		if r := recover(); r != nil {
+			msg = nil
+			total = 0
+			err = ErrPanicDetected
+		}
+	}()
+
 	if len(buf) < 1 {
-		return nil, 0, ErrInvalidLength
+		return nil, 0, ErrInsufficientBufferSize
 	}
 
 	// [MQTT-2.2]
-	mType := Type(buf[0] >> offsetHeaderType)
+	mType := PacketType(buf[0] >> offsetMessageType)
 
 	// [MQTT-2.2.1] Type.NewMessage validates message type
-	msg, err := mType.NewMessage()
-	if err != nil {
+	if msg, err = NewMessage(v, mType); err != nil {
 		return nil, 0, err
 	}
-
-	var total int
 
 	if total, err = msg.decode(buf); err != nil {
 		return nil, total, err
@@ -131,63 +222,12 @@ func Decode(buf []byte) (Provider, int, error) {
 	return msg, total, nil
 }
 
-// WriteToBuffer encode and send message into ring buffer
-func WriteToBuffer(msg Provider, to *buffer.Type) (int, error) {
-	expectedSize, err := msg.Size()
-	if err != nil {
-		return 0, err
-	}
-
-	if len(to.ExternalBuf) < expectedSize {
-		to.ExternalBuf = make([]byte, expectedSize)
-	}
-
-	total, err := msg.Encode(to.ExternalBuf)
-	if err != nil {
-		return 0, err
-	}
-
-	return to.Send([][]byte{to.ExternalBuf[:total]})
-}
-
-// readLPBytes read length prefixed bytes
-func readLPBytes(buf []byte) ([]byte, int, error) {
-	if len(buf) < 2 {
-		return nil, 0, ErrInsufficientBufferSize
-	}
-
-	var n int
-	total := 0
-
-	n = int(binary.BigEndian.Uint16(buf))
-	total += 2
-
-	if len(buf) < n {
-		return nil, total, ErrInsufficientBufferSize
-	}
-
-	total += n
-
-	return buf[2:total], total, nil
-}
-
-// writeLPBytes write length prefixed bytes
-func writeLPBytes(buf []byte, b []byte) (int, error) {
-	total, n := 0, len(b)
-
-	if n > int(maxLPString) {
-		return 0, ErrInvalidLPStringSize
-	}
-
-	if len(buf) < 2+n {
-		return 0, ErrInsufficientBufferSize
-	}
-
-	binary.BigEndian.PutUint16(buf, uint16(n))
-	total += 2
-
-	copy(buf[total:], b)
-	total += n
-
-	return total, nil
+// ValidTopic checks the topic, which is a slice of bytes, to see if it's valid. Topic is
+// considered valid if it's longer than 0 bytes, and doesn't contain any wildcard characters
+// such as + and #.
+func ValidTopic(topic string) bool {
+	return len(topic) > 0 &&
+		utf8.Valid([]byte(topic)) &&
+		!strings.Contains(topic, "#") &&
+		!strings.Contains(topic, "+")
 }

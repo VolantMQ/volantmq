@@ -15,9 +15,6 @@
 package message
 
 import (
-	"encoding/binary"
-	"errors"
-
 	"unicode/utf8"
 
 	"github.com/troian/surgemq/map"
@@ -32,13 +29,10 @@ type UnSubscribeMessage struct {
 
 var _ Provider = (*UnSubscribeMessage)(nil)
 
-// NewUnSubscribeMessage creates a new UNSUBSCRIBE message.
-func NewUnSubscribeMessage() *UnSubscribeMessage {
+func newUnSubscribeMessage() *UnSubscribeMessage {
 	msg := &UnSubscribeMessage{
 		topics: omap.New(),
 	}
-	msg.setType(UNSUBSCRIBE) // nolint: errcheck
-	msg.sizeCb = msg.size
 
 	return msg
 }
@@ -66,38 +60,20 @@ func (msg *UnSubscribeMessage) RemoveTopic(topic string) {
 	msg.topics.Delete(topic)
 }
 
-// TopicExists checks to see if a topic exists in the list.
-//func (msg *UnSubscribeMessage) TopicExists(topic string) bool {
-//	if _, ok := msg.topics[topic]; ok {
-//		return true
-//	}
-//
-//	return false
-//}
-
 // SetPacketID sets the ID of the packet.
-func (msg *UnSubscribeMessage) SetPacketID(v uint16) {
-	msg.packetID = v
+func (msg *UnSubscribeMessage) SetPacketID(v PacketID) {
+	msg.setPacketID(v)
 }
 
 // decode reads from the io.Reader parameter until a full message is decoded, or
 // when io.Reader returns EOF or error. The first return value is the number of
 // bytes read from io.Reader. The second is error if decode encounters any problems.
-func (msg *UnSubscribeMessage) decode(src []byte) (int, error) {
-	total := 0
+func (msg *UnSubscribeMessage) decodeMessage(src []byte) (int, error) {
+	total := msg.decodePacketID(src)
 
-	hn, err := msg.header.decode(src[total:])
-	total += hn
-	if err != nil {
-		return total, err
-	}
-
-	msg.packetID = binary.BigEndian.Uint16(src[total:])
-	total += 2
-
-	remLen := int(msg.remLen) - (total - hn)
+	remLen := int(msg.remLen) - total
 	for remLen > 0 {
-		t, n, err := readLPBytes(src[total:])
+		t, n, err := ReadLPBytes(src[total:])
 		total += n
 		if err != nil {
 			return total, err
@@ -115,44 +91,39 @@ func (msg *UnSubscribeMessage) decode(src []byte) (int, error) {
 
 	// [MQTT-3.10.3-2]
 	if msg.topics.Len() == 0 {
-		return 0, errors.New("unsubscribe/decode: Empty topic list")
+		rejectReason := CodeProtocolError
+		if msg.version <= ProtocolV50 {
+			rejectReason = CodeRefusedServerUnavailable
+		}
+		return 0, rejectReason
 	}
 
 	return total, nil
 }
 
-func (msg *UnSubscribeMessage) preEncode(dst []byte) (int, error) {
+func (msg *UnSubscribeMessage) encodeMessage(dst []byte) (int, error) {
 	// [MQTT-2.3.1]
-	if msg.packetID == 0 {
+	if len(msg.packetID) == 0 {
 		return 0, ErrPackedIDZero
 	}
 
-	var err error
-	total := 0
+	if msg.topics.Len() == 0 {
+		return 0, ErrInvalidLength
+	}
 
+	var err error
 	var n int
 
-	total += msg.header.encode(dst[total:])
-
-	binary.BigEndian.PutUint16(dst[total:], msg.packetID)
-	total += 2
+	total := msg.encodePacketID(dst)
 
 	iter := msg.topics.Iterator()
 	for kv, ok := iter(); ok; kv, ok = iter() {
-		n, err = writeLPBytes(dst[total:], []byte(kv.Key.(string)))
+		n, err = WriteLPBytes(dst[total:], []byte(kv.Key.(string)))
 		total += n
 		if err != nil {
 			return total, err
 		}
 	}
-
-	//for t := range msg.topics {
-	//	n, err = writeLPBytes(dst[total:], []byte(t))
-	//	total += n
-	//	if err != nil {
-	//		return total, err
-	//	}
-	//}
 
 	return total, err
 }
@@ -162,18 +133,6 @@ func (msg *UnSubscribeMessage) preEncode(dst []byte) (int, error) {
 // there will be. If Encode returns an error, then the first two return values
 // should be considered invalid.
 // Any changes to the message after Encode() is called will invalidate the io.Reader.
-func (msg *UnSubscribeMessage) Encode(dst []byte) (int, error) {
-	expectedSize, err := msg.Size()
-	if err != nil {
-		return 0, err
-	}
-
-	if len(dst) < expectedSize {
-		return expectedSize, ErrInsufficientBufferSize
-	}
-
-	return msg.preEncode(dst)
-}
 
 func (msg *UnSubscribeMessage) size() int {
 	// packet ID

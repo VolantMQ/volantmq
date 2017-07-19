@@ -232,7 +232,7 @@ func testCommit(t *testing.T, buf *Type) {
 
 	_, err = buf.ReadCommit(2048)
 
-	require.Equal(t, ErrBufferInsufficientData, err)
+	require.Equal(t, ErrInsufficientData, err)
 }
 
 func testReadBytes(t *testing.T, buf *Type) {

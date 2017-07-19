@@ -1,17 +1,24 @@
 package message
 
-// Type is the type representing the MQTT packet types. In the MQTT spec,
+// PacketType is the type representing the MQTT packet types. In the MQTT spec,
 // MQTT control packet type is represented as a 4-bit unsigned value.
-type Type byte
+type PacketType byte
+
+// PacketID as per [MQTT-2.2.1]
+type PacketID uint16
 
 const (
 	// RESERVED is a reserved value and should be considered an invalid message type
-	RESERVED Type = iota
+	RESERVED PacketType = iota
 
-	// CONNECT Client to Server. Client request to connect to Server.
+	// CONNECT Client request to connect to Server
+	// version: v3.1, v3.1.1, v5.0
+	//      Dir: Client to Server
 	CONNECT
 
-	// CONNACK Server to Client. Connect acknowledgement.
+	// CONNACK Connect acknowledgement
+	// version: v3.1, v3.1.1, v5.0
+	//      Dir: Server to Client
 	CONNACK
 
 	// PUBLISH Client to Server, or Server to Client. Publish message.
@@ -54,11 +61,11 @@ const (
 	// DISCONNECT Client to Server. Client is disconnecting.
 	DISCONNECT
 
-	// RESERVED2 is a reserved value and should be considered an invalid message type.
-	RESERVED2
+	// AUTH is a reserved value and should be considered an invalid message type.
+	AUTH
 )
 
-var typeName = [RESERVED2 + 1]string{
+var typeName = [AUTH + 1]string{
 	"RESERVED",
 	"CONNECT",
 	"CONNACK",
@@ -74,10 +81,10 @@ var typeName = [RESERVED2 + 1]string{
 	"PINGREQ",
 	"PINGRESP",
 	"DISCONNECT",
-	"RESERVED2",
+	"AUTH",
 }
 
-var typeDescription = [RESERVED2 + 1]string{
+var typeDescription = [AUTH + 1]string{
 	"Reserved",
 	"Client request to connect to Server",
 	"Connect acknowledgement",
@@ -93,10 +100,10 @@ var typeDescription = [RESERVED2 + 1]string{
 	"PING request",
 	"PING response",
 	"Client is disconnecting",
-	"Reserved",
+	"Auth",
 }
 
-var typeDefaultFlags = [RESERVED2 + 1]byte{
+var typeDefaultFlags = [AUTH + 1]byte{
 	0, // RESERVED
 	0, // CONNECT
 	0, // CONNACK
@@ -112,14 +119,43 @@ var typeDefaultFlags = [RESERVED2 + 1]byte{
 	0, // PINGREQ
 	0, // PINGRESP
 	0, // DISCONNECT
-	0, // RESERVED2
+	0, // AUTH
 }
+
+// Provider is an interface defined for all MQTT message types.
+//type Provider interface {
+//	// Desc returns a string description of the message type. For example, a
+//	// CONNECT message would return "Client request to connect to Server." These
+//	// descriptions are statically defined (copied from the MQTT spec) and cannot
+//	// be changed.
+//	Desc() string
+//
+//	// Type returns the MessageType of the Message. The returned value should be one
+//	// of the constants defined for MessageType.
+//	Type() PacketType
+//
+//	// PacketID
+//	PacketID() uint16
+//
+//	// Encode writes the message bytes into the byte array from the argument. It
+//	// returns the number of bytes encoded and whether there's any errors along
+//	// the way. If there's any errors, then the byte slice and count should be
+//	// considered invalid.
+//	Encode([]byte) (int, error)
+//
+//	// Size of whole message
+//	Size() (int, error)
+//
+//	Version() ProtocolVersion
+//
+//	SetVersion(ProtocolVersion) error
+//}
 
 // Name returns the name of the message type. It should correspond to one of the
 // constant values defined for MessageType. It is statically defined and cannot
 // be changed.
-func (t Type) Name() string {
-	if t > RESERVED2 {
+func (t PacketType) Name() string {
+	if t > AUTH {
 		return "UNKNOWN"
 	}
 
@@ -128,8 +164,8 @@ func (t Type) Name() string {
 
 // Desc returns the description of the message type. It is statically defined (copied
 // from MQTT spec) and cannot be changed.
-func (t Type) Desc() string {
-	if t > RESERVED2 {
+func (t PacketType) Desc() string {
+	if t > AUTH {
 		return "UNKNOWN"
 	}
 
@@ -137,60 +173,30 @@ func (t Type) Desc() string {
 }
 
 // DefaultFlags returns the default flag values for the message type, as defined by the MQTT spec.
-func (t Type) DefaultFlags() byte {
-	if t > RESERVED2 {
+func (t PacketType) DefaultFlags() byte {
+	if t > AUTH {
 		return 0
 	}
 
 	return typeDefaultFlags[t]
 }
 
-// NewMessage creates a new message based on the message type. It is a shortcut to call
-// one of the New*Message functions. If an error is returned then the message type
-// is invalid.
-func (t Type) NewMessage() (Provider, error) {
-	switch t {
-	case CONNECT:
-		return NewConnectMessage(), nil
-	case CONNACK:
-		return NewConnAckMessage(), nil
-	case PUBLISH:
-		return NewPublishMessage(), nil
-	case PUBACK:
-		return NewPubAckMessage(), nil
-	case PUBREC:
-		return NewPubRecMessage(), nil
-	case PUBREL:
-		return NewPubRelMessage(), nil
-	case PUBCOMP:
-		return NewPubCompMessage(), nil
-	case SUBSCRIBE:
-		return NewSubscribeMessage(), nil
-	case SUBACK:
-		return NewSubAckMessage(), nil
-	case UNSUBSCRIBE:
-		return NewUnSubscribeMessage(), nil
-	case UNSUBACK:
-		return NewUnSubAckMessage(), nil
-	case PINGREQ:
-		return NewPingReqMessage(), nil
-	case PINGRESP:
-		return NewPingRespMessage(), nil
-	case DISCONNECT:
-		return NewDisconnectMessage(), nil
-	default:
-		return nil, ErrInvalidMessageType
-	}
-}
-
-// NewMessage creates a new message based on the message type. It is a shortcut to call
-// one of the New*Message functions. If an error is returned then the message type
-// is invalid.
-func NewMessage(t Type) (Provider, error) {
-	return t.NewMessage()
+// IsValid check if protocol version is valid for this implementation
+func (p ProtocolVersion) IsValid() bool {
+	_, ok := SupportedVersions[p]
+	return ok
 }
 
 // Valid returns a boolean indicating whether the message type is valid or not.
-func (t Type) Valid() bool {
-	return t > RESERVED && t < RESERVED2
+func (t PacketType) Valid(v ProtocolVersion) (bool, error) {
+	switch v {
+	case ProtocolV31:
+		fallthrough
+	case ProtocolV311:
+		return t > RESERVED && t < AUTH, nil
+	case ProtocolV50:
+		return t > RESERVED && t <= AUTH, nil
+	default:
+		return false, ErrInvalidProtocolVersion
+	}
 }

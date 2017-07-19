@@ -14,14 +14,6 @@
 
 package message
 
-import "encoding/binary"
-
-const (
-	publishFlagDupMask    byte = 0x08
-	publishFlagQosMask    byte = 0x06
-	publishFlagRetainMask byte = 0x01
-)
-
 // PublishMessage A PUBLISH Control Packet is sent from a Client to a Server or from Server to a Client
 // to transport an Application Message.
 type PublishMessage struct {
@@ -33,13 +25,8 @@ type PublishMessage struct {
 
 var _ Provider = (*PublishMessage)(nil)
 
-// NewPublishMessage creates a new PUBLISH message.
-func NewPublishMessage() *PublishMessage {
-	msg := &PublishMessage{}
-	msg.setType(PUBLISH) // nolint: errcheck
-	msg.sizeCb = msg.size
-
-	return msg
+func newPublishMessage() *PublishMessage {
+	return &PublishMessage{}
 }
 
 // Dup returns the value specifying the duplicate delivery of a PUBLISH Control Packet.
@@ -48,15 +35,15 @@ func NewPublishMessage() *PublishMessage {
 // set to 1, it indicates that this might be re-delivery of an earlier attempt to send
 // the Packet.
 func (msg *PublishMessage) Dup() bool {
-	return (msg.Flags() & publishFlagDupMask) != 0
+	return (msg.mFlags & maskPublishFlagDup) != 0
 }
 
 // SetDup sets the value specifying the duplicate delivery of a PUBLISH Control Packet.
 func (msg *PublishMessage) SetDup(v bool) {
 	if v {
-		msg.mTypeFlags |= publishFlagDupMask // 0x8 // 00001000
+		msg.mFlags |= maskPublishFlagDup // 0x8 // 00001000
 	} else {
-		msg.mTypeFlags &= ^publishFlagDupMask // 247 // 11110111
+		msg.mFlags &= ^maskPublishFlagDup // 247 // 11110111
 	}
 }
 
@@ -65,22 +52,22 @@ func (msg *PublishMessage) SetDup(v bool) {
 // Server, the Server MUST store the Application Message and its QoS, so that it can be
 // delivered to future subscribers whose subscriptions match its topic name.
 func (msg *PublishMessage) Retain() bool {
-	return (msg.Flags() & publishFlagRetainMask) != 0
+	return (msg.mFlags & maskPublishFlagRetain) != 0
 }
 
 // SetRetain sets the value of the RETAIN flag.
 func (msg *PublishMessage) SetRetain(v bool) {
 	if v {
-		msg.mTypeFlags |= publishFlagRetainMask //0x1 // 00000001
+		msg.mFlags |= maskPublishFlagRetain
 	} else {
-		msg.mTypeFlags &= ^publishFlagRetainMask // 254 // 11111110
+		msg.mFlags &= ^maskPublishFlagRetain
 	}
 }
 
 // QoS returns the field that indicates the level of assurance for delivery of an
 // Application Message. The values are QoS0, QoS1 and QoS2.
 func (msg *PublishMessage) QoS() QosType {
-	return QosType((msg.Flags() & publishFlagQosMask) >> 1)
+	return QosType((msg.mFlags & maskPublishFlagQoS) >> offsetPublishFlagQoS)
 }
 
 // SetQoS sets the field that indicates the level of assurance for delivery of an
@@ -90,9 +77,9 @@ func (msg *PublishMessage) SetQoS(v QosType) error {
 	if !v.IsValid() {
 		return ErrInvalidQoS
 	}
-	msg.mTypeFlags &= ^publishFlagQosMask
 
-	msg.mTypeFlags |= byte(v) << 1 // (msg.mTypeFlags[0] & 249) | byte(v<<1) // 249 = 11111001
+	msg.mFlags &= ^maskPublishFlagQoS
+	msg.mFlags |= byte(v) << 1
 
 	return nil
 }
@@ -122,60 +109,106 @@ func (msg *PublishMessage) Payload() []byte {
 
 // SetPayload sets the application message that's part of the PUBLISH message.
 func (msg *PublishMessage) SetPayload(v []byte) {
-	msg.payload = []byte{}
 	msg.payload = v
 }
 
 // SetPacketID sets the ID of the packet.
-func (msg *PublishMessage) SetPacketID(v uint16) {
-	msg.packetID = v
+func (msg *PublishMessage) SetPacketID(v PacketID) {
+	msg.setPacketID(v)
 }
 
-// decode message
-func (msg *PublishMessage) decode(src []byte) (int, error) {
-	total := 0
-
-	hn, err := msg.header.decode(src[total:])
-	total += hn
-	if err != nil {
-		return total, err
-	}
-
+func (msg *PublishMessage) decodeMessage(src []byte) (int, error) {
+	var err error
 	var n int
 	var buf []byte
-	buf, n, err = readLPBytes(src[total:])
+	total := 0
+
+	if !msg.QoS().IsValid() {
+		var rejectCode ReasonCode
+		if msg.version == ProtocolV50 {
+			rejectCode = CodeProtocolError
+		} else {
+			rejectCode = CodeRefusedServerUnavailable
+		}
+
+		return total, rejectCode
+	}
+
+	// [MQTT-3.3.1-2]
+	if msg.QoS() == QoS0 && msg.Dup() {
+		var rejectCode ReasonCode
+		if msg.version == ProtocolV50 {
+			rejectCode = CodeProtocolError
+		} else {
+			rejectCode = CodeRefusedServerUnavailable
+		}
+
+		return total, rejectCode
+	}
+
+	buf, n, err = ReadLPBytes(src[total:])
 	total += n
 	if err != nil {
 		return total, err
 	}
 
-	//copy([]byte(msg.topic), len(buf))
-	msg.topic = string(buf)
-	if !ValidTopic(msg.topic) {
+	if !ValidTopic(string(buf)) {
 		return total, ErrInvalidTopic
 	}
+
+	msg.topic = string(buf)
 
 	// The packet identifier field is only present in the PUBLISH packets where the
 	// QoS level is 1 or 2
 	if msg.QoS() != QoS0 {
-		msg.packetID = binary.BigEndian.Uint16(src[total:])
-		total += 2
+		total += msg.decodePacketID(src[total:])
 	}
 
-	l := int(msg.remLen) - (total - hn)
-	msg.payload = make([]byte, len(src[total:total+l]))
-	copy(msg.payload, src[total:total+l])
+	if msg.version == ProtocolV50 {
+		msg.properties, n, err = decodeProperties(msg.Type(), buf[total:])
+		total += n
+		if err != nil {
+			return total, err
+		}
+	}
 
-	total += len(msg.payload)
+	pLen := int(msg.remLen) - total
+
+	// check payload len is not malformed
+	if pLen < 0 {
+		var rejectCode ReasonCode
+		if msg.version == ProtocolV50 {
+			rejectCode = CodeMalformedPacket
+		} else {
+			rejectCode = CodeRefusedServerUnavailable
+		}
+
+		return total, rejectCode
+	}
+
+	// check payload is not malformed
+	if len(src[total:]) < pLen {
+		var rejectCode ReasonCode
+		if msg.version == ProtocolV50 {
+			rejectCode = CodeMalformedPacket
+		} else {
+			rejectCode = CodeRefusedServerUnavailable
+		}
+
+		return total, rejectCode
+	}
+
+	if pLen > 0 {
+		msg.payload = make([]byte, pLen)
+		copy(msg.payload, src[total:total+pLen])
+		total += pLen
+	}
 
 	return total, nil
 }
 
-func (msg *PublishMessage) preEncode(dst []byte) (int, error) {
-	var err error
-	total := 0
-
-	if len(msg.topic) == 0 {
+func (msg *PublishMessage) encodeMessage(dst []byte) (int, error) {
+	if !ValidTopic(msg.topic) {
 		return 0, ErrInvalidTopic
 	}
 
@@ -183,46 +216,40 @@ func (msg *PublishMessage) preEncode(dst []byte) (int, error) {
 		return 0, ErrInvalidQoS
 	}
 
+	if msg.QoS() == QoS0 && msg.Dup() {
+		return 0, ErrDupViolation
+	}
+
 	// [MQTT-2.3.1]
-	if (msg.QoS() == QoS1 || msg.QoS() == QoS2) && msg.packetID == 0 {
+	if msg.QoS() != QoS0 && len(msg.packetID) == 0 {
 		return 0, ErrPackedIDZero
 	}
 
-	total += msg.header.encode(dst[total:])
-
+	var err error
 	var n int
-	if n, err = writeLPBytes(dst[total:], []byte(msg.topic)); err != nil {
+	total := 0
+
+	if n, err = WriteLPBytes(dst[total:], []byte(msg.topic)); err != nil {
 		return total, err
 	}
 	total += n
 
-	if msg.QoS() == QoS1 || msg.QoS() == QoS2 {
-		binary.BigEndian.PutUint16(dst[total:], msg.packetID)
-		total += 2
+	if msg.QoS() != QoS0 {
+		total += msg.encodePacketID(dst[total:])
 	}
 
-	return total, err
-}
+	// V5.0   [MQTT-3.1.2.11]
+	if msg.version == ProtocolV50 {
+		if n, err = encodeProperties(msg.properties, dst[total:]); err != nil {
+			return total + n, err
+		}
 
-// Encode message
-func (msg *PublishMessage) Encode(dst []byte) (int, error) {
-	expectedSize, err := msg.Size()
-	if err != nil {
-		return 0, err
-	}
-
-	if len(dst) < expectedSize {
-		return expectedSize, ErrInsufficientBufferSize
-	}
-
-	total, err := msg.preEncode(dst)
-	if err != nil {
-		return 0, err
+		total += n
 	}
 
 	total += copy(dst[total:], msg.payload)
 
-	return total, err
+	return total, nil
 }
 
 func (msg *PublishMessage) size() int {
@@ -230,6 +257,12 @@ func (msg *PublishMessage) size() int {
 
 	if msg.QoS() != 0 {
 		total += 2
+	}
+
+	// v5.0 [MQTT-3.1.2.11]
+	if msg.version == ProtocolV50 {
+		pLen, _ := encodeProperties(msg.properties, []byte{})
+		total += pLen
 	}
 
 	return total

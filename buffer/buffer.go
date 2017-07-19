@@ -28,8 +28,14 @@ var (
 )
 
 var (
-	// ErrBufferInsufficientData buffer has insufficient data
-	ErrBufferInsufficientData = errors.New("buffer has insufficient data")
+	// ErrInsufficientData buffer has insufficient data
+	ErrInsufficientData = errors.New("buffer has insufficient data")
+
+	// ErrInsufficientSpace buffer has insufficient space
+	ErrInsufficientSpace = errors.New("buffer has insufficient space")
+
+	// ErrNotReady buffer is not ready yet
+	ErrNotReady = errors.New("buffer is not ready")
 )
 
 const (
@@ -212,7 +218,7 @@ func (b *Type) WriteTo(w io.Writer) (int64, error) {
 		}
 
 		if err != nil {
-			if err != ErrBufferInsufficientData {
+			if err != ErrInsufficientData {
 				return total, err
 			}
 		}
@@ -361,7 +367,7 @@ func (b *Type) ReadPeek(n int) ([]byte, error) {
 	if m >= int64(n) {
 		m = int64(n)
 	} else {
-		err = ErrBufferInsufficientData
+		err = ErrInsufficientData
 	}
 
 	// There's data to peek. The size of the data could be <= n.
@@ -383,7 +389,7 @@ func (b *Type) ReadPeek(n int) ([]byte, error) {
 		return b.buf[cindex : cindex+m], err
 	}
 
-	return nil, ErrBufferInsufficientData
+	return nil, ErrInsufficientData
 }
 
 // ReadWait waits for for n bytes to be ready. If there's not enough data, then it will
@@ -472,7 +478,7 @@ func (b *Type) ReadCommit(n int) (int, error) {
 		return n, nil
 	}
 
-	return 0, ErrBufferInsufficientData
+	return 0, ErrInsufficientData
 }
 
 // WriteWait waits for n bytes to be available in the buffer and then returns

@@ -14,8 +14,6 @@
 
 package message
 
-import "encoding/binary"
-
 // SubAckMessage A SUBACK Packet is sent by the Server to the Client to confirm receipt and processing
 // of a SUBSCRIBE Packet.
 //
@@ -24,30 +22,27 @@ import "encoding/binary"
 type SubAckMessage struct {
 	header
 
-	returnCodes []QosType
+	returnCodes []ReasonCode
 }
 
 var _ Provider = (*SubAckMessage)(nil)
 
-// NewSubAckMessage creates a new SUBACK message.
-func NewSubAckMessage() *SubAckMessage {
-	msg := &SubAckMessage{}
-	msg.setType(SUBACK) // nolint: errcheck
-	msg.sizeCb = msg.size
-
-	return msg
+func newSubAckMessage() *SubAckMessage {
+	return &SubAckMessage{}
 }
 
 // ReturnCodes returns the list of QoS returns from the subscriptions sent in the SUBSCRIBE message.
-func (msg *SubAckMessage) ReturnCodes() []QosType {
+func (msg *SubAckMessage) ReturnCodes() []ReasonCode {
 	return msg.returnCodes
 }
 
 // AddReturnCodes sets the list of QoS returns from the subscriptions sent in the SUBSCRIBE message.
 // An error is returned if any of the QoS values are not valid.
-func (msg *SubAckMessage) AddReturnCodes(ret []QosType) error {
+func (msg *SubAckMessage) AddReturnCodes(ret []ReasonCode) error {
 	for _, c := range ret {
-		if !c.IsValidFull() {
+		if msg.version == ProtocolV50 && !c.IsValidForType(msg.mType) {
+			return ErrInvalidReturnCode
+		} else if !QosType(c).IsValidFull() {
 			return ErrInvalidReturnCode
 		}
 
@@ -58,60 +53,64 @@ func (msg *SubAckMessage) AddReturnCodes(ret []QosType) error {
 }
 
 // AddReturnCode adds a single QoS return value.
-func (msg *SubAckMessage) AddReturnCode(ret QosType) error {
-	return msg.AddReturnCodes([]QosType{ret})
+func (msg *SubAckMessage) AddReturnCode(ret ReasonCode) error {
+	return msg.AddReturnCodes([]ReasonCode{ret})
 }
 
 // SetPacketID sets the ID of the packet.
-func (msg *SubAckMessage) SetPacketID(v uint16) {
-	msg.packetID = v
+func (msg *SubAckMessage) SetPacketID(v PacketID) {
+	msg.setPacketID(v)
 }
 
 // decode message
-func (msg *SubAckMessage) decode(src []byte) (int, error) {
-	total := 0
+func (msg *SubAckMessage) decodeMessage(src []byte) (int, error) {
+	total := msg.decodePacketID(src)
 
-	hn, err := msg.header.decode(src[total:])
-	total += hn
-	if err != nil {
-		return total, err
-	}
-
-	msg.packetID = binary.BigEndian.Uint16(src[total:])
-	total += 2
-
-	l := int(msg.remLen) - (total - hn)
-
-	if len(msg.returnCodes) < l {
-		msg.returnCodes = make([]QosType, l)
-	}
-	for i, q := range src[total : total+l] {
-		msg.returnCodes[i] = QosType(q)
-	}
-
-	total += len(msg.returnCodes)
-
-	for _, code := range msg.returnCodes {
-		if !code.IsValidFull() {
-			return total, ErrInvalidReturnCode
+	if msg.version == ProtocolV50 {
+		var n int
+		var err error
+		if msg.properties, n, err = decodeProperties(msg.Type(), src[total:]); err != nil {
+			return total + n, err
 		}
+
+		total += n
 	}
+
+	numCodes := int(msg.remLen) - total
+
+	for i, q := range src[total : total+numCodes] {
+		code := ReasonCode(q)
+		if msg.version == ProtocolV50 && !code.IsValidForType(msg.mType) {
+			return total + i, CodeProtocolError
+		} else if !QosType(code).IsValidFull() {
+			return total + i, CodeRefusedServerUnavailable
+		}
+		msg.returnCodes = append(msg.returnCodes, ReasonCode(q))
+	}
+
+	total += numCodes
 
 	return total, nil
 }
 
-func (msg *SubAckMessage) preEncode(dst []byte) (int, error) {
+func (msg *SubAckMessage) encodeMessage(dst []byte) (int, error) {
 	// [MQTT-2.3.1]
-	if msg.packetID == 0 {
+	if len(msg.packetID) == 0 {
 		return 0, ErrPackedIDZero
 	}
 
-	total := 0
+	total := msg.encodePacketID(dst)
 
-	total += msg.header.encode(dst[total:])
+	if msg.version == ProtocolV50 {
+		var n int
+		var err error
+		if n, err = encodeProperties(msg.properties, dst[total:]); err != nil {
+			return total + n, err
+		}
 
-	binary.BigEndian.PutUint16(dst[total:], msg.packetID)
-	total += 2
+		total += n
+	}
+
 	for _, q := range msg.returnCodes {
 		dst[total] = byte(q)
 		total++
@@ -120,20 +119,13 @@ func (msg *SubAckMessage) preEncode(dst []byte) (int, error) {
 	return total, nil
 }
 
-// Encode message
-func (msg *SubAckMessage) Encode(dst []byte) (int, error) {
-	expectedSize, err := msg.Size()
-	if err != nil {
-		return 0, err
-	}
-
-	if len(dst) < expectedSize {
-		return expectedSize, ErrInsufficientBufferSize
-	}
-
-	return msg.preEncode(dst)
-}
-
 func (msg *SubAckMessage) size() int {
-	return 2 + len(msg.returnCodes)
+	total := 2 + len(msg.returnCodes)
+	// v5.0 [MQTT-3.1.2.11]
+	if msg.version == ProtocolV50 {
+		pLen, _ := encodeProperties(msg.properties, []byte{})
+		total += pLen
+	}
+
+	return total
 }

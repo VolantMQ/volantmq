@@ -25,19 +25,18 @@ package topics
 import (
 	"github.com/troian/surgemq/topics/mem"
 	"github.com/troian/surgemq/topics/types"
-	"github.com/troian/surgemq/types"
 )
 
 // New topic provider
 func New(config topicsTypes.ProviderConfig) (topicsTypes.Provider, error) {
 	if config == nil {
-		return nil, types.ErrInvalidArgs
+		return nil, topicsTypes.ErrInvalidArgs
 	}
 
 	switch cfg := config.(type) {
 	case *topicsTypes.MemConfig:
 		return mem.NewMemProvider(cfg)
 	default:
-		return nil, types.ErrUnknownProvider
+		return nil, topicsTypes.ErrUnknownProvider
 	}
 }

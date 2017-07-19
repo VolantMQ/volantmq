@@ -1,0 +1,14 @@
+/
+#
+/#
++
+/+
+$SYS/bla/bla/
+$SYS/bla/bla
+$SYS/bla/bla#
+$SYS/bla/bla/#
+$SYS/bla/bla/+
+$SYS/bla/bla+
+$SYS/bla/bla
+
+(?=.)^(([^+#]*|\+)(\/([^+#]*|\+))*(\/#)?|#)$

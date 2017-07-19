@@ -18,43 +18,96 @@ package message
 // It indicates that the Client is disconnecting cleanly.
 type DisconnectMessage struct {
 	header
+
+	reasonCode ReasonCode
 }
 
 var _ Provider = (*DisconnectMessage)(nil)
 
-// NewDisconnectMessage creates a new DISCONNECT message.
-func NewDisconnectMessage() *DisconnectMessage {
-	msg := &DisconnectMessage{}
-	msg.setType(DISCONNECT) // nolint: errcheck
-	msg.sizeCb = msg.size
+func newDisconnectMessage() *DisconnectMessage {
+	return &DisconnectMessage{}
+}
 
-	return msg
+// ReasonCode get disconnect reason
+func (msg *DisconnectMessage) ReasonCode() ReasonCode {
+	return msg.reasonCode
+}
+
+// SetReasonCode set disconnect reason
+func (msg *DisconnectMessage) SetReasonCode(c ReasonCode) {
+	msg.reasonCode = c
 }
 
 // decode message
-func (msg *DisconnectMessage) decode(src []byte) (int, error) {
-	return msg.header.decode(src)
-}
+func (msg *DisconnectMessage) decodeMessage(src []byte) (int, error) {
+	total := 0
 
-func (msg *DisconnectMessage) preEncode(dst []byte) int {
-	return msg.header.encode(dst)
-}
+	if msg.version == ProtocolV50 {
+		if msg.remLen < 1 {
+			return total, CodeMalformedPacket
+		}
 
-// Encode message
-func (msg *DisconnectMessage) Encode(dst []byte) (int, error) {
-	expectedSize, err := msg.Size()
-	if err != nil {
-		return 0, err
+		msg.reasonCode = ReasonCode(src[total])
+		if !msg.reasonCode.IsValidForType(msg.mType) {
+			return total, CodeProtocolError
+		}
+
+		total++
+
+		// V5.0 [MQTT-3.14.2.2.1]
+		if len(src[total:]) < 1 && msg.remLen < 2 {
+			return total, CodeMalformedPacket
+		}
+
+		if msg.remLen < 2 {
+			total++
+		} else {
+			var err error
+			var n int
+
+			if msg.properties, n, err = decodeProperties(msg.mType, src[total:]); err != nil {
+				return total + n, err
+			}
+
+			total += n
+		}
+	} else {
+		if msg.remLen > 0 {
+			return total, CodeRefusedServerUnavailable
+		}
 	}
 
-	if len(dst) < expectedSize {
-		return expectedSize, ErrInsufficientBufferSize
+	return total, nil
+}
+
+func (msg *DisconnectMessage) encodeMessage(dst []byte) (int, error) {
+	total := 0
+
+	if msg.version == ProtocolV50 {
+		dst[total] = byte(msg.reasonCode)
+		total++
+
+		var err error
+		var n int
+
+		if n, err = encodeProperties(msg.properties, dst[total:]); err != nil {
+			return total + n, err
+		}
+
+		total += n
 	}
 
-	return msg.preEncode(dst), nil
+	return total, nil
 }
 
 // Len of message
 func (msg *DisconnectMessage) size() int {
-	return 0
+	total := 0
+
+	if msg.version == ProtocolV50 {
+		pLen, _ := encodeProperties(msg.properties, []byte{})
+		total += 1 + pLen
+	}
+
+	return total
 }

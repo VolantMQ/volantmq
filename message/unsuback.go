@@ -14,77 +14,109 @@
 
 package message
 
-import "encoding/binary"
-
 // UnSubAckMessage The UNSUBACK Packet is sent by the Server to the Client to confirm receipt of an
 // UNSUBSCRIBE Packet.
 type UnSubAckMessage struct {
 	header
+
+	returnCodes []ReasonCode
 }
 
 var _ Provider = (*UnSubAckMessage)(nil)
 
-// NewUnSubAckMessage creates a new UNSUBACK message.
-func NewUnSubAckMessage() *UnSubAckMessage {
+func newUnSubAckMessage() *UnSubAckMessage {
 	msg := &UnSubAckMessage{}
-	msg.setType(UNSUBACK) // nolint: errcheck
-	msg.sizeCb = msg.size
 
 	return msg
 }
 
 // SetPacketID sets the ID of the packet.
-func (msg *UnSubAckMessage) SetPacketID(v uint16) {
-	msg.packetID = v
+func (msg *UnSubAckMessage) SetPacketID(v PacketID) {
+	msg.setPacketID(v)
+}
+
+// ReturnCodes returns the list of QoS returns from the subscriptions sent in the SUBSCRIBE message.
+func (msg *UnSubAckMessage) ReturnCodes() []ReasonCode {
+	return msg.returnCodes
+}
+
+// AddReturnCodes sets the list of QoS returns from the subscriptions sent in the SUBSCRIBE message.
+// An error is returned if any of the QoS values are not valid.
+func (msg *UnSubAckMessage) AddReturnCodes(ret []ReasonCode) error {
+	for _, c := range ret {
+		if msg.version == ProtocolV50 && !c.IsValidForType(msg.mType) {
+			return ErrInvalidReturnCode
+		} else if !QosType(c).IsValidFull() {
+			return ErrInvalidReturnCode
+		}
+
+		msg.returnCodes = append(msg.returnCodes, c)
+	}
+
+	return nil
+}
+
+// AddReturnCode adds a single QoS return value.
+func (msg *UnSubAckMessage) AddReturnCode(ret ReasonCode) error {
+	return msg.AddReturnCodes([]ReasonCode{ret})
 }
 
 // decode message
-func (msg *UnSubAckMessage) decode(src []byte) (int, error) {
-	total := 0
+func (msg *UnSubAckMessage) decodeMessage(src []byte) (int, error) {
+	total := msg.decodePacketID(src)
 
-	n, err := msg.header.decode(src[total:])
-	total += n
-	if err != nil {
-		return total, err
+	if msg.version == ProtocolV50 && (int(msg.remLen)-total) > 0 {
+		var n int
+		var err error
+		if msg.properties, n, err = decodeProperties(msg.Type(), src[total:]); err != nil {
+			return total + n, err
+		}
+
+		total += n
 	}
-
-	msg.packetID = binary.BigEndian.Uint16(src[total:])
-	total += 2
 
 	return total, nil
 }
 
-func (msg *UnSubAckMessage) preEncode(dst []byte) (int, error) {
+func (msg *UnSubAckMessage) encodeMessage(dst []byte) (int, error) {
 	// [MQTT-2.3.1]
-	if msg.packetID == 0 {
+	if len(msg.packetID) == 0 {
 		return 0, ErrPackedIDZero
 	}
 
-	total := 0
+	total := msg.encodePacketID(dst)
 
-	total += msg.header.encode(dst[total:])
+	if msg.version == ProtocolV50 {
+		var n int
+		var err error
 
-	binary.BigEndian.PutUint16(dst[total:], msg.packetID)
-	total += 2
+		if n, err = encodeProperties(msg.properties, []byte{}); err != nil {
+			return total, err
+		}
+
+		if n > 1 {
+			if n, err = encodeProperties(msg.properties, dst[total:]); err != nil {
+				return total + n, err
+			}
+			total += n
+		}
+	}
 
 	return total, nil
-}
-
-// Encode message
-func (msg *UnSubAckMessage) Encode(dst []byte) (int, error) {
-	expectedSize, err := msg.Size()
-	if err != nil {
-		return 0, err
-	}
-
-	if len(dst) < expectedSize {
-		return expectedSize, ErrInsufficientBufferSize
-	}
-
-	return msg.preEncode(dst)
 }
 
 func (msg *UnSubAckMessage) size() int {
 	// packet ID
-	return 2
+	total := 2
+
+	if msg.version == ProtocolV50 {
+		pLen, _ := encodeProperties(msg.properties, []byte{})
+		total += pLen
+
+		if pLen > 1 {
+			total += pLen
+		}
+	}
+
+	return total
 }

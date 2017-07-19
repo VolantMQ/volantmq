@@ -1,34 +1,61 @@
-// Copyright (c) 2014 The SurgeMQ Authors. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package message
 
-import (
-	"encoding/binary"
-)
+import "encoding/binary"
 
 type sizeCallback func() int
+type encodeCallback func([]byte) (int, error)
+type decodeCallback func([]byte) (int, error)
 
-// Fixed header
-// - 1 byte for control packet type (bits 7-4) and flags (bits 3-0)
-// - up to 4 byte for remaining length
 type header struct {
-	remLen     int32
-	packetID   uint16
-	mTypeFlags byte // is the first byte of the buffer, 4 bits for mType, 4 bits for flags
-	sizeCb     sizeCallback
+	cb struct {
+		encode encodeCallback
+		decode decodeCallback
+		size   sizeCallback
+	}
+
+	properties *property // presented only in V5.0
+	packetID   []byte
+
+	remLen  int32
+	mFlags  byte
+	mType   PacketType
+	version ProtocolVersion
 }
+
+const (
+	offsetMessageType byte = 0x04
+	//offsetPublishFlagRetain     byte = 0x00
+	offsetPublishFlagQoS byte = 0x01
+	//offsetPublishFlagDup        byte = 0x03
+	offsetConnFlagWillQoS byte = 0x03
+	//offsetSubscribeOps             byte = 0x06
+	//offsetSubscriptionQoS          byte = 0x00
+	offsetSubscriptionNL             byte = 0x02
+	offsetSubscriptionRAP            byte = 0x03
+	offsetSubscriptionRetainHandling byte = 0x04
+	//offsetSubscriptionReserved     byte = 0x06
+
+)
+
+const (
+	maskMessageFlags         byte = 0x0F
+	maskConnFlagUsername     byte = 0x80
+	maskConnFlagPassword     byte = 0x40
+	maskConnFlagWillRetain   byte = 0x20
+	maskConnFlagWillQos      byte = 0x18
+	maskConnFlagWill         byte = 0x04
+	maskConnFlagCleanSession byte = 0x02
+	maskConnFlagReserved     byte = 0x01
+	maskPublishFlagRetain    byte = 0x01
+	maskPublishFlagQoS       byte = 0x06
+	maskPublishFlagDup       byte = 0x08
+
+	maskSubscriptionQoS            byte = 0x03
+	maskSubscriptionNL             byte = 0x04
+	maskSubscriptionRAP            byte = 0x08
+	maskSubscriptionRetainHandling byte = 0x30
+	maskSubscriptionReserved       byte = 0xC0
+)
 
 // Name returns a string representation of the message type. Examples include
 // "PUBLISH", "SUBSCRIBE", and others. This is statically defined for each of
@@ -46,13 +73,13 @@ func (h *header) Desc() string {
 }
 
 // Type returns the MessageType of the Message
-func (h *header) Type() Type {
-	return Type(h.mTypeFlags >> 4)
+func (h *header) Type() PacketType {
+	return h.mType
 }
 
 // Flags returns the fixed header flags for this message.
 func (h *header) Flags() byte {
-	return h.mTypeFlags & 0x0F
+	return h.mFlags
 }
 
 // RemainingLength returns the length of the non-fixed-header part of the message.
@@ -60,13 +87,49 @@ func (h *header) RemainingLength() int32 {
 	return h.remLen
 }
 
-func (h *header) PacketID() uint16 {
-	return h.packetID
+func (h *header) Version() ProtocolVersion {
+	return h.version
+}
+
+func (h *header) PacketID() (PacketID, error) {
+	if len(h.packetID) == 0 {
+		return 0, ErrNotSet
+	}
+
+	return PacketID(binary.BigEndian.Uint16(h.packetID)), nil
+}
+
+func (h *header) Encode(dst []byte) (int, error) {
+	expectedSize, err := h.Size()
+	if err != nil {
+		return 0, err
+	}
+
+	if expectedSize > len(dst) {
+		return expectedSize, ErrInsufficientBufferSize
+	}
+
+	total := 0
+
+	dst[total] = byte(h.mType<<offsetMessageType) | h.mFlags
+	total++
+
+	total += binary.PutUvarint(dst[total:], uint64(h.remLen))
+
+	var n int
+
+	n, err = h.cb.encode(dst[total:])
+	total += n
+	return total, err
+}
+
+func (h *header) SetVersion(v ProtocolVersion) {
+	h.version = v
 }
 
 // Size of message
 func (h *header) Size() (int, error) {
-	ml := h.sizeCb()
+	ml := h.cb.size()
 
 	if err := h.setRemainingLength(int32(ml)); err != nil {
 		return 0, err
@@ -75,20 +138,31 @@ func (h *header) Size() (int, error) {
 	return h.size() + ml, nil
 }
 
-// setType sets the message type of this message. It also correctly sets the
-// default flags for the message type. It returns an error if the type is invalid.
-func (h *header) setType(t Type) error {
-	if !t.Valid() {
-		return ErrInvalidMessageType
+func (h *header) Property() (Property, error) {
+	if h.version != ProtocolV50 {
+		return nil, ErrNotSupported
 	}
 
-	// Notice we don't set the message to be dirty when we are not allocating a new
-	// buffer. In this case, it means the buffer is probably a sub-slice of another
-	// slice. If that's the case, then during encoding we would have copied the whole
-	// backing buffer anyway.
-	h.mTypeFlags = byte(t)<<4 | (t.DefaultFlags() & 0xf)
+	return h.properties, nil
+}
 
-	return nil
+func (h *header) setPacketID(id PacketID) {
+	if len(h.packetID) == 0 {
+		h.packetID = make([]byte, 2)
+	}
+	binary.BigEndian.PutUint16(h.packetID, uint16(id))
+}
+
+func (h *header) decodePacketID(src []byte) int {
+	if len(h.packetID) == 0 {
+		h.packetID = make([]byte, 2)
+	}
+
+	return copy(h.packetID, src)
+}
+
+func (h *header) encodePacketID(dst []byte) int {
+	return copy(dst, h.packetID)
 }
 
 // setRemainingLength sets the length of the non-fixed-header part of the message.
@@ -104,65 +178,8 @@ func (h *header) setRemainingLength(remLen int32) error {
 	return nil
 }
 
-// encode fixed header and remaining length into buffer
-// each message type must provide dst buffer with appropriate size
-// provided by header.Size()
-func (h *header) encode(dst []byte) int {
-	total := 0
-
-	dst[total] = h.mTypeFlags
-	total++
-
-	n := binary.PutUvarint(dst[total:], uint64(h.remLen))
-	total += n
-
-	return total
-}
-
-// decode reads fixed header and remaining length
-// if decode successful size of decoded data provided
-// if error happened offset points to error place
-func (h *header) decode(src []byte) (int, error) {
-	total := 0
-
-	// decode and validate fixed header
-	h.mTypeFlags = src[total]
-
-	// [MQTT-2.2.2-1]
-	if h.Type() != PUBLISH {
-		if h.Flags() != h.Type().DefaultFlags() {
-			return total, ErrInvalidMessageTypeFlags
-		}
-	} else {
-		if !QosType((h.Flags() & publishFlagQosMask) >> 1).IsValid() {
-			return total, ErrInvalidQoS
-		}
-	}
-
-	total++
-
-	remLen, m := uvarint(src[total:])
-	if m == 0 {
-		return total, ErrInvalidLength
-	}
-
-	total += m
-	h.remLen = int32(remLen)
-
-	// we don't check remaining length max here as uvariant will return count 0 in case of
-	// returned value bigger than 256MB
-
-	//if h.remLen > maxRemainingLength {
-	//	return total, ErrInvalidLength
-	//}
-
-	// verify if buffer has enough space for whole message
-	// if not return expected size
-	if int(h.remLen) > len(src[total:]) {
-		return total + int(h.remLen), ErrInsufficientBufferSize
-	}
-
-	return total, nil
+func (h *header) getHeader() *header {
+	return h
 }
 
 // size of header
@@ -172,20 +189,73 @@ func (h *header) size() int {
 	total := 1
 
 	return total + uvarintCalc(uint32(h.remLen))
-	//if h.remLen <= 127 {
-	//	total++
-	//} else if h.remLen <= 16383 {
-	//	total += 2
-	//} else if h.remLen <= 2097151 {
-	//	total += 3
-	//} else {
-	//	total += 4
-	//}
-
-	//return total
 }
 
-// uvarint decodes a uint64 from buf and returns that value and the
+// setType sets the message type of this message. It also correctly sets the
+// default flags for the message type. It returns an error if the type is invalid.
+func (h *header) setType(t PacketType) {
+	// Notice we don't set the message to be dirty when we are not allocating a new
+	// buffer. In this case, it means the buffer is probably a sub-slice of another
+	// slice. If that's the case, then during encoding we would have copied the whole
+	// backing buffer anyway.
+	h.mType = t
+	h.mFlags = t.DefaultFlags()
+}
+
+// decode reads fixed header and remaining length
+// if decode successful size of decoded data provided
+// if error happened offset points to error place
+func (h *header) decode(src []byte) (int, error) {
+	total := 0
+
+	// decode and validate fixed header
+	//h.mTypeFlags = src[total]
+	h.mType = PacketType(src[total] >> offsetMessageType)
+	h.mFlags = src[total] & maskMessageFlags
+
+	rejectCode := CodeRefusedServerUnavailable
+	// [MQTT-2.2.2-1]
+	if h.mType != PUBLISH && h.mFlags != h.mType.DefaultFlags() {
+		if h.version == ProtocolV50 {
+			rejectCode = CodeMalformedPacket
+		}
+		return total, rejectCode
+	} else {
+		if !QosType((h.mFlags & maskPublishFlagQoS) >> offsetPublishFlagQoS).IsValid() {
+			if h.version == ProtocolV50 {
+				rejectCode = CodeProtocolError
+			}
+			return total, rejectCode
+		}
+	}
+
+	total++
+
+	remLen, m := uvarint(src[total:])
+	if m <= 0 {
+		return total, ErrInsufficientDataSize
+	}
+
+	total += m
+	h.remLen = int32(remLen)
+
+	// verify if buffer has enough space for whole message
+	// if not return expected size
+	if int(h.remLen) > len(src[total:]) {
+		return total + int(h.remLen), ErrInsufficientDataSize
+	}
+
+	var err error
+	if h.cb.decode != nil {
+		var msgTotal int
+
+		msgTotal, err = h.cb.decode(src[total:])
+		total += msgTotal
+	}
+	return total, err
+}
+
+// uvarint decodes a uint32 from buf and returns that value and the
 // number of bytes read (> 0). If an error occurred, the value is 0
 // and the number of bytes n is <= 0 meaning:
 //
@@ -213,10 +283,8 @@ func uvarint(buf []byte) (uint32, int) {
 func uvarintCalc(x uint32) int {
 	i := 0
 	for x >= 0x80 {
-		//buf[i] = byte(x) | 0x80
 		x >>= 7
 		i++
 	}
-	//buf[i] = byte(x)
 	return i + 1
 }
