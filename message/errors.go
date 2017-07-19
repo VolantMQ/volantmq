@@ -36,6 +36,8 @@ const (
 	ErrUnimplemented
 	// ErrInvalidLPStringSize LP string size is bigger than expected
 	ErrInvalidLPStringSize
+	// ErrMalformedTopic topic string is not UTF8
+	ErrMalformedTopic
 )
 
 // Error returns the corresponding error string for the ConnAckCode
@@ -73,6 +75,8 @@ func (e Error) Error() string {
 		return "Function not implemented yet"
 	case ErrInvalidLPStringSize:
 		return "Invalid LP string size"
+	case ErrMalformedTopic:
+		return "Malformed topic"
 	}
 
 	return "Unknown error"

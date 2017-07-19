@@ -32,8 +32,8 @@ type Retained interface {
 
 // Subscriptions interface within session
 type Subscriptions interface {
-	Add(s message.TopicsQoS) error
-	Get() (message.TopicsQoS, error)
+	Add(s message.TopicQos) error
+	Get() (message.TopicQos, error)
 	Delete() error
 }
 

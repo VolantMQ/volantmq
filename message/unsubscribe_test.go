@@ -26,19 +26,18 @@ func TestUnSubscribeMessageFields(t *testing.T) {
 	msg.SetPacketID(100)
 	require.Equal(t, 100, int(msg.PacketID()), "Error setting packet ID.")
 
-	msg.AddTopic("/a/b/#/c")
-	require.Equal(t, 1, len(msg.Topics()), "Error adding topic.")
+	msg.AddTopic("/a/b/#/c") // nolint: errcheck
+	require.Equal(t, 1, msg.Topics().Len(), "Error adding topic.")
 
-	msg.AddTopic("/a/b/#/c")
-	require.Equal(t, 1, len(msg.Topics()), "Error adding duplicate topic.")
-
-	msg.RemoveTopic("/a/b/#/c")
-	require.False(t, msg.TopicExists("/a/b/#/c"), "Topic should not exist.")
-
-	require.False(t, msg.TopicExists("a/b"), "Topic should not exist.")
+	msg.AddTopic("/a/b/#/c") // nolint: errcheck
+	require.Equal(t, 1, msg.Topics().Len(), "Error adding duplicate topic.")
 
 	msg.RemoveTopic("/a/b/#/c")
-	require.False(t, msg.TopicExists("/a/b/#/c"), "Topic should not exist.")
+	_, exists := msg.Topics().Get("/a/b/#/c")
+	require.False(t, exists, "Topic should not exist.")
+
+	_, exists = msg.Topics().Get("a/b")
+	require.False(t, exists, "Topic should not exist.")
 }
 
 func TestUnSubscribeMessageDecode(t *testing.T) {
@@ -67,10 +66,16 @@ func TestUnSubscribeMessageDecode(t *testing.T) {
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
 	require.Equal(t, UNSUBSCRIBE, msg.Type(), "Error decoding message.")
-	require.Equal(t, 3, len(msg.Topics()), "Error decoding topics.")
-	require.True(t, msg.TopicExists("surgemq"), "Topic 'surgemq' should exist.")
-	require.True(t, msg.TopicExists("/a/b/#/c"), "Topic '/a/b/#/c' should exist.")
-	require.True(t, msg.TopicExists("/a/b/#/cdd"), "Topic '/a/b/#/c' should exist.")
+	require.Equal(t, 3, msg.Topics().Len(), "Error decoding topics.")
+
+	_, exists := msg.Topics().Get("surgemq")
+	require.True(t, exists, "Topic 'surgemq' should exist.")
+
+	_, exists = msg.Topics().Get("/a/b/#/c")
+	require.True(t, exists, "Topic '/a/b/#/c' should exist.")
+
+	_, exists = msg.Topics().Get("/a/b/#/cdd")
+	require.True(t, exists, "Topic '/a/b/#/c' should exist.")
 }
 
 // test empty topic list
@@ -106,9 +111,9 @@ func TestUnSubscribeMessageEncode(t *testing.T) {
 
 	msg := NewUnSubscribeMessage()
 	msg.SetPacketID(7)
-	msg.AddTopic("surgemq")
-	msg.AddTopic("/a/b/#/c")
-	msg.AddTopic("/a/b/#/cdd")
+	msg.AddTopic("surgemq")    // nolint: errcheck
+	msg.AddTopic("/a/b/#/c")   // nolint: errcheck
+	msg.AddTopic("/a/b/#/cdd") // nolint: errcheck
 
 	dst := make([]byte, 100)
 	n, err := msg.Encode(dst)
@@ -126,17 +131,16 @@ func TestUnSubscribeMessageEncode(t *testing.T) {
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
 
-	exists := msg1.TopicExists("surgemq")
-	require.Equal(t, true, exists, "Error decoding message.")
+	_, exists := msg1.Topics().Get("surgemq")
+	require.True(t, exists, "Error decoding message.")
 
-	exists = msg1.TopicExists("/a/b/#/c")
-	require.Equal(t, true, exists, "Error decoding message.")
+	_, exists = msg1.Topics().Get("/a/b/#/c")
+	require.True(t, exists, "Error decoding message.")
 
-	exists = msg1.TopicExists("/a/b/#/cdd")
-	require.Equal(t, true, exists, "Error decoding message.")
+	_, exists = msg1.Topics().Get("/a/b/#/cdd")
+	require.True(t, exists, "Error decoding message.")
 
-	topics := msg1.Topics()
-	require.Equal(t, 3, len(topics), "Error decoding message.")
+	require.Equal(t, 3, msg.Topics().Len(), "Error decoding message.")
 
 	//require.Equal(t, msgBytes, dst[:n], "Error decoding message.")
 }
@@ -172,17 +176,16 @@ func TestUnSubscribeDecodeEncodeEquiv(t *testing.T) {
 	require.NoError(t, err, "Error encoding message.")
 	require.Equal(t, len(msgBytes), n2, "Raw message length does not match")
 
-	exists := msg.TopicExists("surgemq")
-	require.Equal(t, true, exists, "Topic does not exist")
+	_, exists := msg.Topics().Get("surgemq")
+	require.True(t, exists, "Topic does not exist")
 
-	exists = msg.TopicExists("/a/b/#/c")
-	require.Equal(t, true, exists, "Topic does not exist")
+	_, exists = msg.Topics().Get("/a/b/#/c")
+	require.True(t, exists, "Topic does not exist")
 
-	exists = msg.TopicExists("/a/b/#/cdd")
-	require.Equal(t, true, exists, "Topic does not exist")
+	_, exists = msg.Topics().Get("/a/b/#/cdd")
+	require.True(t, exists, "Topic does not exist")
 
-	topics := msg.Topics()
-	require.Equal(t, 3, len(topics), "Topics count does not match")
+	require.Equal(t, 3, msg.Topics().Len(), "Topics count does not match")
 
 	_, n3, err := Decode(dst)
 

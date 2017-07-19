@@ -191,25 +191,37 @@ func (s *Type) onSubscribe(msg *message.SubscribeMessage) error {
 	// Subscribe to the different topics
 	var retCodes []message.QosType
 
-	topics := msg.Topics()
-
 	var retainedMessages []*message.PublishMessage
 
-	for _, t := range topics {
+	iter := msg.Topics().Iterator()
+	for kv, ok := iter(); ok; kv, ok = iter() {
+		//for _, t := range topics {
 		// Let topic manager know we want to listen to given topic
-		qos := msg.TopicQos(t)
-		s.log.dev.Debug("Subscribing", zap.String("ClientID", s.config.id), zap.String("topic", t), zap.Int8("QoS", int8(qos)))
-		rQoS, err := s.config.topicsMgr.Subscribe(t, qos, &s.subscriber)
+		//qos := msg.TopicQos(t)
+		t := kv.Key.(string)
+		q := kv.Value.(message.QosType)
+
+		s.log.dev.Debug("Subscribing",
+			zap.String("ClientID", s.config.id),
+			zap.String("topic", t),
+			zap.Int8("QoS", int8(q)))
+
+		rQoS, err := s.config.topicsMgr.Subscribe(t, q, &s.subscriber)
 		if err != nil {
 			return err
 		}
-		s.addTopic(t, qos) // nolint: errcheck
+
+		s.addTopic(t, q) // nolint: errcheck
 
 		retCodes = append(retCodes, rQoS)
 
 		// yeah I am not checking errors here. If there's an error we don't want the
 		// subscription to stop, just let it go.
-		s.config.topicsMgr.Retained(t, &retainedMessages) // nolint: errcheck
+		rMsg, err := s.config.topicsMgr.Retained(t)
+		if err != nil {
+			s.log.prod.Warn("Couldn't get retained messages", zap.Error(err))
+		}
+		retainedMessages = append(retainedMessages, rMsg...)
 	}
 
 	if err := resp.AddReturnCodes(retCodes); err != nil {
@@ -244,9 +256,13 @@ func (s *Type) onSubscribe(msg *message.SubscribeMessage) error {
 }
 
 func (s *Type) onUnSubscribe(msg *message.UnSubscribeMessage) (*message.UnSubAckMessage, error) {
-	for _, t := range msg.Topics() {
-		s.config.topicsMgr.UnSubscribe(t, &s.subscriber) // nolint: errcheck
-		s.removeTopic(t)                                 // nolint: errcheck
+	iter := msg.Topics().Iterator()
+	for kv, ok := iter(); ok; kv, ok = iter() {
+		t := kv.Key.(string)
+		if err := s.config.topicsMgr.UnSubscribe(t, &s.subscriber); err != nil {
+			s.log.prod.Error("Couldn't unsubscribe from topic", zap.Error(err))
+		}
+		s.removeTopic(t)
 	}
 
 	resp := message.NewUnSubAckMessage()

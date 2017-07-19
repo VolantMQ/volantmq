@@ -40,18 +40,15 @@ const (
 //	offsetHeaderFlags byte = 0
 )
 
-// Topics slice of topics
-type Topics []string
-
-// TopicsQoS is a map if topic and corresponding QoS
-type TopicsQoS map[string]QosType
-
 // SupportedVersions is a map of the version number (0x3 or 0x4) to the version string,
 // "MQIsdp" for 0x3, and "MQTT" for 0x4.
 var SupportedVersions = map[byte]string{
 	0x3: "MQIsdp",
 	0x4: "MQTT",
 }
+
+// TopicQos map of topic filter with respective QoS value
+type TopicQos map[string]QosType
 
 // Provider is an interface defined for all MQTT message types.
 type Provider interface {

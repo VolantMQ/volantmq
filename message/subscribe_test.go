@@ -15,8 +15,11 @@
 package message
 
 import (
+	"errors"
+
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,12 +30,14 @@ func TestSubscribeMessageFields(t *testing.T) {
 	require.Equal(t, 100, int(msg.PacketID()), "Error setting packet ID.")
 
 	msg.AddTopic("/a/b/#/c", 1) // nolint: errcheck
-	require.Equal(t, 1, len(msg.Topics()), "Error adding topic.")
+	require.Equal(t, 1, msg.Topics().Len(), "Error adding topic.")
 
-	require.False(t, msg.TopicExists("a/b"), "Topic should not exist.")
+	_, ok := msg.Topics().Get("a/b")
+	require.False(t, ok, "Topic should not exist.")
 
 	msg.RemoveTopic("/a/b/#/c")
-	require.False(t, msg.TopicExists("/a/b/#/c"), "Topic should not exist.")
+	_, ok = msg.Topics().Get("a/b")
+	require.False(t, ok, "Topic should not exist.")
 }
 
 func TestSubscribeMessageDecode(t *testing.T) {
@@ -63,13 +68,19 @@ func TestSubscribeMessageDecode(t *testing.T) {
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
 	require.Equal(t, SUBSCRIBE, msg.Type(), "Error decoding message.")
-	require.Equal(t, 3, len(msg.Topics()), "Error decoding topics.")
-	require.True(t, msg.TopicExists("surgemq"), "Topic 'surgemq' should exist.")
-	require.Equal(t, 0, int(msg.TopicQos("surgemq")), "Incorrect topic qos.")
-	require.True(t, msg.TopicExists("/a/b/#/c"), "Topic '/a/b/#/c' should exist.")
-	require.Equal(t, 1, int(msg.TopicQos("/a/b/#/c")), "Incorrect topic qos.")
-	require.True(t, msg.TopicExists("/a/b/#/cdd"), "Topic '/a/b/#/c' should exist.")
-	require.Equal(t, 2, int(msg.TopicQos("/a/b/#/cdd")), "Incorrect topic qos.")
+	require.Equal(t, 3, msg.Topics().Len(), "Error decoding topics.")
+
+	qos, ok := msg.topics.Get("surgemq")
+	require.True(t, ok, "Topic 'surgemq' should exist.")
+	require.Equal(t, QoS0, qos, "Incorrect topic qos.")
+
+	qos, ok = msg.topics.Get("/a/b/#/c")
+	require.True(t, ok, "Topic '/a/b/#/c' should exist.")
+	require.Equal(t, QoS1, qos, "Incorrect topic qos.")
+
+	qos, ok = msg.topics.Get("/a/b/#/cdd")
+	require.True(t, ok, "Topic '/a/b/#/cdd' should exist.")
+	require.Equal(t, QoS2, qos, "Incorrect topic qos.")
 }
 
 // test empty topic list
@@ -126,23 +137,19 @@ func TestSubscribeMessageEncode(t *testing.T) {
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
 
-	exists := msg1.TopicExists("surgemq")
-	require.Equal(t, true, exists, "Error decoding message.")
-	qos := msg1.TopicQos("surgemq")
-	require.Equal(t, QosType(0), qos, "Error decoding message.")
+	qos, ok := msg1.Topics().Get("surgemq")
+	require.True(t, ok, "Error decoding message.")
+	require.Equal(t, QoS0, qos, "Error decoding message.")
 
-	exists = msg1.TopicExists("/a/b/#/c")
-	require.Equal(t, true, exists, "Error decoding message.")
-	qos = msg1.TopicQos("/a/b/#/c")
-	require.Equal(t, QosType(1), qos, "Error decoding message.")
+	qos, ok = msg1.Topics().Get("/a/b/#/c")
+	require.True(t, ok, "Error decoding message.")
+	require.Equal(t, QoS1, qos, "Error decoding message.")
 
-	exists = msg1.TopicExists("/a/b/#/cdd")
-	require.Equal(t, true, exists, "Error decoding message.")
-	qos = msg1.TopicQos("/a/b/#/cdd")
-	require.Equal(t, QosType(2), qos, "Error decoding message.")
+	qos, ok = msg1.Topics().Get("/a/b/#/cdd")
+	require.True(t, ok, "Error decoding message.")
+	require.Equal(t, QoS2, qos, "Error decoding message.")
 
-	topics := msg1.Topics()
-	require.Equal(t, 3, len(topics), "Error decoding message.")
+	require.Equal(t, 3, msg1.Topics().Len(), "Error decoding message.")
 }
 
 // test to ensure encoding and decoding are the same
@@ -181,23 +188,68 @@ func TestSubscribeDecodeEncodeEquiv(t *testing.T) {
 	require.NoError(t, err, "Error encoding message")
 	require.Equal(t, len(msgBytes), n2, "Raw message length does not match")
 
-	exists := msg.TopicExists("surgemq")
-	require.Equal(t, true, exists, "Required topic does not exist")
-	qos := msg.TopicQos("surgemq")
-	require.Equal(t, QosType(0), qos, "Invalid QoS for topic")
+	qos, exists := msg.Topics().Get("surgemq")
+	require.True(t, exists, "Required topic does not exist")
+	require.Equal(t, QoS0, qos, "Invalid QoS for topic")
 
-	exists = msg.TopicExists("/a/b/#/c")
-	require.Equal(t, true, exists, "Required topic does not exist")
-	qos = msg.TopicQos("/a/b/#/c")
-	require.Equal(t, QosType(1), qos, "Invalid QoS for topic")
+	qos, exists = msg.Topics().Get("/a/b/#/c")
+	require.True(t, exists, "Required topic does not exist")
+	require.Equal(t, QoS1, qos, "Invalid QoS for topic")
 
-	exists = msg.TopicExists("/a/b/#/cdd")
-	require.Equal(t, true, exists, "Required topic does not exist")
-	qos = msg.TopicQos("/a/b/#/cdd")
-	require.Equal(t, QosType(2), qos, "Invalid QoS for topic")
+	qos, exists = msg.Topics().Get("/a/b/#/cdd")
+	require.True(t, exists, "Required topic does not exist")
+	require.Equal(t, QoS2, qos, "Invalid QoS for topic")
 
 	_, n3, err := Decode(dst)
-
 	require.NoError(t, err, "Error decoding message")
 	require.Equal(t, len(msgBytes), n3, "Raw message length does not match")
+}
+
+// test to ensure encoding and decoding are the same
+// decode, encode, and decode again
+func TestSubscribeDecodeOrder(t *testing.T) {
+	msgBytes := []byte{
+		byte(SUBSCRIBE<<4) | 2,
+		36,
+		0, // packet ID MSB (0)
+		7, // packet ID LSB (7)
+		0, // topic name MSB (0)
+		7, // topic name LSB (7)
+		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		0, // QoS
+		0, // topic name MSB (0)
+		8, // topic name LSB (8)
+		'/', 'a', '/', 'b', '/', '#', '/', 'c',
+		1,  // QoS
+		0,  // topic name MSB (0)
+		10, // topic name LSB (10)
+		'/', 'a', '/', 'b', '/', '#', '/', 'c', 'd', 'd',
+		2, // QoS
+	}
+
+	//msg := NewSubscribeMessage()
+	m, n, err := Decode(msgBytes)
+	msg, ok := m.(*SubscribeMessage)
+	require.Equal(t, true, ok, "Invalid message type")
+	require.NoError(t, err, "Error decoding message")
+	require.Equal(t, len(msgBytes), n, "Raw message length does not match")
+
+	iter := msg.Topics().Iterator()
+	i := 0
+	for kv, ok := iter(); ok; kv, ok = iter() {
+		switch i {
+		case 0:
+			require.Equal(t, "surgemq", kv.Key.(string))
+			require.Equal(t, QoS0, kv.Value.(QosType))
+		case 1:
+			require.Equal(t, "/a/b/#/c", kv.Key.(string))
+			require.Equal(t, QoS1, kv.Value.(QosType))
+		case 2:
+			require.Equal(t, "/a/b/#/cdd", kv.Key.(string))
+			require.Equal(t, QoS2, kv.Value.(QosType))
+		default:
+			assert.Error(t, errors.New("Invalid topics count"))
+		}
+		i++
+	}
 }

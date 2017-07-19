@@ -32,7 +32,7 @@ import (
 
 type managerCallbacks struct {
 	// onClose called when session has done all work and should be deleted
-	onStop func(id string, s message.TopicsQoS)
+	onStop func(id string, s message.TopicQos)
 	// onDisconnect called when session stopped net connection and should be either suspended or deleted
 	onDisconnect func(id string, messages *persistenceTypes.SessionMessages, shutdown bool)
 	// onPublish
@@ -61,7 +61,7 @@ type config struct {
 		session systree.SessionStat
 	}
 
-	subscriptions message.TopicsQoS
+	subscriptions message.TopicQos
 
 	callbacks managerCallbacks
 
@@ -324,23 +324,19 @@ func (s *Type) onSubscribedPublish(msg *message.PublishMessage) error {
 }
 
 // AddTopic add topic
-func (s *Type) addTopic(topic string, qos message.QosType) error {
+func (s *Type) addTopic(topic string, qos message.QosType) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.config.subscriptions[topic] = qos
-
-	return nil
 }
 
 // RemoveTopic remove
-func (s *Type) removeTopic(topic string) error {
+func (s *Type) removeTopic(topic string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	delete(s.config.subscriptions, topic)
-
-	return nil
 }
 
 func (s *Type) newPacketID() uint16 {

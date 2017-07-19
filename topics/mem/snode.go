@@ -10,6 +10,8 @@ import (
 
 // subscription nodes
 type sNode struct {
+	//lock sync.RWMutex
+
 	// If this is the end of the topic string, then add subscribers here
 	subs subscribers
 
@@ -67,7 +69,7 @@ func (sn *sNode) insert(topic string, qos message.QosType, sub *types.Subscriber
 // This remove implementation ignores the QoS, as long as the subscriber
 // matches then it's removed
 func (sn *sNode) remove(topic string, sub *types.Subscriber) error {
-	// If the topic is empty, it means we are at the final matching snode. If so,
+	// If the topic is empty, it means we are at the final matching sNode. If so,
 	// let's find the matching subscribers and remove them.
 	if len(topic) == 0 {
 		// If subscriber == nil, then it's signal to remove ALL subscribers
@@ -76,8 +78,7 @@ func (sn *sNode) remove(topic string, sub *types.Subscriber) error {
 			return nil
 		}
 
-		// If we find the subscriber then remove it from the list. Technically
-		// we just overwrite the slot by shifting all other items up by one.
+		// If we find the subscriber then remove it from the list.
 		if _, ok := sn.subs[uintptr(unsafe.Pointer(sub))]; ok {
 			delete(sn.subs, uintptr(unsafe.Pointer(sub)))
 			return nil
@@ -86,7 +87,7 @@ func (sn *sNode) remove(topic string, sub *types.Subscriber) error {
 		return types.ErrNotFound
 	}
 
-	// Not the last level, so let's find the next level snode, and recursively
+	// Not the last level, so let's find the next level sNode, and recursively
 	// call it's remove().
 
 	// ntl = next topic level
@@ -103,12 +104,12 @@ func (sn *sNode) remove(topic string, sub *types.Subscriber) error {
 		return types.ErrNotFound
 	}
 
-	// Remove the subscriber from the next level snode
+	// Remove the subscriber from the next level sNode
 	if err := n.remove(rem, sub); err != nil {
 		return err
 	}
 
-	// If there are no more subscribers and snodes to the next level we just visited
+	// If there are no more subscribers and sNodes to the next level we just visited
 	// let's remove it
 	if len(n.subs) == 0 && len(n.nodes) == 0 {
 		delete(sn.nodes, level)
@@ -122,7 +123,7 @@ func (sn *sNode) remove(topic string, sub *types.Subscriber) error {
 // to the topic. For each of the level names, it's a match
 // - if there are subscribers to '#', then all the subscribers are added to result set
 func (sn *sNode) match(topic string, qos message.QosType, subs *types.Subscribers) error {
-	// If the topic is empty, it means we are at the final matching snode. If so,
+	// If the topic is empty, it means we are at the final matching sNode. If so,
 	// let's find the subscribers that match the qos and append them to the list.
 	if len(topic) == 0 {
 		sn.matchQos(qos, subs)

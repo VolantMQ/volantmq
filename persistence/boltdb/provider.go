@@ -309,7 +309,7 @@ func (s *session) ID() (string, error) {
 	return s.id, nil
 }
 
-func (s *subscriptions) Add(subs message.TopicsQoS) error {
+func (s *subscriptions) Add(subs message.TopicQos) error {
 	select {
 	case <-s.db.done:
 		return types.ErrNotOpen
@@ -332,6 +332,7 @@ func (s *subscriptions) Add(subs message.TopicsQoS) error {
 		if err != nil {
 			return err
 		}
+
 		for t, q := range subs {
 			id, _ := bucket.NextSequence() // nolint: gas
 
@@ -352,14 +353,15 @@ func (s *subscriptions) Add(subs message.TopicsQoS) error {
 	})
 }
 
-func (s *subscriptions) Get() (message.TopicsQoS, error) {
+func (s *subscriptions) Get() (message.TopicQos, error) {
 	select {
 	case <-s.db.done:
 		return nil, types.ErrNotOpen
 	default:
 	}
 
-	res := make(message.TopicsQoS)
+	res := make(message.TopicQos)
+
 	err := s.db.db.View(func(tx *bolt.Tx) error {
 		// get sessions bucket
 		sesBucket := tx.Bucket([]byte(bucketSessions))

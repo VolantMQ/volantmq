@@ -18,10 +18,8 @@ var testProviders []*providerTest
 
 func init() {
 	testProviders = append(testProviders, &providerTest{
-		name: "mem",
-		config: &topicsTypes.MemConfig{
-			Name: "mem",
-		},
+		name:   "mem",
+		config: topicsTypes.NewMemConfig(),
 	})
 }
 
@@ -133,55 +131,49 @@ func TestTopicsRetained(t *testing.T) {
 
 		// ---
 
-		err = prov.Retained(msg1.Topic(), &msglist)
+		msglist, err = prov.Retained(msg1.Topic())
 
 		require.NoError(t, err)
 		require.Equal(t, 1, len(msglist))
 
 		// ---
 
-		msglist = msglist[0:0]
-		err = prov.Retained(msg2.Topic(), &msglist)
+		msglist, err = prov.Retained(msg2.Topic())
 
 		require.NoError(t, err)
 		require.Equal(t, 1, len(msglist))
 
 		// ---
 
-		msglist = msglist[0:0]
-		err = prov.Retained(msg3.Topic(), &msglist)
+		msglist, err = prov.Retained(msg3.Topic())
 
 		require.NoError(t, err)
 		require.Equal(t, 1, len(msglist))
 
 		// ---
 
-		msglist = msglist[0:0]
-		err = prov.Retained("sport/tennis/andre/+", &msglist)
+		msglist, err = prov.Retained("sport/tennis/andre/+")
 
 		require.NoError(t, err)
 		require.Equal(t, 2, len(msglist))
 
 		// ---
 
-		msglist = msglist[0:0]
-		err = prov.Retained("sport/tennis/andre/#", &msglist)
+		msglist, err = prov.Retained("sport/tennis/andre/#")
 
 		require.NoError(t, err)
 		require.Equal(t, 2, len(msglist))
 
 		// ---
 
-		msglist = msglist[0:0]
-		err = prov.Retained("sport/tennis/+/stats", &msglist)
+		msglist, err = prov.Retained("sport/tennis/+/stats")
 
 		require.NoError(t, err)
 		require.Equal(t, 2, len(msglist))
 
 		// ---
 
-		msglist = msglist[0:0]
-		err = prov.Retained("sport/tennis/#", &msglist)
+		msglist, err = prov.Retained("sport/tennis/#")
 
 		require.NoError(t, err)
 		require.Equal(t, 3, len(msglist))

@@ -169,7 +169,7 @@ func TestSubscriptions(t *testing.T) {
 			_, err = subscriptions.Get()
 			require.EqualError(t, err, types.ErrNotFound.Error())
 
-			subsList := make(message.TopicsQoS)
+			subsList := make(message.TopicQos)
 			subsList["topic1"] = message.QoS1
 			subsList["topic2"] = message.QoS1
 			subsList["topic3"] = message.QoS2
@@ -177,7 +177,7 @@ func TestSubscriptions(t *testing.T) {
 			err = subscriptions.Add(subsList)
 			require.NoError(t, err)
 
-			var subsList1 message.TopicsQoS
+			var subsList1 message.TopicQos
 			subsList1, err = subscriptions.Get()
 			require.NoError(t, err)
 			require.Equal(t, len(subsList), len(subsList1))

@@ -17,13 +17,17 @@ package message
 import (
 	"encoding/binary"
 	"errors"
+
+	"unicode/utf8"
+
+	"github.com/troian/surgemq/map"
 )
 
 // UnSubscribeMessage An UNSUBSCRIBE Packet is sent by the Client to the Server, to unsubscribe from topics.
 type UnSubscribeMessage struct {
 	header
 
-	topics TopicsQoS
+	topics omap.Map
 }
 
 var _ Provider = (*UnSubscribeMessage)(nil)
@@ -31,7 +35,7 @@ var _ Provider = (*UnSubscribeMessage)(nil)
 // NewUnSubscribeMessage creates a new UNSUBSCRIBE message.
 func NewUnSubscribeMessage() *UnSubscribeMessage {
 	msg := &UnSubscribeMessage{
-		topics: make(TopicsQoS),
+		topics: omap.New(),
 	}
 	msg.setType(UNSUBSCRIBE) // nolint: errcheck
 	msg.sizeCb = msg.size
@@ -40,41 +44,36 @@ func NewUnSubscribeMessage() *UnSubscribeMessage {
 }
 
 // Topics returns a list of topics sent by the Client.
-func (msg *UnSubscribeMessage) Topics() Topics {
-	topics := Topics{}
-
-	for t := range msg.topics {
-		topics = append(topics, t)
-	}
-
-	return topics
+func (msg *UnSubscribeMessage) Topics() omap.Map {
+	return msg.topics
 }
 
 // AddTopic adds a single topic to the message.
-func (msg *UnSubscribeMessage) AddTopic(topic string) {
-	if msg.TopicExists(topic) {
-		return
+func (msg *UnSubscribeMessage) AddTopic(topic string) error {
+	// [MQTT-3.8.3-1]
+	if !utf8.Valid([]byte(topic)) {
+		return ErrMalformedTopic
 	}
 
-	msg.topics[topic] = 0
+	msg.topics.Set(topic, QoS0)
+
+	return nil
 }
 
 // RemoveTopic removes a single topic from the list of existing ones in the message.
 // If topic does not exist it just does nothing.
 func (msg *UnSubscribeMessage) RemoveTopic(topic string) {
-	if msg.TopicExists(topic) {
-		delete(msg.topics, topic)
-	}
+	msg.topics.Delete(topic)
 }
 
 // TopicExists checks to see if a topic exists in the list.
-func (msg *UnSubscribeMessage) TopicExists(topic string) bool {
-	if _, ok := msg.topics[topic]; ok {
-		return true
-	}
-
-	return false
-}
+//func (msg *UnSubscribeMessage) TopicExists(topic string) bool {
+//	if _, ok := msg.topics[topic]; ok {
+//		return true
+//	}
+//
+//	return false
+//}
 
 // SetPacketID sets the ID of the packet.
 func (msg *UnSubscribeMessage) SetPacketID(v uint16) {
@@ -96,19 +95,26 @@ func (msg *UnSubscribeMessage) decode(src []byte) (int, error) {
 	msg.packetID = binary.BigEndian.Uint16(src[total:])
 	total += 2
 
-	remlen := int(msg.remLen) - (total - hn)
-	for remlen > 0 {
+	remLen := int(msg.remLen) - (total - hn)
+	for remLen > 0 {
 		t, n, err := readLPBytes(src[total:])
 		total += n
 		if err != nil {
 			return total, err
 		}
 
-		msg.topics[string(t)] = 0
-		remlen = remlen - n - 1
+		// [MQTT-3.10.3-1]
+		if !utf8.Valid(t) {
+			return total, ErrMalformedTopic
+		}
+
+		msg.topics.Set(string(t), QoS0)
+
+		remLen = remLen - n - 1
 	}
 
-	if len(msg.topics) == 0 {
+	// [MQTT-3.10.3-2]
+	if msg.topics.Len() == 0 {
 		return 0, errors.New("unsubscribe/decode: Empty topic list")
 	}
 
@@ -131,13 +137,22 @@ func (msg *UnSubscribeMessage) preEncode(dst []byte) (int, error) {
 	binary.BigEndian.PutUint16(dst[total:], msg.packetID)
 	total += 2
 
-	for t := range msg.topics {
-		n, err = writeLPBytes(dst[total:], []byte(t))
+	iter := msg.topics.Iterator()
+	for kv, ok := iter(); ok; kv, ok = iter() {
+		n, err = writeLPBytes(dst[total:], []byte(kv.Key.(string)))
 		total += n
 		if err != nil {
 			return total, err
 		}
 	}
+
+	//for t := range msg.topics {
+	//	n, err = writeLPBytes(dst[total:], []byte(t))
+	//	total += n
+	//	if err != nil {
+	//		return total, err
+	//	}
+	//}
 
 	return total, err
 }
@@ -164,8 +179,9 @@ func (msg *UnSubscribeMessage) size() int {
 	// packet ID
 	total := 2
 
-	for t := range msg.topics {
-		total += 2 + len(t)
+	iter := msg.topics.Iterator()
+	for kv, ok := iter(); ok; kv, ok = iter() {
+		total += 2 + len(kv.Key.(string))
 	}
 
 	return total

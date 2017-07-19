@@ -93,12 +93,12 @@ func (rn *rNode) remove(topic string) error {
 // match() finds the retained messages for the topic and qos provided. It's somewhat
 // of a reverse match compare to match() since the supplied topic can contain
 // wildcards, whereas the retained message topic is a full (no wildcard) topic.
-func (rn *rNode) match(topic string, msgs *[]*message.PublishMessage) error {
+func (rn *rNode) match(topic string, retained *[]*message.PublishMessage) error {
 	// If the topic is empty, it means we are at the final matching rNode. If so,
 	// add the retained msg to the list.
 	if len(topic) == 0 {
 		if rn.msg != nil {
-			*msgs = append(*msgs, rn.msg)
+			*retained = append(*retained, rn.msg)
 		}
 		return nil
 	}
@@ -113,18 +113,18 @@ func (rn *rNode) match(topic string, msgs *[]*message.PublishMessage) error {
 
 	if level == topicsTypes.MWC {
 		// If '#', add all retained messages starting this node
-		rn.allRetained(msgs)
+		rn.allRetained(retained)
 	} else if level == topicsTypes.SWC {
 		// If '+', check all nodes at this level. Next levels must be matched.
 		for _, n := range rn.nodes {
-			if err := n.match(rem, msgs); err != nil {
+			if err := n.match(rem, retained); err != nil {
 				return err
 			}
 		}
 	} else {
 		// Otherwise, find the matching node, go to the next level
 		if n, ok := rn.nodes[level]; ok {
-			if err := n.match(rem, msgs); err != nil {
+			if err := n.match(rem, retained); err != nil {
 				return err
 			}
 		}
@@ -133,12 +133,12 @@ func (rn *rNode) match(topic string, msgs *[]*message.PublishMessage) error {
 	return nil
 }
 
-func (rn *rNode) allRetained(msgs *[]*message.PublishMessage) {
+func (rn *rNode) allRetained(retained *[]*message.PublishMessage) {
 	if rn.msg != nil {
-		*msgs = append(*msgs, rn.msg)
+		*retained = append(*retained, rn.msg)
 	}
 
 	for _, n := range rn.nodes {
-		n.allRetained(msgs)
+		n.allRetained(retained)
 	}
 }

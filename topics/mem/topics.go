@@ -28,11 +28,6 @@ import (
 	"go.uber.org/zap"
 )
 
-//var (
-//	// MaxQosAllowed is the maximum QOS supported by this server
-//	MaxQosAllowed = message.QosExactlyOnce
-//)
-
 type subscriber struct {
 	entry *types.Subscriber
 	qos   message.QosType
@@ -57,6 +52,8 @@ type provider struct {
 
 	persist persistenceTypes.Retained
 
+	maxQoS message.QosType
+
 	log struct {
 		prod *zap.Logger
 		dev  *zap.Logger
@@ -75,10 +72,11 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 		rRoot:   newRNode(),
 		stat:    config.Stat,
 		persist: config.Persist,
+		maxQoS:  config.MaxQosAllowed,
 	}
 
-	p.log.prod = surgemq.GetProdLogger().Named("topics").Named("mem")
-	p.log.dev = surgemq.GetDevLogger().Named("topics").Named("mem")
+	p.log.prod = surgemq.GetProdLogger().Named("topics").Named(config.Name)
+	p.log.dev = surgemq.GetDevLogger().Named("topics").Named(config.Name)
 
 	if p.persist != nil {
 		entries, err := p.persist.Load()
@@ -107,6 +105,10 @@ func (mT *provider) Subscribe(topic string, qos message.QosType, sub *types.Subs
 
 	if sub == nil {
 		return message.QosFailure, topicsTypes.ErrInvalidSubscriber
+	}
+
+	if qos < mT.maxQoS {
+		qos = mT.maxQoS
 	}
 
 	mT.smu.Lock()
@@ -178,21 +180,27 @@ func (mT *provider) Retain(msg *message.PublishMessage) error {
 	return mT.rRoot.insert(msg.Topic(), msg)
 }
 
-func (mT *provider) Retained(topic string, msgs *[]*message.PublishMessage) error {
+func (mT *provider) Retained(topic string) ([]*message.PublishMessage, error) {
 	mT.rmu.RLock()
 	defer mT.rmu.RUnlock()
 
+	var res []*message.PublishMessage
+
 	// [MQTT-3.3.1-5]
-	return mT.rRoot.match(topic, msgs)
+	err := mT.rRoot.match(topic, &res)
+	return res, err
 }
 
 func (mT *provider) Close() error {
-	var rMsg []*message.PublishMessage
-	mT.Retained("#", &rMsg) // nolint: errcheck
+	var res []*message.PublishMessage
+	// [MQTT-3.3.1-5]
+	if err := mT.rRoot.match("#", &res); err != nil {
+		mT.log.prod.Error("Couldn't get retained topics", zap.Error(err))
+	}
 
 	toStore := []message.Provider{}
 
-	for _, m := range rMsg {
+	for _, m := range res {
 		toStore = append(toStore, m)
 	}
 
@@ -288,49 +296,3 @@ func (sn *sNode) matchQos(qos message.QosType, subs *types.Subscribers) {
 		}
 	}
 }
-
-//func equal(k1, k2 interface{}) bool {
-//	if reflect.TypeOf(k1) != reflect.TypeOf(k2) {
-//		return false
-//	}
-//
-//	if reflect.ValueOf(k1).Kind() == reflect.Func {
-//		return &k1 == &k2
-//	}
-//
-//	if k1 == k2 {
-//		return true
-//	}
-//
-//	switch k1 := k1.(type) {
-//	case string:
-//		return k1 == k2.(string)
-//	case int64:
-//		return k1 == k2.(int64)
-//	case int32:
-//		return k1 == k2.(int32)
-//	case int16:
-//		return k1 == k2.(int16)
-//	case int8:
-//		return k1 == k2.(int8)
-//	case int:
-//		return k1 == k2.(int)
-//	case float32:
-//		return k1 == k2.(float32)
-//	case float64:
-//		return k1 == k2.(float64)
-//	case uint:
-//		return k1 == k2.(uint)
-//	case uint8:
-//		return k1 == k2.(uint8)
-//	case uint16:
-//		return k1 == k2.(uint16)
-//	case uint32:
-//		return k1 == k2.(uint32)
-//	case uint64:
-//		return k1 == k2.(uint64)
-//	case uintptr:
-//		return k1 == k2.(uintptr)
-//	}
-//	return false
-//}

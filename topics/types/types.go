@@ -36,7 +36,7 @@ type Provider interface {
 	Subscribers(topic string, qos message.QosType, subs *types.Subscribers) error
 	Publish(msg *message.PublishMessage) error
 	Retain(msg *message.PublishMessage) error
-	Retained(topic string, msgs *[]*message.PublishMessage) error
+	Retained(topic string) ([]*message.PublishMessage, error)
 	Close() error
 }
 

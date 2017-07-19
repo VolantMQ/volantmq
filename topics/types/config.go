@@ -1,6 +1,7 @@
 package topicsTypes
 
 import (
+	"github.com/troian/surgemq/message"
 	persistTypes "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/systree"
 )
@@ -10,7 +11,16 @@ type ProviderConfig interface{}
 
 // MemConfig of topics manager
 type MemConfig struct {
-	Name    string
-	Stat    systree.TopicsStat
-	Persist persistTypes.Retained
+	Name          string
+	Stat          systree.TopicsStat
+	Persist       persistTypes.Retained
+	MaxQosAllowed message.QosType
+}
+
+// NewMemConfig generate default config for memory
+func NewMemConfig() *MemConfig {
+	return &MemConfig{
+		Name:          "mem",
+		MaxQosAllowed: message.QoS2,
+	}
 }

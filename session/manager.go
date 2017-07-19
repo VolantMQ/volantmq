@@ -116,7 +116,7 @@ func NewManager(cfg Config) (*Manager, error) {
 		for _, s := range persistedSessions {
 			// 2. restore only those having persisted subscriptions
 			if persistedSubs, err := s.Subscriptions(); err == nil {
-				var subscriptions message.TopicsQoS
+				var subscriptions message.TopicQos
 				if subscriptions, err = persistedSubs.Get(); err == nil && len(subscriptions) > 0 {
 					var sID string
 					if sID, err = s.ID(); err != nil {
@@ -301,7 +301,7 @@ func (m *Manager) allocSession(id string, msg *message.ConnectMessage, resp *mes
 		connectTimeout: m.config.ConnectTimeout,
 		ackTimeout:     m.config.AckTimeout,
 		timeoutRetries: m.config.TimeoutRetries,
-		subscriptions:  make(message.TopicsQoS),
+		subscriptions:  make(message.TopicQos),
 		id:             id,
 		callbacks: managerCallbacks{
 			onDisconnect: m.onDisconnect,
@@ -384,7 +384,7 @@ func (m *Manager) allocSession(id string, msg *message.ConnectMessage, resp *mes
 }
 
 // onStop is only invoked for non-clean session
-func (m *Manager) onStop(id string, s message.TopicsQoS) {
+func (m *Manager) onStop(id string, s message.TopicQos) {
 	defer m.sessions.suspended.count.Done()
 
 	ses, err := m.config.Persist.Get(id)
