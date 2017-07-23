@@ -40,3 +40,5 @@ _testmain.go
 persistence/examples/bolt/test.db
 examples/surgemq/persist.db
 coverage.txt
+
+vendor/
