@@ -1,0 +1,15 @@
+package: github.com/troian/surgemq
+import:
+- package: github.com/boltdb/bolt
+  version: v1.3.1
+- package: github.com/gorilla/websocket
+  version: v1.2.0
+- package: github.com/spf13/viper
+- package: go.uber.org/zap
+  version: v1.5.0
+testImport:
+- package: github.com/stretchr/testify
+  version: v1.1.4
+  subpackages:
+  - assert
+  - require
