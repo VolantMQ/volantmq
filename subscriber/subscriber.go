@@ -20,7 +20,7 @@ type OfflinePublish func(string, *message.PublishMessage)
 
 // Provider general provider
 type Provider interface {
-	Subscribe(string, message.SubscriptionOptions) (message.QosType, []*message.PublishMessage, error)
+	Subscribe(string, *SubscriptionParams) (message.QosType, []*message.PublishMessage, error)
 	UnSubscribe(string) error
 	SetOnlineCallback(OnlinePublish)
 	Subscriptions() Subscriptions
@@ -30,14 +30,18 @@ type Provider interface {
 
 // SessionProvider passed to session
 type SessionProvider interface {
-	Subscribe(string, message.SubscriptionOptions) (message.QosType, []*message.PublishMessage, error)
+	Subscribe(string, *SubscriptionParams) (message.QosType, []*message.PublishMessage, error)
 	UnSubscribe(string) error
 	SetOnlineCallback(OnlinePublish)
 	PutOffline(bool)
 }
 
 // QosParams parameters of the subscription
-type QosParams struct {
+type SubscriptionParams struct {
+	// Subscription id
+	// V5.0 ONLY
+	ID uint32
+
 	// Requested QoS requested by subscriber
 	Requested message.SubscriptionOptions
 
@@ -46,7 +50,19 @@ type QosParams struct {
 }
 
 // Subscriptions
-type Subscriptions map[string]QosParams
+type Subscriptions map[string]*SubscriptionParams
+
+type SubscriptionID uint32
+
+type SubscriptionIDS []SubscriptionID
+
+type Entry struct {
+	S          topicsTypes.Subscriber
+	GrantedQoS message.QosType
+	ID         SubscriptionID
+}
+
+type Entries map[uintptr]*Entry
 
 // Config of subscriber
 type Config struct {
@@ -94,6 +110,8 @@ type ProviderType struct {
 
 	version     message.ProtocolVersion
 	offlineQoS0 bool
+
+	publishLock sync.RWMutex // todo: find better way
 }
 
 // New subscriber object
@@ -142,13 +160,11 @@ func (s *ProviderType) Version() message.ProtocolVersion {
 }
 
 // Subscribe to given topic
-func (s *ProviderType) Subscribe(topic string, ops message.SubscriptionOptions) (message.QosType, []*message.PublishMessage, error) {
-	q, r, err := s.topics.Subscribe(topic, ops.QoS(), s)
+func (s *ProviderType) Subscribe(topic string, params *SubscriptionParams) (message.QosType, []*message.PublishMessage, error) {
+	q, r, err := s.topics.Subscribe(topic, params.Requested.QoS(), s, params.ID)
 
-	s.subscriptions[topic] = QosParams{
-		Requested: ops,
-		Granted:   q,
-	}
+	params.Granted = q
+	s.subscriptions[topic] = params
 
 	return q, r, err
 }
@@ -169,7 +185,7 @@ func (s *ProviderType) SetOnlineCallback(c OnlinePublish) {
 }
 
 // PutOffline put subscriber offline
-// if shutdown is true it unsubscribes from all active subscriptions
+// if shutdown is true it does unsubscribe from all active subscriptions
 func (s *ProviderType) PutOffline(shutdown bool) {
 	if shutdown {
 		for topic := range s.subscriptions {
@@ -183,7 +199,9 @@ func (s *ProviderType) PutOffline(shutdown bool) {
 	default:
 		close(s.isOnline)
 		// Wait all of online publishes done
+		s.publishLock.Lock()
 		s.writers.online.wg.Wait()
+		s.publishLock.Unlock()
 	}
 
 	if shutdown {
@@ -195,17 +213,20 @@ func (s *ProviderType) PutOffline(shutdown bool) {
 // Publish message accordingly to subscriber state
 // online: forward message to session
 // offline: persist message
-func (s *ProviderType) Publish(m *message.PublishMessage, grantedQoS message.QosType) error {
+func (s *ProviderType) Publish(m *message.PublishMessage, grantedQoS message.QosType, ids []uint32) error {
 	// message version should be same as session as encode/decode depends on it
 	mP, _ := message.NewMessage(s.version, message.PUBLISH)
 	msg, _ := mP.(*message.PublishMessage)
 
 	// TODO: copy properties for V5.0
 	msg.SetDup(false)
-	msg.SetQoS(m.QoS()) // nolint: errcheck
-	msg.SetRetain(false)
+	msg.SetQoS(m.QoS())     // nolint: errcheck
 	msg.SetTopic(m.Topic()) // nolint: errcheck
+	msg.SetRetain(false)
 	msg.SetPayload(m.Payload())
+
+	if err := msg.PropertySet(message.PropertySubscriptionIdentifier, ids); err != nil && err != message.ErrPropertyNotFound {
+	}
 
 	if msg.QoS() != message.QoS0 {
 		msg.SetPacketID(0)
@@ -242,7 +263,9 @@ func (s *ProviderType) Publish(m *message.PublishMessage, grantedQoS message.Qos
 	default:
 		// forward message to publish queue
 		defer s.writers.online.wg.Done()
+		s.publishLock.RLock()
 		s.writers.online.wg.Add(1)
+		s.publishLock.RUnlock()
 		return s.writers.online.publish(msg)
 	}
 

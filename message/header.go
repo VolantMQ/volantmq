@@ -138,12 +138,30 @@ func (h *header) Size() (int, error) {
 	return h.size() + ml, nil
 }
 
-func (h *header) Property() (Property, error) {
+func (h *header) PropertyGet(id PropertyID) (interface{}, error) {
 	if h.version != ProtocolV50 {
 		return nil, ErrNotSupported
 	}
 
-	return h.properties, nil
+	return h.properties.Get(id)
+}
+
+func (h *header) PropertySet(id PropertyID, val interface{}) error {
+	if h.version != ProtocolV50 {
+		return ErrNotSupported
+	}
+
+	return h.properties.Set(h.mType, id, val)
+}
+
+func (h *header) PropertyForEach(f func(PropertyID, interface{})) error {
+	if h.version != ProtocolV50 {
+		return ErrNotSupported
+	}
+
+	h.properties.ForEach(f)
+
+	return nil
 }
 
 func (h *header) setPacketID(id PacketID) {

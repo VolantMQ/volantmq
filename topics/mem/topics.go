@@ -24,6 +24,7 @@ import (
 	"github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics/types"
+	"github.com/troian/surgemq/types"
 	"go.uber.org/zap"
 )
 
@@ -42,20 +43,32 @@ type provider struct {
 		prod *zap.Logger
 		dev  *zap.Logger
 	}
+
+	onCleanUnsubscribe func([]string)
+	wgPublisher        sync.WaitGroup
+	wgPublisherStarted sync.WaitGroup
+
+	inbound    chan *message.PublishMessage
+	inRetained chan types.RetainObject
+
+	allowOverlapping bool
 }
 
 var _ topicsTypes.Provider = (*provider)(nil)
 
 // NewMemProvider returns an new instance of the provider, which is implements the
 // TopicsProvider interface. provider is a hidden struct that stores the topic
-// subscriptions and retained messages in memory. The content is not persistend so
+// subscriptions and retained messages in memory. The content is not persistent so
 // when the server goes, everything will be gone. Use with care.
 func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error) {
 	p := &provider{
-		root:    newSNode(nil),
-		stat:    config.Stat,
-		persist: config.Persist,
+		stat:               config.Stat,
+		persist:            config.Persist,
+		onCleanUnsubscribe: config.OnCleanUnsubscribe,
+		inbound:            make(chan *message.PublishMessage, 1024*512),
+		inRetained:         make(chan types.RetainObject, 1024*512),
 	}
+	p.root = newNode(p.allowOverlapping, nil)
 
 	p.log.prod = configuration.GetProdLogger().Named("topics").Named(config.Name)
 	p.log.dev = configuration.GetDevLogger().Named("topics").Named(config.Name)
@@ -85,31 +98,41 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 		}
 	}
 
+	p.wgPublisher.Add(1)
+	p.wgPublisherStarted.Add(1)
+	go p.publisher()
+	p.wgPublisherStarted.Wait()
+
+	p.wgPublisher.Add(1)
+	p.wgPublisherStarted.Add(1)
+	go p.retainer()
+	p.wgPublisherStarted.Wait()
+
 	return p, nil
 }
 
-func (mT *provider) Subscribe(topic string, qos message.QosType, sub topicsTypes.Subscriber) (message.QosType, []*message.PublishMessage, error) {
-	if !qos.IsValid() {
+func (mT *provider) Subscribe(t string, q message.QosType, s topicsTypes.Subscriber, id uint32) (message.QosType, []*message.PublishMessage, error) {
+	if !q.IsValid() {
 		return message.QosFailure, nil, message.ErrInvalidQoS
 	}
 
-	if sub == nil {
+	if s == nil {
 		return message.QosFailure, nil, topicsTypes.ErrInvalidSubscriber
 	}
 
-	levels := strings.Split(topic, "/")
+	levels := strings.Split(t, "/")
 
 	defer mT.smu.Unlock()
 	mT.smu.Lock()
 
-	subscriptionInsert(mT.root, levels, qos, sub)
+	mT.subscriptionInsert(levels, q, s, id)
 
 	var r []*message.PublishMessage
 
 	// [MQTT-3.3.1-5]
-	retainSearch(mT.root, levels, &r)
+	mT.retainSearch(levels, &r)
 
-	return qos, r, nil
+	return q, r, nil
 }
 
 func (mT *provider) UnSubscribe(topic string, sub topicsTypes.Subscriber) error {
@@ -118,43 +141,17 @@ func (mT *provider) UnSubscribe(topic string, sub topicsTypes.Subscriber) error 
 	defer mT.smu.Unlock()
 	mT.smu.Lock()
 
-	return subscriptionRemove(mT.root, levels, sub)
+	return mT.subscriptionRemove(levels, sub)
 }
 
 func (mT *provider) Publish(msg *message.PublishMessage) error {
-	levels := strings.Split(msg.Topic(), "/")
-	var subs entries
-
-	defer mT.smu.Unlock()
-	mT.smu.Lock()
-
-	subscriptionSearch(mT.root, levels, &subs)
-
-	for _, s := range subs {
-		if err := s.s.Publish(msg, s.grantedQoS); err != nil {
-			mT.log.prod.Error("Publish error", zap.Error(err))
-		}
-		s.s.Release()
-	}
+	mT.inbound <- msg
 
 	return nil
 }
 
-func (mT *provider) Retain(msg *message.PublishMessage) error {
-	levels := strings.Split(msg.Topic(), "/")
-
-	defer mT.smu.Unlock()
-	mT.smu.Lock()
-
-	// [MQTT-3.3.1-10]            [MQTT-3.3.1-7]
-	if len(msg.Payload()) == 0 || msg.QoS() == message.QoS0 {
-		retainRemove(mT.root, levels) // nolint: errcheck
-		if len(msg.Payload()) == 0 {
-			return nil
-		}
-	}
-
-	retainInsert(mT.root, levels, msg)
+func (mT *provider) Retain(obj types.RetainObject) error {
+	mT.inRetained <- obj
 
 	return nil
 }
@@ -169,7 +166,7 @@ func (mT *provider) Retained(topic string) ([]*message.PublishMessage, error) {
 	mT.smu.Lock()
 
 	// [MQTT-3.3.1-5]
-	retainSearch(mT.root, levels, &r)
+	mT.retainSearch(levels, &r)
 
 	return r, nil
 }
@@ -178,22 +175,30 @@ func (mT *provider) Close() error {
 	defer mT.smu.Unlock()
 	mT.smu.Lock()
 
+	close(mT.inbound)
+	close(mT.inRetained)
+
+	mT.wgPublisher.Wait()
+
 	var res []*message.PublishMessage
 	// [MQTT-3.3.1-5]
-	retainSearch(mT.root, []string{"#"}, &res)
+	//retainSearch(mT.root, []string{"#"}, &res)
 
 	if mT.persist != nil {
 		var encoded [][]byte
 
 		for _, m := range res {
-			if sz, err := m.Size(); err != nil {
-				mT.log.prod.Error("Couldn't get retained message size", zap.Error(err))
-			} else {
-				buf := make([]byte, sz)
-				if _, err = m.Encode(buf); err != nil {
-					mT.log.prod.Error("Couldn't encode retained message", zap.Error(err))
+			// Skip retained QoS0 messages
+			if m.QoS() != message.QoS0 {
+				if sz, err := m.Size(); err != nil {
+					mT.log.prod.Error("Couldn't get retained message size", zap.Error(err))
 				} else {
-					encoded = append(encoded, buf)
+					buf := make([]byte, sz)
+					if _, err = m.Encode(buf); err != nil {
+						mT.log.prod.Error("Couldn't encode retained message", zap.Error(err))
+					} else {
+						encoded = append(encoded, buf)
+					}
 				}
 			}
 		}
@@ -207,4 +212,63 @@ func (mT *provider) Close() error {
 
 	mT.root = nil
 	return nil
+}
+
+func (mT *provider) retain(obj types.RetainObject) {
+	levels := strings.Split(obj.Topic(), "/")
+	insert := true
+
+	mT.smu.Lock()
+
+	switch t := obj.(type) {
+	case *message.PublishMessage:
+		// [MQTT-3.3.1-10]            [MQTT-3.3.1-7]
+		if len(t.Payload()) == 0 || t.QoS() == message.QoS0 {
+			mT.retainRemove(levels) // nolint: errcheck
+			if len(t.Payload()) == 0 {
+				insert = false
+			}
+		}
+	}
+
+	if insert {
+		mT.retainInsert(levels, obj)
+	}
+
+	mT.smu.Unlock()
+}
+
+func (mT *provider) retainer() {
+	defer func() {
+		mT.wgPublisher.Done()
+	}()
+	mT.wgPublisherStarted.Done()
+
+	for obj := range mT.inRetained {
+		mT.retain(obj)
+	}
+}
+
+func (mT *provider) publisher() {
+	defer mT.wgPublisher.Done()
+	mT.wgPublisherStarted.Done()
+
+	for msg := range mT.inbound {
+		levels := strings.Split(msg.Topic(), "/")
+		pubEntries := publishEntries{}
+
+		mT.smu.Lock()
+		mT.subscriptionSearch(levels, &pubEntries)
+
+		for _, pub := range pubEntries {
+			for _, e := range pub {
+				if err := e.s.Publish(msg, e.qos, e.ids); err != nil {
+					mT.log.prod.Error("Publish error", zap.Error(err))
+				}
+				e.s.Release()
+			}
+		}
+
+		mT.smu.Unlock()
+	}
 }

@@ -9,9 +9,9 @@ import (
 )
 
 var (
-	bucketRetained = []byte("retained")
-	bucketSessions = []byte("sessions")
-	//bucketMessages      = "messages"
+	bucketRetained      = []byte("retained")
+	bucketSessions      = []byte("sessions")
+	bucketSystem        = []byte("system")
 	bucketSubscriptions = []byte("subscriptions")
 )
 
@@ -30,6 +30,7 @@ type impl struct {
 	r    retained
 	s    sessions
 	subs subscriptions
+	sys  system
 }
 
 // New allocate new persistence provider of boltDB type
@@ -62,6 +63,12 @@ func New(config *persistenceTypes.BoltDBConfig) (p persistenceTypes.Provider, er
 		lock: &pl.lock,
 	}
 
+	pl.sys = system{
+		db:   &pl.db,
+		wgTx: &pl.wgTx,
+		lock: &pl.lock,
+	}
+
 	err = pl.db.db.Update(func(tx *bolt.Tx) error {
 		if _, e := tx.CreateBucketIfNotExists(bucketSessions); e != nil {
 			return e
@@ -72,7 +79,9 @@ func New(config *persistenceTypes.BoltDBConfig) (p persistenceTypes.Provider, er
 		if _, e := tx.CreateBucketIfNotExists(bucketSubscriptions); e != nil {
 			return e
 		}
-
+		if _, e := tx.CreateBucketIfNotExists(bucketSystem); e != nil {
+			return e
+		}
 		return nil
 	})
 
@@ -83,6 +92,26 @@ func New(config *persistenceTypes.BoltDBConfig) (p persistenceTypes.Provider, er
 	p = pl
 
 	return p, nil
+}
+
+func (p *impl) System() (persistenceTypes.System, error) {
+	select {
+	case <-p.db.done:
+		return nil, persistenceTypes.ErrNotOpen
+	default:
+	}
+
+	err := p.db.db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists(bucketSystem)
+
+		return err
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &p.sys, nil
 }
 
 // Sessions

@@ -12,6 +12,7 @@ type impl struct {
 	r    retained
 	s    sessions
 	subs subscriptions
+	sys  system
 }
 
 // New allocate new persistence provider of boltDB type
@@ -34,7 +35,21 @@ func New(config *persistenceTypes.MemConfig) (p persistenceTypes.Provider, err e
 		subs:   make(map[string][]byte),
 	}
 
+	pl.sys = system{
+		status: &pl.status,
+	}
+
 	return pl, nil
+}
+
+func (p *impl) System() (persistenceTypes.System, error) {
+	select {
+	case <-p.status.done:
+		return nil, persistenceTypes.ErrNotOpen
+	default:
+	}
+
+	return &p.sys, nil
 }
 
 // Sessions

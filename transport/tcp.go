@@ -1,4 +1,4 @@
-package listener
+package transport
 
 import (
 	"crypto/tls"
@@ -6,23 +6,17 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/troian/surgemq/auth"
-	"github.com/troian/surgemq/types"
 	"go.uber.org/zap"
+	"github.com/troian/surgemq/configuration"
 )
 
-// ConfigTCP listener object for tcp server
+// ConfigTCP configuration of tcp transport
 type ConfigTCP struct {
-	InternalConfig
-
 	// Scheme
 	Scheme string
 
 	// Host
 	Host string
-
-	// Port
-	Port int
 
 	// CertFile
 	CertFile string
@@ -30,8 +24,7 @@ type ConfigTCP struct {
 	// KeyFile
 	KeyFile string
 
-	// AuthManager
-	AuthManager *auth.Manager
+	transport *TransportConfig
 }
 
 type tcp struct {
@@ -41,13 +34,24 @@ type tcp struct {
 	tlsConfig *tls.Config
 }
 
-func NewTCP(config *ConfigTCP) (Provider, error) {
+// NewConfigTCP
+func NewConfigTCP(transport *TransportConfig) *ConfigTCP {
+	return &ConfigTCP{
+		Scheme:    "tcp",
+		Host:      "",
+		transport: transport,
+	}
+}
+
+// NewTCP
+func NewTCP(config *ConfigTCP, internal *InternalConfig) (Provider, error) {
 	l := &tcp{}
 
-	l.InternalConfig = config.InternalConfig
 	l.quit = make(chan struct{})
-	l.auth = config.AuthManager
-	l.lPort = config.Port
+	l.protocol = config.Scheme
+	l.InternalConfig = *internal
+	l.config = *config.transport
+	l.log = configuration.GetProdLogger().Named("server.transport.tcp")
 
 	var err error
 
@@ -64,7 +68,7 @@ func NewTCP(config *ConfigTCP) (Provider, error) {
 	}
 
 	var ln net.Listener
-	if ln, err = net.Listen(config.Scheme, config.Host+":"+strconv.Itoa(config.Port)); err != nil {
+	if ln, err = net.Listen(config.Scheme, config.Host+":"+strconv.Itoa(config.transport.Port)); err != nil {
 		return nil, err
 	}
 
@@ -77,6 +81,7 @@ func NewTCP(config *ConfigTCP) (Provider, error) {
 	return l, nil
 }
 
+// Close
 func (l *tcp) Close() error {
 	var err error
 
@@ -90,9 +95,9 @@ func (l *tcp) Close() error {
 	return err
 }
 
-func (l *tcp) Protocol() string {
-	return "tcp"
-}
+//func (l *tcp) Protocol() string {
+//	return "tcp"
+//}
 
 func (l *tcp) Serve() error {
 	var tempDelay time.Duration // how long to sleep on accept failure
@@ -133,10 +138,10 @@ func (l *tcp) Serve() error {
 		go func(cn net.Conn) {
 			defer l.onConnection.Done()
 
-			if conn, err := types.NewConnTCP(cn, l.Metric); err != nil {
+			if conn, err := newConnTCP(cn, l.Metric.Bytes()); err != nil {
 				l.log.Error("Couldn't create connection interface", zap.Error(err))
 			} else {
-				l.HandleConnection(conn, l.auth)
+				l.handleConnection(conn)
 			}
 		}(conn)
 	}

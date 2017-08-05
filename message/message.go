@@ -94,8 +94,11 @@ type Provider interface {
 	// Version get protocol version used by message
 	Version() ProtocolVersion
 
-	// Property
-	Property() (Property, error)
+	PropertyGet(PropertyID) (interface{}, error)
+
+	PropertySet(PropertyID, interface{}) error
+
+	PropertyForEach(func(PropertyID, interface{})) error
 
 	// decode reads the bytes in the byte slice from the argument. It returns the
 	// total number of bytes decoded, and whether there's any errors during the

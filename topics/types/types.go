@@ -8,6 +8,7 @@ import (
 	"regexp"
 
 	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/types"
 )
 
 //var (
@@ -32,11 +33,10 @@ const (
 	//BWC = "#+"
 )
 
-var TopicRegexp *regexp.Regexp
-
-func init() {
-	TopicRegexp = regexp.MustCompile(`^(([^+#]*|\+)(/([^+#]*|\+))*(/#)?|#)$`)
-}
+var (
+	TopicSubscribeRegexp = regexp.MustCompile(`^(([^+#]*|\+)(/([^+#]*|\+))*(/#)?|#)$`)
+	TopicPublishRegexp   = regexp.MustCompile(`^[^#+]*$`)
+)
 
 var (
 	//ErrInvalidConnectionType = errors.New("invalid connection type")
@@ -65,7 +65,7 @@ var (
 type Subscriber interface {
 	Acquire()
 	Release()
-	Publish(*message.PublishMessage, message.QosType) error
+	Publish(*message.PublishMessage, message.QosType, []uint32) error
 	Hash() uintptr
 }
 
@@ -74,26 +74,24 @@ type Subscribers []Subscriber
 
 // Provider interface
 type Provider interface {
-	Subscribe(string, message.QosType, Subscriber) (message.QosType, []*message.PublishMessage, error)
+	Subscribe(string, message.QosType, Subscriber, uint32) (message.QosType, []*message.PublishMessage, error)
 	UnSubscribe(string, Subscriber) error
-	//Subscribers(string, message.QosType) (Subscribers, error)
 	Publish(*message.PublishMessage) error
-	Retain(*message.PublishMessage) error
+	Retain(types.RetainObject) error
 	Retained(string) ([]*message.PublishMessage, error)
 	Close() error
 }
 
 type Topics interface {
-	Subscribe(string, message.QosType, Subscriber) (message.QosType, []*message.PublishMessage, error)
+	Subscribe(string, message.QosType, Subscriber, uint32) (message.QosType, []*message.PublishMessage, error)
 	UnSubscribe(string, Subscriber) error
-	//Subscribers(string, message.QosType) (Subscribers, error)
-	Retain(*message.PublishMessage) error
+	Retain(types.RetainObject) error
 	Retained(string) ([]*message.PublishMessage, error)
 }
 
 type Messenger interface {
 	Publish(*message.PublishMessage) error
-	Retain(*message.PublishMessage) error
+	Retain(types.RetainObject) error
 }
 
 var (

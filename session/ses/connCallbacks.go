@@ -9,6 +9,7 @@ import (
 
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/persistence/types"
+	"github.com/troian/surgemq/subscriber"
 	"go.uber.org/zap"
 )
 
@@ -75,7 +76,7 @@ func (s *Type) onConnectionClose(will bool) {
 			}
 		}
 
-		go s.callbacks.OnStop(s.id, persist)
+		go s.callbacks.OnStop(s.id, s.version, persist)
 	}()
 
 	s.started.Wait()
@@ -250,7 +251,19 @@ func (s *Type) onSubscribe(msg *message.SubscribeMessage) error {
 		// TODO: check permissions here
 
 		//if authorized {
-		if rQoS, retained, err := s.subscriber.Subscribe(t, ops); err != nil {
+		subsId := uint32(0)
+
+		// V5.0 [MQTT-3.8.2.1.2]
+		if sID, err := msg.PropertyGet(message.PropertySubscriptionIdentifier); err == nil {
+			subsId = sID.(uint32)
+		}
+
+		subsParams := subscriber.SubscriptionParams{
+			ID:        subsId,
+			Requested: ops,
+		}
+
+		if rQoS, retained, err := s.subscriber.Subscribe(t, &subsParams); err != nil {
 			// [MQTT-3.9.3]ƒ
 			if s.version == message.ProtocolV50 {
 				reason = message.CodeUnspecifiedError

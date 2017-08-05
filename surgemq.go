@@ -4,89 +4,122 @@ import (
 	"errors"
 	"strconv"
 	"sync"
+
+	"regexp"
+
 	"time"
 
+	"github.com/pborman/uuid"
 	"github.com/troian/surgemq/auth"
 	"github.com/troian/surgemq/configuration"
-	"github.com/troian/surgemq/listener"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/persistence"
 	persistTypes "github.com/troian/surgemq/persistence/types"
-	"github.com/troian/surgemq/routines"
 	"github.com/troian/surgemq/session"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics"
 	"github.com/troian/surgemq/topics/types"
+	"github.com/troian/surgemq/transport"
 	"github.com/troian/surgemq/types"
+)
 
-	"go.uber.org/zap"
+var (
+	nodeNameRegexp = regexp.MustCompile("^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$")
 )
 
 // ServerConfig configuration of the MQTT server
 type ServerConfig struct {
-	// The number of seconds to keep the connection live if there's no data.
-	// If not set then default to 5 minutes.
-	KeepAlive int
-
-	// The number of seconds to wait for the CONNECT message before disconnecting.
-	// If not set then default to 2 seconds.
-	ConnectTimeout int
-
 	// Authenticator is the authenticator used to check username and password sent
-	// in the CONNECT message. If not set then default to "mockSuccess".
+	// in the CONNECT message. If not set then defaults to "mockSuccess".
 	Authenticators string
 
 	// Configuration of persistence provider
 	Persistence persistTypes.ProviderConfig
 
-	// OnDuplicate If requested we notify if there is attempt to dup session
+	// OnDuplicate notify if there is attempt connect client with id that already exists and active
+	// If not not set than defaults to mock function
 	OnDuplicate func(string, bool)
 
-	// ListenerStatus user provided callback to track listener status
-	ListenerStatus func(id string, status string)
+	// TransportStatus user provided callback to track transport status
+	// If not set than defaults to mock function
+	TransportStatus func(id string, status string)
 
-	// AllowedVersions
-	AllowedVersions []message.ProtocolVersion
+	// ConnectTimeout The number of seconds to wait for the CONNACK message before disconnecting.
+	// If not set then default to 2 seconds.
+	ConnectTimeout int
 
-	// Anonymous either allow or deny anonymous access
-	// Default is false
-	Anonymous bool
+	// KeepAlive The number of seconds to keep the connection live if there's no data.
+	// If not set then defaults to 5 minutes.
+	KeepAlive int
+
+	// SystreeUpdateInterval
+	SystreeUpdateInterval time.Duration
+
+	// NodeName
+	NodeName string
+
+	// RewriteNodeName
+	RewriteNodeName bool
+
+	// AllowedVersions what protocol version server will handle
+	// If not set than defaults to 0x3 and 0x04
+	AllowedVersions map[message.ProtocolVersion]bool
+
+	// AllowOverlappingSubscriptions tells server how to handle overlapping subscriptions from within one client
+	// if true server will send only one publish with max subscribed QoS even there are n subscriptions
+	// if false server will send as many publishes as amount of subscriptions matching publish topic exists
+	// If not set than default is false
+	AllowOverlappingSubscriptions bool
 
 	// OfflineQoS0 tell server to either persist (true) or not persist (false) QoS 0 messages for non-clean sessions
-	// Default is false
+	// If not set than default is false
 	OfflineQoS0 bool
 
 	// AllowDuplicates Either allow or deny replacing of existing session if there new client with same clientID
-	// default false
+	// If not set than default is false
 	AllowDuplicates bool
+
+	WithSystree bool
 }
 
-// NewServerConfig with default values
+// NewServerConfig with default values. It's highly recommended to use that function to allocate config
+// rather than directly ServerConfig structure
 func NewServerConfig() *ServerConfig {
 	return &ServerConfig{
-		KeepAlive:       types.DefaultAckTimeout,
-		ConnectTimeout:  types.DefaultConnectTimeout,
-		Authenticators:  "mockSuccess",
-		Persistence:     persistTypes.MemConfig{},
-		Anonymous:       false,
-		OfflineQoS0:     false,
-		AllowDuplicates: false,
-		AllowedVersions: []message.ProtocolVersion{
-			message.ProtocolV31,
-			message.ProtocolV311,
+		Authenticators:                "mockSuccess",
+		Persistence:                   persistTypes.MemConfig{},
+		OfflineQoS0:                   false,
+		AllowDuplicates:               false,
+		AllowOverlappingSubscriptions: true,
+		RewriteNodeName:               false,
+		WithSystree:                   true,
+		SystreeUpdateInterval:         5,
+		KeepAlive:                     types.DefaultKeepAlive,
+		ConnectTimeout:                types.DefaultConnectTimeout,
+		TransportStatus:               func(id string, status string) {},
+		AllowedVersions: map[message.ProtocolVersion]bool{
+			message.ProtocolV31:  true,
+			message.ProtocolV311: true,
 		},
 	}
 }
 
 // Server server API
 type Server interface {
-	ListenAndServe(listener.Config) error
+	// ListenAndServe configures transport according to provided config
+	// This is non blocking function. It returns nil if listener started
+	// or error if any happened during configuration.
+	// Transport status reported over TransportStatus callback in server configuration
+	ListenAndServe(transport.Config) error
+
+	// Close terminates the server by shutting down all the client connections and closing
+	// configured listeners. It does full clean up of the resources and
 	Close() error
 }
 
-// Type is a library implementation of the MQTT server that, as best it can, complies
+// server is a library implementation of the MQTT server that, as best it can, complies
 // with the MQTT 3.1/3.1.1 and 5.0 specs.
-type implementation struct {
+type server struct {
 	log types.LogInterface
 
 	config *ServerConfig
@@ -108,8 +141,8 @@ type implementation struct {
 
 	lock sync.Mutex
 
-	listeners struct {
-		list map[int]listener.Provider
+	transports struct {
+		list map[int]transport.Provider
 		wg   sync.WaitGroup
 	}
 
@@ -117,13 +150,26 @@ type implementation struct {
 
 	onClose sync.Once
 
+	systree struct {
+		done      chan bool
+		wgStarted sync.WaitGroup
+		wgStopped sync.WaitGroup
+		timer     *time.Ticker
+	}
+
 	// nodes cluster nodes
 	//nodes map[string]subscriber.Provider
 }
 
 // NewServer allocate server object
 func NewServer(config *ServerConfig) (Server, error) {
-	s := &implementation{}
+	s := &server{}
+
+	if config.NodeName != "" {
+		if !nodeNameRegexp.MatchString(config.NodeName) {
+			// todo: return error node name is invalid
+		}
+	}
 
 	s.config = config
 
@@ -131,14 +177,10 @@ func NewServer(config *ServerConfig) (Server, error) {
 	s.log.Dev = configuration.GetDevLogger().Named("server")
 
 	s.quit = make(chan struct{})
-	s.listeners.list = make(map[int]listener.Provider)
+	s.transports.list = make(map[int]transport.Provider)
 
 	var err error
 	if s.authMgr, err = auth.NewManager(s.config.Authenticators); err != nil {
-		return nil, err
-	}
-
-	if s.sysTree, err = systree.NewTree(); err != nil {
 		return nil, err
 	}
 
@@ -150,17 +192,70 @@ func NewServer(config *ServerConfig) (Server, error) {
 		return nil, err
 	}
 
+	var systemPersistence persistTypes.System
+	var systemState *persistTypes.SystemState
+
+	if systemPersistence, err = s.persist.System(); err != nil {
+		return nil, err
+	}
+
+	if systemState, err = systemPersistence.GetInfo(); err != nil {
+		return nil, err
+	}
+
+	generateNodeID := func() string {
+		return uuid.New() + "@surgemq.io"
+	}
+
+	if systemState.NodeName == "" || s.config.RewriteNodeName {
+		if s.config.NodeName == "" {
+			s.config.NodeName = generateNodeID()
+		}
+
+		systemState.NodeName = s.config.NodeName
+	} else {
+		s.config.NodeName = systemState.NodeName
+	}
+
+	if err = systemPersistence.SetInfo(systemState); err != nil {
+		return nil, err
+	}
+
 	var persisRetained persistTypes.Retained
+	var retains []types.RetainObject
+	var dynPublishes []systree.DynamicValue
+
+	if s.sysTree, retains, dynPublishes, err = systree.NewTree("$SYS/servers/" + s.config.NodeName); err != nil {
+		return nil, err
+	}
 
 	persisRetained, _ = s.persist.Retained()
 
-	tConfig := &topicsTypes.MemConfig{
-		Name:    "mem",
-		Stat:    s.sysTree.Topics(),
-		Persist: persisRetained,
-	}
+	tConfig := topicsTypes.NewMemConfig()
+
+	tConfig.Stat = s.sysTree.Topics()
+	tConfig.Persist = persisRetained
+	tConfig.AllowOverlappingSubscriptions = config.AllowOverlappingSubscriptions
+
 	if s.topicsMgr, err = topics.New(tConfig); err != nil {
 		return nil, err
+	}
+
+	if s.config.WithSystree {
+		s.sysTree.SetCallbacks(s.topicsMgr)
+
+		for _, o := range retains {
+			if err = s.topicsMgr.Retain(o); err != nil {
+				return nil, err
+			}
+		}
+
+		if s.config.SystreeUpdateInterval > 0 {
+			s.systree.wgStarted.Add(1)
+			s.systree.wgStopped.Add(1)
+			go s.systreeUpdater(dynPublishes, s.config.SystreeUpdateInterval*time.Second)
+			s.systree.wgStarted.Wait()
+		}
 	}
 
 	mConfig := sessions.Config{
@@ -170,10 +265,9 @@ func NewServer(config *ServerConfig) (Server, error) {
 		AllowDuplicates: s.config.AllowDuplicates,
 		OnDuplicate:     s.config.OnDuplicate,
 		OfflineQoS0:     s.config.OfflineQoS0,
+		Systree:         s.sysTree,
+		NodeName:        s.config.NodeName,
 	}
-	mConfig.Metric.Packets = s.sysTree.Metric().Packets()
-	mConfig.Metric.Session = s.sysTree.Session()
-	mConfig.Metric.Sessions = s.sysTree.Sessions()
 
 	if s.sessionsMgr, err = sessions.New(mConfig); err != nil {
 		return nil, err
@@ -182,28 +276,23 @@ func NewServer(config *ServerConfig) (Server, error) {
 	return s, nil
 }
 
-// ListenAndServe configures listener according to provided config
-// This is non blocking function. It returns nil if listener started
-// to run or error if any happened during configuration.
-// Listener status reported over ListenerStatus callback in server configuration
-func (s *implementation) ListenAndServe(config listener.Config) error {
-	var l listener.Provider
+func (s *server) ListenAndServe(config transport.Config) error {
+	var l transport.Provider
 	var err error
 
-	internalConfig := listener.InternalConfig{
-		Metric:           s.sysTree.Metric().Bytes(),
-		HandleConnection: s.handleConnection,
+	internalConfig := transport.InternalConfig{
+		Metric:          s.sysTree.Metric(),
+		Sessions:        s.sessionsMgr,
+		ConnectTimeout:  s.config.ConnectTimeout,
+		KeepAlive:       s.config.KeepAlive,
+		AllowedVersions: s.config.AllowedVersions,
 	}
 
 	switch c := config.(type) {
-	case *listener.ConfigTCP:
-		c.InternalConfig = internalConfig
-		c.Log = s.log.Prod.Named("tcp").Named(strconv.Itoa(c.Port))
-		l, err = listener.NewTCP(c)
-	case *listener.ConfigWS:
-		c.InternalConfig = internalConfig
-		c.Log = s.log.Prod.Named("ws").Named(strconv.Itoa(c.Port))
-		l, err = listener.NewWS(c)
+	case *transport.ConfigTCP:
+		l, err = transport.NewTCP(c, &internalConfig)
+	case *transport.ConfigWS:
+		l, err = transport.NewWS(c, &internalConfig)
 	default:
 		return errors.New("Invalid listener type")
 	}
@@ -215,37 +304,29 @@ func (s *implementation) ListenAndServe(config listener.Config) error {
 	defer s.lock.Unlock()
 	s.lock.Lock()
 
-	if _, ok := s.listeners.list[l.Port()]; ok {
+	if _, ok := s.transports.list[l.Port()]; ok {
 		l.Close() // nolint: errcheck
 		return errors.New("Already exists")
 	}
 
-	s.listeners.list[l.Port()] = l
-	s.listeners.wg.Add(1)
+	s.transports.list[l.Port()] = l
+	s.transports.wg.Add(1)
 	go func() {
-		defer s.listeners.wg.Done()
+		defer s.transports.wg.Done()
 
-		if s.config.ListenerStatus != nil {
-			s.config.ListenerStatus(":"+strconv.Itoa(l.Port()), "started")
+		s.config.TransportStatus(":"+strconv.Itoa(l.Port()), "started")
+
+		status := "stopped"
+		if e := l.Serve(); e != nil {
+			status = e.Error()
 		}
-
-		e := l.Serve()
-
-		if s.config.ListenerStatus != nil {
-			status := "stopped"
-			if err != nil {
-				status = e.Error()
-			}
-			s.config.ListenerStatus(":"+strconv.Itoa(l.Port()), status)
-		}
+		s.config.TransportStatus(":"+strconv.Itoa(l.Port()), status)
 	}()
 
 	return nil
 }
 
-// Close terminates the server by shutting down all the client connections and closing
-// the listener. It will, as best it can, clean up after itself.
-func (s *implementation) Close() error {
+func (s *server) Close() error {
 	// By closing the quit channel, we are telling the server to stop accepting new
 	// connection.
 	s.onClose.Do(func() {
@@ -254,19 +335,27 @@ func (s *implementation) Close() error {
 		defer s.lock.Unlock()
 		s.lock.Lock()
 
+		// shutdown systree updater
+		if s.systree.timer != nil {
+			s.systree.timer.Stop()
+			s.systree.done <- true
+			s.systree.wgStopped.Wait()
+			close(s.systree.done)
+		}
+
 		// We then close all net.Listener, which will force Accept() to return if it's
 		// blocked waiting for new connections.
-		for _, l := range s.listeners.list {
+		for _, l := range s.transports.list {
 			if err := l.Close(); err != nil {
 				s.log.Prod.Error(err.Error())
 			}
 		}
 
 		// Wait all of listeners has finished
-		s.listeners.wg.Wait()
+		s.transports.wg.Wait()
 
-		for port := range s.listeners.list {
-			delete(s.listeners.list, port)
+		for port := range s.transports.list {
+			delete(s.transports.list, port)
 		}
 
 		if s.sessionsMgr != nil {
@@ -283,100 +372,28 @@ func (s *implementation) Close() error {
 	return nil
 }
 
-// handleConnection is for the broker to handle an incoming connection from a client
-func (s *implementation) handleConnection(c types.Conn, auth *auth.Manager) {
-	if c == nil {
-		s.log.Prod.Error("Invalid connection type")
-		return
-	}
+func (s *server) systreeUpdater(publishes []systree.DynamicValue, period time.Duration) {
+	defer s.systree.wgStopped.Done()
 
-	var err error
+	s.systree.done = make(chan bool)
+	s.systree.timer = time.NewTicker(period)
+	s.systree.wgStarted.Done()
 
-	defer func() {
-		if err != nil {
-			c.Close() // nolint: errcheck, gas
-			c = nil
-		}
-	}()
+	for {
+		select {
+		case <-s.systree.timer.C:
+			for _, m := range publishes {
+				_m := m.Publish()
+				_msg, _ := message.NewMessage(message.ProtocolV311, message.PUBLISH)
+				msg, _ := _msg.(*message.PublishMessage)
+				msg.SetTopic(_m.Topic())
+				msg.SetQoS(_m.QoS())
+				msg.SetPayload(_m.Payload())
 
-	// To establish a connection, we must
-	// 1. Read and decode the message.ConnectMessage from the wire
-	// 2. If no decoding errors, then authenticate using username and password.
-	//    Otherwise, write out to the wire message.ConnackMessage with
-	//    appropriate error.
-	// 3. If authentication is successful, then either create a new session or
-	//    retrieve existing session
-	// 4. Write out to the wire a successful message.ConnackMessage message
-
-	// Read the CONNECT message from the wire, if error, then check to see if it's
-	// a CONNACK error. If it's CONNACK error, send the proper CONNACK error back
-	// to client. Exit regardless of error type.
-
-	c.SetReadDeadline(time.Now().Add(time.Second * time.Duration(s.config.ConnectTimeout))) // nolint: errcheck, gas
-
-	var req message.Provider
-
-	var buf []byte
-	if buf, err = routines.GetMessageBuffer(c); err != nil {
-		s.log.Prod.Error("Couldn't get CONNECT message", zap.Error(err))
-		return
-	}
-
-	if req, _, err = message.Decode(message.ProtocolV50, buf); err != nil {
-		s.log.Prod.Warn("Couldn't decode message", zap.Error(err))
-
-		if _, ok := err.(message.ReasonCode); ok {
-			if req != nil {
-				s.sysTree.Metric().Packets().Received(req.Type())
+				s.topicsMgr.Publish(msg)
 			}
-		}
-	} else {
-		switch r := req.(type) {
-		case *message.ConnectMessage:
-			m, _ := message.NewMessage(req.Version(), message.CONNACK)
-			resp, _ := m.(*message.ConnAckMessage)
-
-			s.handleConnectionPermission(r, resp, auth)
-
-			s.sessionsMgr.Start(r, resp, c)
-		default:
-			s.log.Prod.Error("Unexpected message type",
-				zap.String("expected", "CONNECT"),
-				zap.String("received", r.Type().Name()))
+		case <-s.systree.done:
+			return
 		}
 	}
-}
-
-func (s *implementation) handleConnectionPermission(req *message.ConnectMessage, resp *message.ConnAckMessage, auth *auth.Manager) {
-	user, pass := req.Credentials()
-
-	var reason message.ReasonCode
-
-	if len(user) > 0 {
-		if err := auth.Password(string(user), string(pass)); err == nil {
-			reason = message.CodeSuccess
-		} else {
-			reason = message.CodeRefusedBadUsernameOrPassword
-			if req.Version() == message.ProtocolV50 {
-				reason = message.CodeBadUserOrPassword
-			}
-		}
-	} else {
-		if s.config.Anonymous {
-			reason = message.CodeSuccess
-		} else {
-			reason = message.CodeRefusedBadUsernameOrPassword
-			if req.Version() == message.ProtocolV50 {
-				reason = message.CodeBadUserOrPassword
-			}
-		}
-	}
-
-	if req.KeepAlive() == 0 {
-		req.SetKeepAlive(uint16(s.config.KeepAlive))
-
-		// set assigned keep alive for V5.0
-	}
-
-	resp.SetReturnCode(reason) // nolint: errcheck
 }

@@ -1,4 +1,4 @@
-package listener
+package transport
 
 import (
 	"net/http"
@@ -12,7 +12,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/troian/surgemq/auth"
-	"github.com/troian/surgemq/types"
+	"github.com/troian/surgemq/configuration"
 	"go.uber.org/zap"
 )
 
@@ -23,11 +23,6 @@ type httpServer struct {
 
 // ConfigWS listener object for websocket server
 type ConfigWS struct {
-	InternalConfig
-
-	// Port
-	Port int
-
 	// CertFile
 	CertFile string
 
@@ -42,6 +37,8 @@ type ConfigWS struct {
 
 	// SubProtocols
 	SubProtocols []string
+
+	transport *TransportConfig
 }
 
 type ws struct {
@@ -53,17 +50,25 @@ type ws struct {
 	s        httpServer
 }
 
-func NewWS(config *ConfigWS) (Provider, error) {
+// NewConfigTCP
+func NewConfigWS(transport *TransportConfig) *ConfigWS {
+	return &ConfigWS{
+		Path:      "/",
+		transport: transport,
+	}
+}
+
+func NewWS(config *ConfigWS, internal *InternalConfig) (Provider, error) {
 	l := &ws{
 		certFile: config.CertFile,
 		keyFile:  config.KeyFile,
 	}
 
-	l.InternalConfig = config.InternalConfig
-
 	l.quit = make(chan struct{})
-	l.auth = config.AuthManager
-	l.lPort = config.Port
+	l.protocol = "ws"
+	l.InternalConfig = *internal
+	l.config = *config.transport
+	l.log = configuration.GetProdLogger().Named("server.transport.ws")
 
 	if len(config.Path) == 0 {
 		config.Path = "/"
@@ -84,12 +89,13 @@ func NewWS(config *ConfigWS) (Provider, error) {
 	l.s.mux.HandleFunc(config.Path, l.serveWs)
 
 	l.s.http = &http.Server{
-		Addr:    ":" + strconv.Itoa(config.Port),
+		Addr:    ":" + strconv.Itoa(config.transport.Port),
 		Handler: &l.s,
 	}
 
 	return l, nil
 }
+
 func (s *httpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
@@ -104,10 +110,10 @@ func (l *ws) serveWs(w http.ResponseWriter, r *http.Request) {
 	l.onConnection.Add(1)
 	go func(cn *websocket.Conn) {
 		defer l.onConnection.Done()
-		if conn, err := types.NewConnWs(cn, l.Metric); err != nil {
+		if conn, err := newConnWs(cn, l.Metric.Bytes()); err != nil {
 			l.log.Error("Couldn't create connection interface", zap.Error(err))
 		} else {
-			l.HandleConnection(conn, l.auth)
+			l.handleConnection(conn)
 		}
 	}(conn)
 }

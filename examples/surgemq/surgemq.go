@@ -26,8 +26,8 @@ import (
 	"github.com/troian/surgemq/auth"
 	authTypes "github.com/troian/surgemq/auth/types"
 	"github.com/troian/surgemq/configuration"
-	"github.com/troian/surgemq/listener"
 	persistType "github.com/troian/surgemq/persistence/types"
+	"github.com/troian/surgemq/transport"
 	"go.uber.org/zap"
 
 	"net/http"
@@ -64,12 +64,6 @@ func main() {
 	configuration.Init(ops)
 
 	logger := configuration.GetProdLogger().Named("example")
-
-	//defer func() {
-	//	if r := recover(); r != nil {
-	//		logger.Error("Recover from panic", zap.Any("recover", r))
-	//	}
-	//}()
 
 	var err error
 
@@ -116,15 +110,13 @@ func main() {
 
 	serverConfig := surgemq.NewServerConfig()
 
-	serverConfig.Anonymous = true
 	serverConfig.OfflineQoS0 = true
 	//serverConfig.Persistence = &persistType.MemConfig{}
 	serverConfig.Persistence = &persistType.BoltDBConfig{
 		File: "./persist.db",
 	}
-	serverConfig.ListenerStatus = listenerStatus
+	serverConfig.TransportStatus = listenerStatus
 	serverConfig.AllowDuplicates = true
-
 	serverConfig.Authenticators = "internal"
 
 	srv, err = surgemq.NewServer(serverConfig)
@@ -141,21 +133,23 @@ func main() {
 		return
 	}
 
-	config := &listener.ConfigTCP{
-		Scheme:      "tcp",
-		Host:        "",
-		Port:        1883,
-		AuthManager: authMng,
-	}
+	config := transport.NewConfigTCP(
+		&transport.TransportConfig{
+			Port:        1883,
+			AuthManager: authMng,
+			Anonymous:   true,
+		})
 
 	if err = srv.ListenAndServe(config); err != nil {
 		logger.Error("Couldn't start listener", zap.Error(err))
 	}
 
-	configWs := &listener.ConfigWS{
-		Port:        8080,
-		AuthManager: authMng,
-	}
+	configWs := transport.NewConfigWS(
+		&transport.TransportConfig{
+			Port:        8080,
+			AuthManager: authMng,
+			Anonymous:   true,
+		})
 
 	if err = srv.ListenAndServe(configWs); err != nil {
 		logger.Error("Couldn't start listener", zap.Error(err))
@@ -174,5 +168,5 @@ func main() {
 		logger.Error("Couldn't shutdown server", zap.Error(err))
 	}
 
-	os.Remove("./persist.db") // nolint: errcheck
+	//os.Remove("./persist.db") // nolint: errcheck
 }

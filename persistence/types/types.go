@@ -43,6 +43,11 @@ type SessionState struct {
 	UnAckMessages [][]byte
 }
 
+type SystemState struct {
+	Version  string
+	NodeName string
+}
+
 // Retained provider for load/store retained messages
 type Retained interface {
 	// Store persist retained message
@@ -75,11 +80,17 @@ type Session interface {
 	Get([]byte) (*SessionState, error)
 }
 
+type System interface {
+	GetInfo() (*SystemState, error)
+	SetInfo(*SystemState) error
+}
+
 // Provider interface implemented by different backends
 type Provider interface {
 	Sessions() (Sessions, error)
 	Subscriptions() (Subscriptions, error)
 	Retained() (Retained, error)
+	System() (System, error)
 	Shutdown() error
 }
 

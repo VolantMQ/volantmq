@@ -22,6 +22,12 @@ import (
 	"net"
 	"sync"
 
+	"encoding/binary"
+
+	"unsafe"
+
+	"time"
+
 	"github.com/troian/surgemq/configuration"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/persistence/types"
@@ -41,27 +47,44 @@ var (
 	ErrDupNotAllowed = errors.New("duplicate not allowed")
 )
 
+type clientConnectStatus struct {
+	Address        string
+	Username       string
+	CleanSession   bool
+	SessionPresent bool
+	Protocol       message.ProtocolVersion
+	Timestamp      string
+	ConnAckCode    message.ReasonCode
+}
+
+type clientDisconnectStatus struct {
+	Reason    string
+	Timestamp string
+}
+
 // Config manager configuration
 type Config struct {
 	// Topics manager for all the client subscriptions
 	TopicsMgr topicsTypes.Provider
 
+	NodeName string
+
 	// The number of seconds to wait for the CONNACK message before disconnecting.
 	// If not set then default to 2 seconds.
 	ConnectTimeout int
 
-	Metric struct {
-		Packets  systree.PacketsMetric
-		Sessions systree.SessionsStat
-		Session  systree.SessionStat
-	}
+	// The number of seconds to keep the connection live if there's no data.
+	// If not set then defaults to 5 minutes.
+	KeepAlive int
+
+	Systree systree.Provider
+
+	// OnDuplicate If requested we notify if there is attempt to dup session
+	OnDuplicate func(string, bool)
 
 	// AllowDuplicates Either allow or deny replacing of existing session if there new client
 	// with same clientID
 	AllowDuplicates bool
-
-	// OnDuplicate If requested we notify if there is attempt to dup session
-	OnDuplicate func(string, bool)
 
 	Persist persistenceTypes.Provider
 
@@ -72,6 +95,11 @@ type activeSessions struct {
 	list  map[string]*session.Type
 	lock  sync.RWMutex
 	count sync.WaitGroup
+}
+
+type subscribedTopicConfig struct {
+	ops message.SubscriptionOptions
+	id  uint32
 }
 
 // Manager interface
@@ -124,12 +152,12 @@ func New(cfg Config) (*Manager, error) {
 	if sHandler, err := m.config.Persist.Subscriptions(); err == nil {
 		type subscriberConfig struct {
 			version message.ProtocolVersion
-			topics  map[string]message.SubscriptionOptions
+			topics  subscriber.Subscriptions
 		}
 		subs := map[string]subscriberConfig{}
 
 		err = sHandler.Load(func(id []byte, data []byte) error {
-			sub := map[string]message.SubscriptionOptions{}
+			sub := subscriber.Subscriptions{}
 			offset := 0
 			version := message.ProtocolVersion(data[offset])
 			offset++
@@ -142,8 +170,14 @@ func New(cfg Config) (*Manager, error) {
 
 				offset += total
 
-				sub[string(t)] = message.SubscriptionOptions(data[offset])
+				params := &subscriber.SubscriptionParams{}
+
+				params.Requested = message.SubscriptionOptions(data[offset])
 				offset++
+
+				params.ID = binary.BigEndian.Uint32(data[offset:])
+				offset += 4
+				sub[string(t)] = params
 			}
 
 			subs[string(id)] = subscriberConfig{
@@ -175,6 +209,7 @@ func New(cfg Config) (*Manager, error) {
 			m.subsLock.Lock()
 			m.subscribers[id] = sub
 			m.subsLock.Unlock()
+			m.config.Systree.Sessions().Created()
 		}
 	}
 
@@ -182,7 +217,7 @@ func New(cfg Config) (*Manager, error) {
 }
 
 // Start try start new session
-func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessage, conn io.Closer) {
+func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessage, conn net.Conn) {
 	var err error
 	var ses *session.Type
 	var id string
@@ -203,10 +238,9 @@ func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessag
 		} else {
 			resp.SetSessionPresent(present)
 
-			// TODO: set assigned client id property
-			//if msg.Version() == message.ProtocolV50 || idGenerated {
-			//	// Set assigned client ID
-			//}
+			if idGenerated {
+				msg.PropertySet(message.PropertyAssignedClientIdentifier, id)
+			}
 		}
 		m.log.prod.Info("Client connect",
 			zap.String("Status", resp.ReturnCode().Desc()),
@@ -222,6 +256,17 @@ func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessag
 		} else {
 			if ses != nil {
 				ses.Start()
+
+				notifyPayload := systree.ClientConnectStatus{
+					Address:        conn.RemoteAddr().String(),
+					CleanSession:   msg.CleanStart(),
+					SessionPresent: present,
+					Protocol:       msg.Version(),
+					Timestamp:      time.Now().Format(time.RFC3339),
+					ConnAckCode:    resp.ReturnCode(),
+				}
+
+				m.config.Systree.Clients().Connected(id, &notifyPayload)
 			}
 		}
 	}()
@@ -271,6 +316,7 @@ func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessag
 		} else {
 			// duplicate allowed stop current session
 			ses.Stop()
+			m.config.Systree.Sessions().Removed()
 			delete(m.sessions.list, id)
 			replace = true
 		}
@@ -294,6 +340,7 @@ func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessag
 		m.subsLock.Lock()
 		if sub, ok := m.subscribers[id]; ok {
 			sub.PutOffline(true)
+			m.config.Systree.Sessions().Removed()
 			delete(m.subscribers, id)
 		}
 		m.subsLock.Unlock()
@@ -316,6 +363,7 @@ func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessag
 			OfflineQoS0: m.config.OfflineQoS0,
 		})
 		m.subscribers[id] = sub
+		m.config.Systree.Sessions().Created()
 	}
 	m.subsLock.Unlock()
 
@@ -329,6 +377,7 @@ func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessag
 		KeepAlive:   int(msg.KeepAlive()),
 		State:       pState,
 		OfflineQoS0: m.config.OfflineQoS0,
+		Metric:      m.config.Systree.Metric(),
 		Callbacks: &session.Callbacks{
 			OnPublish: m.onPublish,
 			OnStop:    m.onStop,
@@ -343,9 +392,6 @@ func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessag
 		cfg.Will.SetPayload(willPayload)
 		cfg.Will.SetRetain(willRetain)
 	}
-
-	cfg.Metric.Packets = m.config.Metric.Packets
-	cfg.Metric.Session = m.config.Metric.Session
 
 	if ses, present, err = session.New(cfg); err != nil {
 		if e, ok := err.(persistenceTypes.Errors); ok {
@@ -426,10 +472,11 @@ func (m *Manager) Shutdown() error {
 			// 2 bytes - length prefix
 			// n bytes - topic
 			// 1 byte - topic options
+			// 4 bytes - subscription id
 
 			size := 0
 			for topic := range topics {
-				size += 2 + len(topic) + 1
+				size += 2 + len(topic) + 1 + int(unsafe.Sizeof(uint32(0)))
 			}
 
 			buf := make([]byte, size+1)
@@ -437,11 +484,13 @@ func (m *Manager) Shutdown() error {
 			buf[offset] = byte(s.Version())
 			offset++
 
-			for s, ops := range topics {
+			for s, params := range topics {
 				total, _ := message.WriteLPBytes(buf[offset:], []byte(s))
 				offset += total
-				buf[offset] = byte(ops.Requested)
+				buf[offset] = byte(params.Requested)
 				offset++
+				binary.BigEndian.PutUint32(buf[offset:], params.ID)
+				offset += 4
 			}
 
 			if err = sHandler.Store([]byte(id), buf); err != nil {
@@ -485,20 +534,26 @@ func (m *Manager) onPublish(id string, msg *message.PublishMessage) {
 	}
 }
 
-func (m *Manager) onStop(id string, state *persistenceTypes.SessionState) {
+func (m *Manager) onStop(id string, protocol message.ProtocolVersion, state *persistenceTypes.SessionState) {
 	defer m.sessions.count.Done()
 
+	retain := false
 	// non-nil messages object means this is non-clean session
 	if state != nil {
 		if err := m.pSessions.Store([]byte(id), state); err != nil {
 			m.log.prod.Error("Cannot persist session", zap.String("ClientID", id), zap.Error(err))
 		}
+
+		retain = true
 	} else {
 		// It has been unsubscribed by session object
+		m.config.Systree.Sessions().Removed()
 		m.subsLock.Lock()
 		delete(m.subscribers, id)
 		m.subsLock.Unlock()
 	}
+
+	m.config.Systree.Clients().Disconnected(id, message.CodeSuccess, retain)
 
 	select {
 	case <-m.quit:
@@ -511,33 +566,3 @@ func (m *Manager) onStop(id string, state *persistenceTypes.SessionState) {
 
 	m.log.prod.Info("Client disconnected", zap.String("ClientID", id))
 }
-
-//// WriteMessage into connection
-//func (m *Manager) writeMessage(conn io.Closer, msg message.Provider) error {
-//	size, err := msg.Size()
-//	if err != nil {
-//		return err
-//	}
-//
-//	buf := make([]byte, size)
-//	if _, err = msg.Encode(buf); err != nil {
-//		m.log.dev.Debug("Write error", zap.Error(err))
-//		return err
-//	}
-//
-//	return m.writeMessageBuffer(conn, buf)
-//}
-
-//func (m *Manager) writeMessageBuffer(c io.Closer, b []byte) error {
-//	if c == nil {
-//		//return types.ErrInvalidConnectionType
-//	}
-//
-//	conn, ok := c.(net.Conn)
-//	if !ok {
-//		//return types.ErrInvalidConnectionType
-//	}
-//
-//	_, err := conn.Write(b)
-//	return err
-//}

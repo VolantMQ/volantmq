@@ -21,3 +21,7 @@ const (
 	DefaultAuthenticator    = "mockSuccess" // DefaultAuthenticator default auth provider
 	DefaultTopicsProvider   = "mem"         // DefaultTopicsProvider default topics provider
 )
+
+type RetainObject interface {
+	Topic() string
+}

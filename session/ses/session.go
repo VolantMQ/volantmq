@@ -44,9 +44,9 @@ type Callbacks struct {
 	// OnClose called when session has done all work and should be deleted
 	//OnStop func(id string, s message.TopicQos)
 	// OnDisconnect called when session stopped net connection and should be either suspended or deleted
-	OnStop func(id string, state *persistenceTypes.SessionState)
+	OnStop func(string, message.ProtocolVersion, *persistenceTypes.SessionState)
 	// OnPublish
-	OnPublish func(id string, msg *message.PublishMessage)
+	OnPublish func(string, *message.PublishMessage)
 }
 
 type WillConfig struct {
@@ -68,10 +68,7 @@ type Config struct {
 	Callbacks *Callbacks
 	Will      *message.PublishMessage
 
-	Metric struct {
-		Packets systree.PacketsMetric
-		Session systree.SessionStat
-	}
+	Metric systree.Metric
 
 	KeepAlive   int
 	SendQuota   int32
@@ -230,7 +227,7 @@ func New(config *Config) (s *Type, present bool, err error) {
 				UnSubscribe: s.onUnSubscribe,
 				Disconnect:  s.onConnectionClose,
 			},
-			PacketsMetric: config.Metric.Packets,
+			PacketsMetric: config.Metric.Packets(),
 		})
 	return
 }
@@ -356,8 +353,6 @@ func (s *Type) publishToTopic(msg *message.PublishMessage) error {
 			s.retained.lock.Unlock()
 		}
 	}
-
-	msg.SetRetain(false)
 
 	if err := s.messenger.Publish(msg); err != nil {
 		s.log.prod.Error("Couldn't publish", zap.String("ClientID", s.id), zap.Error(err))
