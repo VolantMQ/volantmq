@@ -33,6 +33,10 @@ type InternalConfig struct {
 	// If not set than defaults to 0x3 and 0x04
 	AllowedVersions map[message.ProtocolVersion]bool
 
+	Sessions *sessions.Manager
+
+	Metric systree.Metric
+
 	// ConnectTimeout The number of seconds to wait for the CONNACK message before disconnecting.
 	// If not set then default to 2 seconds.
 	ConnectTimeout int
@@ -40,27 +44,16 @@ type InternalConfig struct {
 	// KeepAlive The number of seconds to keep the connection live if there's no data.
 	// If not set then defaults to 5 minutes.
 	KeepAlive int
-
-	Sessions *sessions.Manager
-
-	Metric systree.Metric
 }
 
 type baseConfig struct {
 	InternalConfig
-
-	config Config
-
-	quit chan struct{}
-	log  *zap.Logger
-
-	onStop       func(int)
-	onConnection sync.WaitGroup
-	once         struct {
-		start sync.Once
-		stop  sync.Once
-	}
-	protocol string
+	config       Config
+	onConnection sync.WaitGroup // nolint: structcheck
+	onceStop     sync.Once      // nolint: structcheck
+	quit         chan struct{}  // nolint: structcheck
+	log          *zap.Logger
+	protocol     string
 }
 
 // Provider is interface that all of transports must implement
@@ -139,7 +132,7 @@ func (c *baseConfig) handleConnection(conn conn) {
 				if r.Version() == message.ProtocolV50 {
 					reason = message.CodeUnsupportedProtocol
 				}
-				resp.SetReturnCode(reason)
+				resp.SetReturnCode(reason) // nolint: errcheck
 			} else {
 				c.handleConnectionPermission(r, resp)
 			}

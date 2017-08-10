@@ -68,7 +68,7 @@ func TestPubRelMessageDecode2(t *testing.T) {
 
 func TestPubRelMessageEncode(t *testing.T) {
 	msgBytes := []byte{
-		byte(PUBREL<<offsetMessageType) | 2,
+		byte(PUBREL<<offsetPacketType) | 2,
 		2,
 		0, // packet ID MSB (0)
 		7, // packet ID LSB (7)

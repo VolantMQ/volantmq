@@ -213,8 +213,7 @@ func (s *ProviderType) Publish(m *message.PublishMessage, grantedQoS message.Qos
 	msg.SetRetain(false)
 	msg.SetPayload(m.Payload())
 
-	if err := msg.PropertySet(message.PropertySubscriptionIdentifier, ids); err != nil && err != message.ErrPropertyNotFound {
-	}
+	msg.PropertySet(message.PropertySubscriptionIdentifier, ids) // nolint: errcheck
 
 	if msg.QoS() != message.QoS0 {
 		msg.SetPacketID(0)

@@ -20,8 +20,8 @@ func newBroker(topicPrefix string, dynRetains, staticRetains *[]types.RetainObje
 
 	m, _ := message.NewMessage(message.ProtocolV311, message.PUBLISH)
 	msg, _ := m.(*message.PublishMessage)
-	msg.SetQoS(message.QoS0)
-	msg.SetTopic(topicPrefix + "/version")
+	msg.SetQoS(message.QoS0)               // nolint: errcheck
+	msg.SetTopic(topicPrefix + "/version") // nolint: errcheck
 	msg.SetPayload([]byte(b.version))
 
 	*dynRetains = append(*dynRetains, b.upTime)

@@ -6,7 +6,6 @@ import (
 )
 
 const (
-	maxLPString uint16 = 65535
 	//maxFixedHeaderLength int    = 5
 	maxRemainingLength int32 = (256 * 1024 * 1024) - 1 // 256 MB
 )
@@ -15,12 +14,6 @@ const (
 	//  maskHeaderFlags byte = 0x0F
 	//  maskHeaderFlagQoS
 	maskConnAckSessionPresent byte = 0x01
-)
-
-const (
-	offsetHeaderType byte = 0x04
-
-//  offsetHeaderFlags byte = 0
 )
 
 // SubscriptionOptions as per [MQTT-3.8.3.1]
@@ -211,7 +204,7 @@ func Decode(v ProtocolVersion, buf []byte) (msg Provider, total int, err error) 
 	}
 
 	// [MQTT-2.2]
-	mType := PacketType(buf[0] >> offsetMessageType)
+	mType := PacketType(buf[0] >> offsetPacketType)
 
 	// [MQTT-2.2.1] Type.NewMessage validates message type
 	if msg, err = NewMessage(v, mType); err != nil {

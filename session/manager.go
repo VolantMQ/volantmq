@@ -47,25 +47,17 @@ var (
 	ErrDupNotAllowed = errors.New("duplicate not allowed")
 )
 
-type clientConnectStatus struct {
-	Address        string
-	Username       string
-	CleanSession   bool
-	SessionPresent bool
-	Protocol       message.ProtocolVersion
-	Timestamp      string
-	ConnAckCode    message.ReasonCode
-}
-
-type clientDisconnectStatus struct {
-	Reason    string
-	Timestamp string
-}
-
 // Config manager configuration
 type Config struct {
 	// Topics manager for all the client subscriptions
 	TopicsMgr topicsTypes.Provider
+
+	Persist persistenceTypes.Provider
+
+	Systree systree.Provider
+
+	// OnDuplicate If requested we notify if there is attempt to dup session
+	OnDuplicate func(string, bool)
 
 	NodeName string
 
@@ -77,16 +69,8 @@ type Config struct {
 	// If not set then defaults to 5 minutes.
 	KeepAlive int
 
-	Systree systree.Provider
-
-	// OnDuplicate If requested we notify if there is attempt to dup session
-	OnDuplicate func(string, bool)
-
-	// AllowDuplicates Either allow or deny replacing of existing session if there new client
-	// with same clientID
+	// AllowDuplicates Either allow or deny replacing of existing session if there new client with same clientID
 	AllowDuplicates bool
-
-	Persist persistenceTypes.Provider
 
 	OfflineQoS0 bool
 }
@@ -95,11 +79,6 @@ type activeSessions struct {
 	list  map[string]*session.Type
 	lock  sync.RWMutex
 	count sync.WaitGroup
-}
-
-type subscribedTopicConfig struct {
-	ops message.SubscriptionOptions
-	id  uint32
 }
 
 // Manager interface
@@ -239,7 +218,7 @@ func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessag
 			resp.SetSessionPresent(present)
 
 			if idGenerated {
-				msg.PropertySet(message.PropertyAssignedClientIdentifier, id)
+				msg.PropertySet(message.PropertyAssignedClientIdentifier, id) // nolint: errcheck
 			}
 		}
 		m.log.prod.Info("Client connect",

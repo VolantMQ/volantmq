@@ -24,15 +24,17 @@ import (
 )
 
 var (
+	// nolint: megacheck
 	nodeNameRegexp = regexp.MustCompile("^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$")
+)
+
+var (
+	// ErrInvalidNodeName node name does not follow requirements
+	ErrInvalidNodeName = errors.New("node name is invalid")
 )
 
 // ServerConfig configuration of the MQTT server
 type ServerConfig struct {
-	// Authenticator is the authenticator used to check username and password sent
-	// in the CONNECT message. If not set then defaults to "mockSuccess".
-	Authenticators string
-
 	// Configuration of persistence provider
 	Persistence persistTypes.ProviderConfig
 
@@ -58,8 +60,9 @@ type ServerConfig struct {
 	// NodeName
 	NodeName string
 
-	// RewriteNodeName
-	RewriteNodeName bool
+	// Authenticator is the authenticator used to check username and password sent
+	// in the CONNECT message. If not set then defaults to "mockSuccess".
+	Authenticators string
 
 	// AllowedVersions what protocol version server will handle
 	// If not set than defaults to 0x3 and 0x04
@@ -70,6 +73,9 @@ type ServerConfig struct {
 	// if false server will send as many publishes as amount of subscriptions matching publish topic exists
 	// If not set than default is false
 	AllowOverlappingSubscriptions bool
+
+	// RewriteNodeName
+	RewriteNodeName bool
 
 	// OfflineQoS0 tell server to either persist (true) or not persist (false) QoS 0 messages for non-clean sessions
 	// If not set than default is false
@@ -120,8 +126,6 @@ type Server interface {
 // server is a library implementation of the MQTT server that, as best it can, complies
 // with the MQTT 3.1/3.1.1 and 5.0 specs.
 type server struct {
-	log types.LogInterface
-
 	config *ServerConfig
 	// authMgr is the authentication manager that we are going to use for authenticating
 	// incoming connections
@@ -130,10 +134,14 @@ type server struct {
 	// sessionsMgr is the sessions manager for keeping track of the sessions
 	sessionsMgr *sessions.Manager
 
+	log types.LogInterface
+
 	// topicsMgr is the topics manager for keeping track of subscriptions
 	topicsMgr topicsTypes.Provider
 
 	persist persistTypes.Provider
+
+	sysTree systree.Provider
 
 	// The quit channel for the server. If the server detects that this channel
 	// is closed, then it's a signal for it to shutdown as well.
@@ -141,14 +149,12 @@ type server struct {
 
 	lock sync.Mutex
 
+	onClose sync.Once
+
 	transports struct {
 		list map[int]transport.Provider
 		wg   sync.WaitGroup
 	}
-
-	sysTree systree.Provider
-
-	onClose sync.Once
 
 	systree struct {
 		done      chan bool
@@ -167,7 +173,7 @@ func NewServer(config *ServerConfig) (Server, error) {
 
 	if config.NodeName != "" {
 		if !nodeNameRegexp.MatchString(config.NodeName) {
-			// todo: return error node name is invalid
+			return nil, ErrInvalidNodeName
 		}
 	}
 
@@ -386,11 +392,11 @@ func (s *server) systreeUpdater(publishes []systree.DynamicValue, period time.Du
 				_m := m.Publish()
 				_msg, _ := message.NewMessage(message.ProtocolV311, message.PUBLISH)
 				msg, _ := _msg.(*message.PublishMessage)
-				msg.SetTopic(_m.Topic())
-				msg.SetQoS(_m.QoS())
-				msg.SetPayload(_m.Payload())
 
-				s.topicsMgr.Publish(msg)
+				msg.SetPayload(_m.Payload())
+				msg.SetTopic(_m.Topic()) // nolint: errcheck
+				msg.SetQoS(_m.QoS())     // nolint: errcheck
+				s.topicsMgr.Publish(msg) // nolint: errcheck
 			}
 		case <-s.systree.done:
 			return

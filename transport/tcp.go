@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"time"
 
-	"go.uber.org/zap"
 	"github.com/troian/surgemq/configuration"
+	"go.uber.org/zap"
 )
 
 // ConfigTCP configuration of tcp transport
@@ -86,7 +86,7 @@ func NewTCP(config *ConfigTCP, internal *InternalConfig) (Provider, error) {
 func (l *tcp) Close() error {
 	var err error
 
-	l.once.stop.Do(func() {
+	l.onceStop.Do(func() {
 		close(l.quit)
 
 		err = l.listener.Close()

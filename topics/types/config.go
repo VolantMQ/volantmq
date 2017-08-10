@@ -11,11 +11,11 @@ type ProviderConfig interface{}
 
 // MemConfig of topics manager
 type MemConfig struct {
-	Name                          string
 	Stat                          systree.TopicsStat
 	Persist                       persistTypes.Retained
-	MaxQosAllowed                 message.QosType
 	OnCleanUnsubscribe            func([]string)
+	Name                          string
+	MaxQosAllowed                 message.QosType
 	AllowOverlappingSubscriptions bool
 }
 

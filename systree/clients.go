@@ -14,10 +14,10 @@ import (
 type ClientConnectStatus struct {
 	Address        string
 	Username       string
+	Timestamp      string
 	CleanSession   bool
 	SessionPresent bool
 	Protocol       message.ProtocolVersion
-	Timestamp      string
 	ConnAckCode    message.ReasonCode
 }
 
@@ -28,8 +28,8 @@ type clientDisconnectStatus struct {
 
 type clients struct {
 	stat
-	topic         string
 	topicsManager types.TopicMessenger
+	topic         string
 }
 
 func newClients(topicPrefix string, retained *[]types.RetainObject) clients {
@@ -51,9 +51,9 @@ func (t *clients) Connected(id string, status *ClientConnectStatus) {
 	// notify client connected
 	nm, _ := message.NewMessage(message.ProtocolV311, message.PUBLISH)
 	notifyMsg, _ := nm.(*message.PublishMessage)
-	notifyMsg.SetQoS(message.QoS0)
 	notifyMsg.SetRetain(false)
-	notifyMsg.SetTopic(t.topic + id + "/connected")
+	notifyMsg.SetQoS(message.QoS0)                  // nolint: errcheck
+	notifyMsg.SetTopic(t.topic + id + "/connected") // nolint: errcheck
 
 	if out, err := json.Marshal(&status); err != nil {
 		// todo: put reliable message
@@ -63,19 +63,19 @@ func (t *clients) Connected(id string, status *ClientConnectStatus) {
 	}
 
 	if t.topicsManager != nil {
-		t.topicsManager.Publish(notifyMsg)
-		t.topicsManager.Retain(notifyMsg)
+		t.topicsManager.Publish(notifyMsg) // nolint: errcheck
+		t.topicsManager.Retain(notifyMsg)  // nolint: errcheck
 	}
 
 	// notify remove previous disconnect if any
 	nm, _ = message.NewMessage(message.ProtocolV311, message.PUBLISH)
 	notifyMsg, _ = nm.(*message.PublishMessage)
-	notifyMsg.SetQoS(message.QoS0)
 	notifyMsg.SetRetain(false)
-	notifyMsg.SetTopic(t.topic + id + "/disconnected")
+	notifyMsg.SetQoS(message.QoS0)                     // nolint: errcheck
+	notifyMsg.SetTopic(t.topic + id + "/disconnected") // nolint: errcheck
 
 	if t.topicsManager != nil {
-		t.topicsManager.Retain(notifyMsg)
+		t.topicsManager.Retain(notifyMsg) // nolint: errcheck
 	}
 }
 
@@ -85,9 +85,9 @@ func (t *clients) Disconnected(id string, reason message.ReasonCode, retain bool
 
 	nm, _ := message.NewMessage(message.ProtocolV311, message.PUBLISH)
 	notifyMsg, _ := nm.(*message.PublishMessage)
-	notifyMsg.SetQoS(message.QoS0)
 	notifyMsg.SetRetain(false)
-	notifyMsg.SetTopic(t.topic + id + "/disconnected")
+	notifyMsg.SetQoS(message.QoS0)                     // nolint: errcheck
+	notifyMsg.SetTopic(t.topic + id + "/disconnected") // nolint: errcheck
 	notifyPayload := clientDisconnectStatus{
 		Reason:    "normal",
 		Timestamp: time.Now().Format(time.RFC3339),
@@ -101,19 +101,19 @@ func (t *clients) Disconnected(id string, reason message.ReasonCode, retain bool
 
 	if t.topicsManager != nil {
 		if retain {
-			t.topicsManager.Retain(notifyMsg)
+			t.topicsManager.Retain(notifyMsg) // nolint: errcheck
 		}
-		t.topicsManager.Publish(notifyMsg)
+		t.topicsManager.Publish(notifyMsg) // nolint: errcheck
 	}
 
 	// remove connected retained message
 	nm, _ = message.NewMessage(message.ProtocolV311, message.PUBLISH)
 	notifyMsg, _ = nm.(*message.PublishMessage)
-	notifyMsg.SetQoS(message.QoS0)
 	notifyMsg.SetRetain(false)
-	notifyMsg.SetTopic(t.topic + id + "/connected")
+	notifyMsg.SetQoS(message.QoS0)                  // nolint: errcheck
+	notifyMsg.SetTopic(t.topic + id + "/connected") // nolint: errcheck
 
 	if t.topicsManager != nil {
-		t.topicsManager.Retain(notifyMsg)
+		t.topicsManager.Retain(notifyMsg) // nolint: errcheck
 	}
 }

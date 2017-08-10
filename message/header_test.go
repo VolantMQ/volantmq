@@ -94,11 +94,11 @@ func TestMessageHeaderDecode5(t *testing.T) {
 }
 
 func TestMessageHeaderDecode6(t *testing.T) {
-	buf := []byte{byte(PUBLISH<<offsetHeaderType | 3<<1), 0xff, 0x7f}
+	buf := []byte{byte(PUBLISH<<offsetPacketType | 3<<1), 0xff, 0x7f}
 
 	// PUBLISH with invalid QoS value
 	header := &header{
-		mType:  PacketType(buf[0] >> offsetMessageType),
+		mType:  PacketType(buf[0] >> offsetPacketType),
 		mFlags: buf[0] | maskMessageFlags,
 	}
 

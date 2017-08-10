@@ -23,31 +23,30 @@ type httpServer struct {
 
 // ConfigWS listener object for websocket server
 type ConfigWS struct {
+	transport *Config
+
+	// AuthManager
+	AuthManager *auth.Manager
+
 	// CertFile
 	CertFile string
 
 	// KeyFile
 	KeyFile string
 
-	// AuthManager
-	AuthManager *auth.Manager
-
 	// Path
 	Path string
 
 	// SubProtocols
 	SubProtocols []string
-
-	transport *Config
 }
 
 type ws struct {
 	baseConfig
-
+	up       *websocket.Upgrader
+	s        httpServer
 	certFile string
 	keyFile  string
-	up       websocket.Upgrader
-	s        httpServer
 }
 
 // NewConfigWS allocate new transport config for websocket transport
@@ -64,6 +63,7 @@ func NewWS(config *ConfigWS, internal *InternalConfig) (Provider, error) {
 	l := &ws{
 		certFile: config.CertFile,
 		keyFile:  config.KeyFile,
+		up:       &websocket.Upgrader{},
 	}
 
 	l.quit = make(chan struct{})
@@ -134,7 +134,7 @@ func (l *ws) Serve() error {
 func (l *ws) Close() error {
 	var err error
 
-	l.once.stop.Do(func() {
+	l.onceStop.Do(func() {
 		ctx, ctxCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer ctxCancel()
 

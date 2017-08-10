@@ -6,8 +6,6 @@ import (
 
 	"time"
 
-	"fmt"
-
 	"github.com/troian/surgemq/message"
 )
 
@@ -76,9 +74,7 @@ func (v *dynamicValueInteger) get() []byte {
 func (v *dynamicValueUpTime) get() []byte {
 	diff := time.Since(v.startTime)
 
-	val := fmt.Sprintf("%s", diff)
-
-	return []byte(val)
+	return []byte(diff.String())
 }
 
 func (v *dynamicValueCurrentTime) get() []byte {
@@ -94,8 +90,8 @@ func (m *dynamicValue) Retained() *message.PublishMessage {
 	if m.retained == nil {
 		np, _ := message.NewMessage(message.ProtocolV311, message.PUBLISH)
 		m.retained, _ = np.(*message.PublishMessage)
-		m.retained.SetTopic(m.topic)
-		m.retained.SetQoS(message.QoS0)
+		m.retained.SetTopic(m.topic)    // nolint: errcheck
+		m.retained.SetQoS(message.QoS0) // nolint: errcheck
 		m.retained.SetRetain(true)
 	}
 
@@ -108,8 +104,8 @@ func (m *dynamicValue) Publish() *message.PublishMessage {
 	if m.publish == nil {
 		np, _ := message.NewMessage(message.ProtocolV311, message.PUBLISH)
 		m.publish, _ = np.(*message.PublishMessage)
-		m.publish.SetTopic(m.topic)
-		m.publish.SetQoS(message.QoS0)
+		m.publish.SetTopic(m.topic)    // nolint: errcheck
+		m.publish.SetQoS(message.QoS0) // nolint: errcheck
 		m.publish.SetRetain(true)
 	}
 

@@ -37,7 +37,7 @@ func TestMatch1(t *testing.T) {
 	prov := allocProvider(t)
 	sub := &subscriber.ProviderType{}
 
-	prov.Subscribe("sport/tennis/player1/#", message.QoS1, sub, 0)
+	prov.Subscribe("sport/tennis/player1/#", message.QoS1, sub, 0) // nolint: errcheck
 
 	subscribers := publishEntries{}
 
@@ -50,7 +50,7 @@ func TestMatch2(t *testing.T) {
 
 	sub := &subscriber.ProviderType{}
 
-	prov.Subscribe("sport/tennis/player1/#", message.QoS2, sub, 0)
+	prov.Subscribe("sport/tennis/player1/#", message.QoS2, sub, 0) // nolint: errcheck
 
 	subscribers := publishEntries{}
 
@@ -63,7 +63,7 @@ func TestSNodeMatch3(t *testing.T) {
 
 	sub := &subscriber.ProviderType{}
 
-	prov.Subscribe("sport/tennis/#", message.QoS2, sub, 0)
+	prov.Subscribe("sport/tennis/#", message.QoS2, sub, 0) // nolint: errcheck
 
 	subscribers := publishEntries{}
 	prov.subscriptionSearch("sport/tennis/player1/anzel", &subscribers)
@@ -74,7 +74,7 @@ func TestMatch4(t *testing.T) {
 	prov := allocProvider(t)
 	sub := &subscriber.ProviderType{}
 
-	prov.Subscribe("#", message.QoS2, sub, 0)
+	prov.Subscribe("#", message.QoS2, sub, 0) // nolint: errcheck
 
 	subscribers := publishEntries{}
 
@@ -473,7 +473,7 @@ func TestRetain2(t *testing.T) {
 	msg := newPublishMessageLarge("sport/tennis/player1/ricardo", message.QoS1)
 	prov.retain(msg)
 
-	prov.Subscribe("#", message.QoS1, sub, 0)
+	prov.Subscribe("#", message.QoS1, sub, 0) // nolint: errcheck
 
 	var rMsg []*message.PublishMessage
 	prov.retainSearch("#", &rMsg)

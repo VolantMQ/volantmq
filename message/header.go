@@ -23,7 +23,7 @@ type header struct {
 }
 
 const (
-	offsetMessageType byte = 0x04
+	offsetPacketType byte = 0x04
 	//offsetPublishFlagRetain     byte = 0x00
 	offsetPublishFlagQoS byte = 0x01
 	//offsetPublishFlagDup        byte = 0x03
@@ -111,7 +111,7 @@ func (h *header) Encode(dst []byte) (int, error) {
 
 	total := 0
 
-	dst[total] = byte(h.mType<<offsetMessageType) | h.mFlags
+	dst[total] = byte(h.mType<<offsetPacketType) | h.mFlags
 	total++
 
 	total += binary.PutUvarint(dst[total:], uint64(h.remLen))
@@ -228,7 +228,7 @@ func (h *header) decode(src []byte) (int, error) {
 
 	// decode and validate fixed header
 	//h.mTypeFlags = src[total]
-	h.mType = PacketType(src[total] >> offsetMessageType)
+	h.mType = PacketType(src[total] >> offsetPacketType)
 	h.mFlags = src[total] & maskMessageFlags
 
 	reject := false

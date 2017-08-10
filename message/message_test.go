@@ -111,7 +111,7 @@ func TestWriteLPBytes(t *testing.T) {
 	_, err := WriteLPBytes(buf, testString)
 	require.EqualError(t, ErrInsufficientBufferSize, err.Error())
 
-	testString = make([]byte, int(maxLPString)+1)
+	testString = make([]byte, int(MaxLPString)+1)
 	_, err = WriteLPBytes(buf, testString)
 	require.EqualError(t, ErrInvalidLPStringSize, err.Error())
 }
@@ -235,7 +235,7 @@ func TestMessageDecode(t *testing.T) {
 	require.EqualError(t, err, ErrInsufficientBufferSize.Error())
 
 	buf = make([]byte, 1)
-	buf[0] = 0x0F << offsetHeaderType
+	buf[0] = 0x0F << offsetPacketType
 
 	_, n, err = Decode(ProtocolV311, buf)
 	require.Error(t, err)
