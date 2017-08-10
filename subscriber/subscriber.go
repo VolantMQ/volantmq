@@ -36,7 +36,7 @@ type SessionProvider interface {
 	PutOffline(bool)
 }
 
-// QosParams parameters of the subscription
+// SubscriptionParams parameters of the subscription
 type SubscriptionParams struct {
 	// Subscription id
 	// V5.0 ONLY
@@ -49,20 +49,8 @@ type SubscriptionParams struct {
 	Granted message.QosType
 }
 
-// Subscriptions
+// Subscriptions contains active subscriptions with respective subscription parameters
 type Subscriptions map[string]*SubscriptionParams
-
-type SubscriptionID uint32
-
-type SubscriptionIDS []SubscriptionID
-
-type Entry struct {
-	S          topicsTypes.Subscriber
-	GrantedQoS message.QosType
-	ID         SubscriptionID
-}
-
-type Entries map[uintptr]*Entry
 
 // Config of subscriber
 type Config struct {
@@ -73,7 +61,7 @@ type Config struct {
 	Offline OfflinePublish
 
 	// Topics manager
-	Topics topicsTypes.Topics
+	Topics topicsTypes.SubscriberInterface
 
 	// Version MQTT protocol version
 	Version message.ProtocolVersion
@@ -87,7 +75,7 @@ type Config struct {
 type ProviderType struct {
 	id string
 
-	topics topicsTypes.Topics
+	topics topicsTypes.SubscriberInterface
 
 	subscriptions Subscriptions
 

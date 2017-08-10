@@ -368,7 +368,7 @@ func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessag
 	m.subsLock.Unlock()
 
 	cfg := &session.Config{
-		Id:          id,
+		ID:          id,
 		Subscriber:  sub,
 		Messenger:   m.config.TopicsMgr,
 		Clean:       msg.CleanStart(),
@@ -379,8 +379,7 @@ func (m *Manager) Start(msg *message.ConnectMessage, resp *message.ConnAckMessag
 		OfflineQoS0: m.config.OfflineQoS0,
 		Metric:      m.config.Systree.Metric(),
 		Callbacks: &session.Callbacks{
-			OnPublish: m.onPublish,
-			OnStop:    m.onStop,
+			OnStop: m.onStop,
 		},
 	}
 

@@ -251,15 +251,15 @@ func (s *Type) onSubscribe(msg *message.SubscribeMessage) error {
 		// TODO: check permissions here
 
 		//if authorized {
-		subsId := uint32(0)
+		subsID := uint32(0)
 
 		// V5.0 [MQTT-3.8.2.1.2]
 		if sID, err := msg.PropertyGet(message.PropertySubscriptionIdentifier); err == nil {
-			subsId = sID.(uint32)
+			subsID = sID.(uint32)
 		}
 
 		subsParams := subscriber.SubscriptionParams{
-			ID:        subsId,
+			ID:        subsID,
 			Requested: ops,
 		}
 

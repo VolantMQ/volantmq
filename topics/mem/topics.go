@@ -138,7 +138,11 @@ func (mT *provider) UnSubscribe(topic string, sub topicsTypes.Subscriber) error 
 	return mT.subscriptionRemove(topic, sub)
 }
 
-func (mT *provider) Publish(msg *message.PublishMessage) error {
+func (mT *provider) Publish(m interface{}) error {
+	msg, ok := m.(*message.PublishMessage)
+	if !ok {
+		return topicsTypes.ErrUnexpectedObjectType
+	}
 	mT.inbound <- msg
 
 	return nil

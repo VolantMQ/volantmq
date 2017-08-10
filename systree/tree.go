@@ -35,7 +35,7 @@ func NewTree(base string) (Provider, []types.RetainObject, []DynamicValue, error
 	return tr, retains, dynUpdates, nil
 }
 
-func (t *impl) SetCallbacks(cb Topics) {
+func (t *impl) SetCallbacks(cb types.TopicMessenger) {
 	t.clients.topicsManager = cb
 }
 

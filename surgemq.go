@@ -110,7 +110,7 @@ type Server interface {
 	// This is non blocking function. It returns nil if listener started
 	// or error if any happened during configuration.
 	// Transport status reported over TransportStatus callback in server configuration
-	ListenAndServe(transport.Config) error
+	ListenAndServe(interface{}) error
 
 	// Close terminates the server by shutting down all the client connections and closing
 	// configured listeners. It does full clean up of the resources and
@@ -276,7 +276,7 @@ func NewServer(config *ServerConfig) (Server, error) {
 	return s, nil
 }
 
-func (s *server) ListenAndServe(config transport.Config) error {
+func (s *server) ListenAndServe(config interface{}) error {
 	var l transport.Provider
 	var err error
 

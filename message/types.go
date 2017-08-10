@@ -1,12 +1,15 @@
 package message
 
-// ProtocolVersion
+// ProtocolVersion describes versions implemented by this package
 type ProtocolVersion byte
 
 const (
-	ProtocolV31  = ProtocolVersion(0x3)
+	// ProtocolV31 describes spec MQIsdp
+	ProtocolV31 = ProtocolVersion(0x3)
+	// ProtocolV311 describes spec v3.1.1
 	ProtocolV311 = ProtocolVersion(0x4)
-	ProtocolV50  = ProtocolVersion(0x5)
+	// ProtocolV50 describes spec v5.0
+	ProtocolV50 = ProtocolVersion(0x5)
 )
 
 // SupportedVersions is a map of the version number (0x3 or 0x4) to the version string,

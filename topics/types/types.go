@@ -34,8 +34,11 @@ const (
 )
 
 var (
+	// TopicSubscribeRegexp regular expression that all subcriptions must be validated
 	TopicSubscribeRegexp = regexp.MustCompile(`^(([^+#]*|\+)(/([^+#]*|\+))*(/#)?|#)$`)
-	TopicPublishRegexp   = regexp.MustCompile(`^[^#+]*$`)
+
+	// TopicPublishRegexp regular expression that all publish to topic must be validated
+	TopicPublishRegexp = regexp.MustCompile(`^[^#+]*$`)
 )
 
 var (
@@ -45,6 +48,9 @@ var (
 
 	// ErrInvalidArgs invalid arguments provided
 	ErrInvalidArgs = errors.New("topics: invalid arguments")
+
+	// ErrUnexpectedObjectType invalid arguments provided
+	ErrUnexpectedObjectType = errors.New("topics: unexpected object type")
 
 	// ErrUnknownProvider if provider is unknown
 	ErrUnknownProvider = errors.New("topics: unknown provider")
@@ -76,22 +82,18 @@ type Subscribers []Subscriber
 type Provider interface {
 	Subscribe(string, message.QosType, Subscriber, uint32) (message.QosType, []*message.PublishMessage, error)
 	UnSubscribe(string, Subscriber) error
-	Publish(*message.PublishMessage) error
+	Publish(interface{}) error
 	Retain(types.RetainObject) error
 	Retained(string) ([]*message.PublishMessage, error)
 	Close() error
 }
 
-type Topics interface {
+// SubscriberInterface used by subscriber to handle messages
+type SubscriberInterface interface {
 	Subscribe(string, message.QosType, Subscriber, uint32) (message.QosType, []*message.PublishMessage, error)
 	UnSubscribe(string, Subscriber) error
 	Retain(types.RetainObject) error
 	Retained(string) ([]*message.PublishMessage, error)
-}
-
-type Messenger interface {
-	Publish(*message.PublishMessage) error
-	Retain(types.RetainObject) error
 }
 
 var (

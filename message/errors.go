@@ -3,6 +3,7 @@ package message
 // Error errors
 type Error byte
 
+// nolint: golint
 const (
 	// ErrInvalidUnSubscribe Invalid UNSUBSCRIBE message
 	ErrInvalidUnSubscribe Error = iota

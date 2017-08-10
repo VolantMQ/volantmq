@@ -55,6 +55,7 @@ type Config struct {
 	ProtoVersion message.ProtocolVersion
 }
 
+// Provider implementation of the connection
 type Provider struct {
 	// Incoming data buffer. Bytes are read from the connection and put in here.
 	in *buffer.Type

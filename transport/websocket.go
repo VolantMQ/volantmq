@@ -38,7 +38,7 @@ type ConfigWS struct {
 	// SubProtocols
 	SubProtocols []string
 
-	transport *TransportConfig
+	transport *Config
 }
 
 type ws struct {
@@ -50,14 +50,16 @@ type ws struct {
 	s        httpServer
 }
 
-// NewConfigTCP
-func NewConfigWS(transport *TransportConfig) *ConfigWS {
+// NewConfigWS allocate new transport config for websocket transport
+// Use of this function is preferable instead of direct allocation of ConfigWS
+func NewConfigWS(transport *Config) *ConfigWS {
 	return &ConfigWS{
 		Path:      "/",
 		transport: transport,
 	}
 }
 
+// NewWS create new websocket transport
 func NewWS(config *ConfigWS, internal *InternalConfig) (Provider, error) {
 	l := &ws{
 		certFile: config.CertFile,

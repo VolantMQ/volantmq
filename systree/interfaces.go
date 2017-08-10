@@ -5,14 +5,9 @@ import (
 	"github.com/troian/surgemq/types"
 )
 
-type Topics interface {
-	Publish(*message.PublishMessage) error
-	Retain(types.RetainObject) error
-}
-
 // Provider systree provider
 type Provider interface {
-	SetCallbacks(Topics)
+	SetCallbacks(types.TopicMessenger)
 	Metric() Metric
 	Topics() TopicsStat
 	Subscriptions() SubscriptionsStat
@@ -56,11 +51,8 @@ type TopicsStat interface {
 	Removed()
 }
 
+// SubscriptionsStat statistic of subscriptions
 type SubscriptionsStat interface {
 	Subscribed()
 	UnSubscribed()
-}
-
-type TreeRetainMessage interface {
-	Publish() *message.PublishMessage
 }

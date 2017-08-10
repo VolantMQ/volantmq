@@ -134,7 +134,7 @@ func main() {
 	}
 
 	config := transport.NewConfigTCP(
-		&transport.TransportConfig{
+		&transport.Config{
 			Port:        1883,
 			AuthManager: authMng,
 			Anonymous:   true,
@@ -145,7 +145,7 @@ func main() {
 	}
 
 	configWs := transport.NewConfigWS(
-		&transport.TransportConfig{
+		&transport.Config{
 			Port:        8080,
 			AuthManager: authMng,
 			Anonymous:   true,
@@ -168,5 +168,5 @@ func main() {
 		logger.Error("Couldn't shutdown server", zap.Error(err))
 	}
 
-	//os.Remove("./persist.db") // nolint: errcheck
+	os.Remove("./persist.db") // nolint: errcheck
 }

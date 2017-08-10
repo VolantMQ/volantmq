@@ -24,7 +24,7 @@ type ConfigTCP struct {
 	// KeyFile
 	KeyFile string
 
-	transport *TransportConfig
+	transport *Config
 }
 
 type tcp struct {
@@ -34,8 +34,9 @@ type tcp struct {
 	tlsConfig *tls.Config
 }
 
-// NewConfigTCP
-func NewConfigTCP(transport *TransportConfig) *ConfigTCP {
+// NewConfigTCP allocate new transport config for tcp transport
+// Use of this function is preferable instead of direct allocation of ConfigTCP
+func NewConfigTCP(transport *Config) *ConfigTCP {
 	return &ConfigTCP{
 		Scheme:    "tcp",
 		Host:      "",
@@ -43,7 +44,7 @@ func NewConfigTCP(transport *TransportConfig) *ConfigTCP {
 	}
 }
 
-// NewTCP
+// NewTCP create new tcp transport
 func NewTCP(config *ConfigTCP, internal *InternalConfig) (Provider, error) {
 	l := &tcp{}
 

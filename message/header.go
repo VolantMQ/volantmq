@@ -231,20 +231,22 @@ func (h *header) decode(src []byte) (int, error) {
 	h.mType = PacketType(src[total] >> offsetMessageType)
 	h.mFlags = src[total] & maskMessageFlags
 
-	rejectCode := CodeRefusedServerUnavailable
+	reject := false
 	// [MQTT-2.2.2-1]
 	if h.mType != PUBLISH && h.mFlags != h.mType.DefaultFlags() {
+		reject = true
+	} else {
+		if !QosType((h.mFlags & maskPublishFlagQoS) >> offsetPublishFlagQoS).IsValid() {
+			reject = true
+		}
+	}
+
+	if reject {
+		rejectCode := CodeRefusedServerUnavailable
 		if h.version == ProtocolV50 {
 			rejectCode = CodeMalformedPacket
 		}
 		return total, rejectCode
-	} else {
-		if !QosType((h.mFlags & maskPublishFlagQoS) >> offsetPublishFlagQoS).IsValid() {
-			if h.version == ProtocolV50 {
-				rejectCode = CodeProtocolError
-			}
-			return total, rejectCode
-		}
 	}
 
 	total++

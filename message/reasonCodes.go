@@ -42,8 +42,8 @@ const ( ///////////////////////////////////////////////////////    |   \    |
 	CodeSessionTakenOver                   ReasonCode = 0x8E //        \    |
 	CodeKeepAliveTimeout                   ReasonCode = 0x8F //        \    |
 	CodeTopicFilterNotValid                ReasonCode = 0x90 //        \    |
-	CodePacketIdInUse                      ReasonCode = 0x91 //        \    |
-	CodePacketIdNotFound                   ReasonCode = 0x92 //        \    |
+	CodePacketIDInUse                      ReasonCode = 0x91 //        \    |
+	CodePacketIDNotFound                   ReasonCode = 0x92 //        \    |
 	CodePacketTooLarge                     ReasonCode = 0x95 //        \    |
 	CodeMessageRateTooHigh                 ReasonCode = 0x96 //        \    |
 	CodeQuotaExceeded                      ReasonCode = 0x97 //        \    |
@@ -56,7 +56,7 @@ const ( ///////////////////////////////////////////////////////    |   \    |
 	CodeSharedSubscriptionNotSupported     ReasonCode = 0x9E //        \    |
 	CodeConnectionRateExceeded             ReasonCode = 0x9F //        \    |
 	CodeMaximumConnectTime                 ReasonCode = 0xA0 //        \    |
-	CodeSubscriptionIdNotSupported         ReasonCode = 0xA1 //        \    |
+	CodeSubscriptionIDNotSupported         ReasonCode = 0xA1 //        \    |
 	CodeWildcardSubscriptionsNotSupported  ReasonCode = 0xA2 //        \ <--|
 )
 
@@ -104,16 +104,16 @@ var packetTypeCodeMap = map[PacketType]map[ReasonCode]struct {
 		CodeImplementationSpecificError: {iss: CodeIssuerBoth, desc: "The PUBLISH is valid but the receiver is not willing to accept it"},
 		CodeNotAuthorized:               {iss: CodeIssuerBoth, desc: "The PUBLISH is not authorized"},
 		CodeTopicFilterNotValid:         {iss: CodeIssuerBoth, desc: "The topic name is valid, but is not accepted"},
-		CodePacketIdInUse:               {iss: CodeIssuerBoth, desc: "The PacketID is already in use. Possible mismatch in the session state between the Client and Server"},
+		CodePacketIDInUse:               {iss: CodeIssuerBoth, desc: "The PacketID is already in use. Possible mismatch in the session state between the Client and Server"},
 		CodeQuotaExceeded:               {iss: CodeIssuerBoth, desc: "An implementation imposed limit has been exceeded"},
 	},
 	PUBREL: {
 		CodeSuccess:          {iss: CodeIssuerBoth, desc: "Message released. Publication of QoS 2 message is complete"},
-		CodePacketIdNotFound: {iss: CodeIssuerBoth, desc: "The PacketID is not known. Possible a mismatch between the Session state on the Client and Server"},
+		CodePacketIDNotFound: {iss: CodeIssuerBoth, desc: "The PacketID is not known. Possible a mismatch between the Session state on the Client and Server"},
 	},
 	PUBCOMP: {
 		CodeSuccess:          {iss: CodeIssuerBoth, desc: "Message released. Publication of QoS 2 message is complete"},
-		CodePacketIdNotFound: {iss: CodeIssuerBoth, desc: "The PacketID is not known. Possible a mismatch between the Session state on the Client and Server"},
+		CodePacketIDNotFound: {iss: CodeIssuerBoth, desc: "The PacketID is not known. Possible a mismatch between the Session state on the Client and Server"},
 	},
 	SUBACK: {
 		0:                                     {iss: CodeIssuerBoth, desc: "The subscription is accepted and the maximum QoS sent will be QoS 0. This might be a lower QoS than was requested"}, // Maximum QoS 0
@@ -123,10 +123,10 @@ var packetTypeCodeMap = map[PacketType]map[ReasonCode]struct {
 		CodeImplementationSpecificError:       {iss: CodeIssuerBoth, desc: "The SUBSCRIBE is valid but the Server does not accept i"},
 		CodeNotAuthorized:                     {iss: CodeIssuerBoth, desc: "The Client is not authorized to make this subscription"},
 		CodeTopicFilterNotValid:               {iss: CodeIssuerBoth, desc: "The Topic Filter is correctly formed but is not allowed for this client"},
-		CodePacketIdInUse:                     {iss: CodeIssuerBoth, desc: "The specified packet identifier is already in use"},
+		CodePacketIDInUse:                     {iss: CodeIssuerBoth, desc: "The specified packet identifier is already in use"},
 		CodeQuotaExceeded:                     {iss: CodeIssuerBoth, desc: "An implementation imposed limit has been exceeded"},
 		CodeSharedSubscriptionNotSupported:    {iss: CodeIssuerBoth, desc: "The Server does not support shared subscriptions for this Client"},
-		CodeSubscriptionIdNotSupported:        {iss: CodeIssuerBoth, desc: "The Server does not support subscription identifiers; the subscription is not accepted"},
+		CodeSubscriptionIDNotSupported:        {iss: CodeIssuerBoth, desc: "The Server does not support subscription identifiers; the subscription is not accepted"},
 		CodeWildcardSubscriptionsNotSupported: {iss: CodeIssuerBoth, desc: "The Server does not support Wildcard subscription; the subscription is not accepted"},
 	},
 	UNSUBACK: {
@@ -136,7 +136,7 @@ var packetTypeCodeMap = map[PacketType]map[ReasonCode]struct {
 		CodeImplementationSpecificError: {iss: CodeIssuerBoth, desc: "The UNSUBSCRIBE is valid but the Server does not accept it"},
 		CodeNotAuthorized:               {iss: CodeIssuerBoth, desc: "The client is not authorized to unsubscribe"},
 		CodeTopicFilterNotValid:         {iss: CodeIssuerBoth, desc: "The topic filter is correctly formed but is not allowed for this client"},
-		CodePacketIdInUse:               {iss: CodeIssuerBoth, desc: "The specified packet identifier is already in use"},
+		CodePacketIDInUse:               {iss: CodeIssuerBoth, desc: "The specified packet identifier is already in use"},
 	},
 	DISCONNECT: {
 		CodeSuccess:                           {iss: CodeIssuerClient, desc: "Close the connection normally. Do not send the Will Message"},
@@ -162,7 +162,7 @@ var packetTypeCodeMap = map[PacketType]map[ReasonCode]struct {
 		CodeSharedSubscriptionNotSupported:    {iss: 0, desc: ""},
 		CodeConnectionRateExceeded:            {iss: 0, desc: ""},
 		CodeMaximumConnectTime:                {iss: CodeIssuerServer, desc: "The maximum connection time authorized for this connection has been exceeded"},
-		CodeSubscriptionIdNotSupported:        {iss: CodeIssuerServer, desc: "The Server does not support subscription identifiers; the subscription is not accepted"},
+		CodeSubscriptionIDNotSupported:        {iss: CodeIssuerServer, desc: "The Server does not support subscription identifiers; the subscription is not accepted"},
 		CodeWildcardSubscriptionsNotSupported: {iss: CodeIssuerServer, desc: "The Server does not support Wildcard subscription; the subscription is not accepted"},
 	},
 	AUTH: {
@@ -208,8 +208,8 @@ var codeDescMap = map[ReasonCode]string{
 	CodeSessionTakenOver:                   "",
 	CodeKeepAliveTimeout:                   "",
 	CodeTopicFilterNotValid:                "",
-	CodePacketIdInUse:                      "",
-	CodePacketIdNotFound:                   "",
+	CodePacketIDInUse:                      "",
+	CodePacketIDNotFound:                   "",
 	CodePacketTooLarge:                     "",
 	CodeMessageRateTooHigh:                 "",
 	CodeQuotaExceeded:                      "",
@@ -222,7 +222,7 @@ var codeDescMap = map[ReasonCode]string{
 	CodeSharedSubscriptionNotSupported:     "",
 	CodeConnectionRateExceeded:             "",
 	CodeMaximumConnectTime:                 "",
-	CodeSubscriptionIdNotSupported:         "",
+	CodeSubscriptionIDNotSupported:         "",
 	CodeWildcardSubscriptionsNotSupported:  "",
 }
 

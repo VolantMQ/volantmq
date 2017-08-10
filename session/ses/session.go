@@ -31,24 +31,23 @@ import (
 	"github.com/troian/surgemq/session/connection"
 	"github.com/troian/surgemq/subscriber"
 	"github.com/troian/surgemq/systree"
-	"github.com/troian/surgemq/topics/types"
+	"github.com/troian/surgemq/types"
 	"go.uber.org/zap"
 )
 
+// nolint: golint
 var (
-	ErrOverflow    = errors.New("overflow")
-	ErrPersistence = errors.New("error during persistence restore")
+	ErrOverflow    = errors.New("session: overflow")
+	ErrPersistence = errors.New("session: error during persistence restore")
 )
 
+// Callbacks provided by sessions manager to signal session state
 type Callbacks struct {
-	// OnClose called when session has done all work and should be deleted
-	//OnStop func(id string, s message.TopicQos)
-	// OnDisconnect called when session stopped net connection and should be either suspended or deleted
+	// OnStop called when session stopped net connection and should be either suspended or deleted
 	OnStop func(string, message.ProtocolVersion, *persistenceTypes.SessionState)
-	// OnPublish
-	OnPublish func(string, *message.PublishMessage)
 }
 
+// WillConfig configures session for will messages
 type WillConfig struct {
 	Topic   string
 	Message []byte
@@ -58,18 +57,14 @@ type WillConfig struct {
 
 // Config is system wide configuration parameters for every session
 type Config struct {
-	Id string
-
-	State      persistenceTypes.Session
-	Subscriber subscriber.SessionProvider
-	Messenger  topicsTypes.Messenger
-	Conn       io.Closer
-
-	Callbacks *Callbacks
-	Will      *message.PublishMessage
-
-	Metric systree.Metric
-
+	ID          string
+	State       persistenceTypes.Session
+	Subscriber  subscriber.SessionProvider
+	Messenger   types.TopicMessenger
+	Conn        io.Closer
+	Metric      systree.Metric
+	Callbacks   *Callbacks
+	Will        *message.PublishMessage
 	KeepAlive   int
 	SendQuota   int32
 	OfflineQoS0 bool
@@ -79,23 +74,19 @@ type Config struct {
 
 // Type session
 type Type struct {
-	packetID  uint64
-	callbacks *Callbacks
-	will      *message.PublishMessage
-	conn      *connection.Provider
-	pubIn     *ackQueue
-	pubOut    *ackQueue
-
+	packetID   uint64
+	callbacks  *Callbacks
+	will       *message.PublishMessage
+	conn       *connection.Provider
+	pubIn      *ackQueue
+	pubOut     *ackQueue
 	subscriber subscriber.SessionProvider
-	messenger  topicsTypes.Messenger
-
-	publisher publisher
-
-	id string
-
-	onStart sync.Once
-	onStop  sync.Once
-	started sync.WaitGroup
+	messenger  types.TopicMessenger
+	publisher  publisher
+	id         string
+	onStart    sync.Once
+	onStop     sync.Once
+	started    sync.WaitGroup
 
 	packetIds struct {
 		inUse map[message.PacketID]bool
@@ -130,7 +121,7 @@ func New(config *Config) (s *Type, present bool, err error) {
 	present = false
 
 	s = &Type{
-		id:          config.Id,
+		id:          config.ID,
 		subscriber:  config.Subscriber,
 		messenger:   config.Messenger,
 		version:     config.Version,

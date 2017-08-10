@@ -11,9 +11,12 @@ import (
 	"github.com/troian/surgemq/message"
 )
 
+// DynamicValue interface describes states of the dynamic value
 type DynamicValue interface {
 	Topic() string
+	// Retained used by topics provider to get retained message when there is new subscription to given topic
 	Retained() *message.PublishMessage
+	// Publish used by systree update routine to publish new value when on periodic basis
 	Publish() *message.PublishMessage
 }
 

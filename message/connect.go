@@ -169,7 +169,7 @@ func (msg *ConnectMessage) ResetWill() {
 	msg.will.message = []byte{}
 }
 
-// Credentials
+// Credentials returns user and password
 func (msg *ConnectMessage) Credentials() ([]byte, []byte) {
 	return msg.username, msg.password
 }

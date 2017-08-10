@@ -14,7 +14,8 @@ import (
 	"github.com/troian/surgemq/systree"
 )
 
-type TransportConfig struct {
+// Config is base configuration object used by all transports
+type Config struct {
 	// AuthManager
 	AuthManager *auth.Manager
 
@@ -26,6 +27,7 @@ type TransportConfig struct {
 	Anonymous bool
 }
 
+// InternalConfig used by server implementation to configure internal specific needs
 type InternalConfig struct {
 	// AllowedVersions what protocol version server will handle
 	// If not set than defaults to 0x3 and 0x04
@@ -47,7 +49,7 @@ type InternalConfig struct {
 type baseConfig struct {
 	InternalConfig
 
-	config TransportConfig
+	config Config
 
 	quit chan struct{}
 	log  *zap.Logger
@@ -61,9 +63,7 @@ type baseConfig struct {
 	protocol string
 }
 
-// Config listener
-type Config interface{}
-
+// Provider is interface that all of transports must implement
 type Provider interface {
 	Protocol() string
 	Serve() error
@@ -71,10 +71,12 @@ type Provider interface {
 	Port() int
 }
 
+// Port return tcp port used by transport
 func (c *baseConfig) Port() int {
 	return c.config.Port
 }
 
+// Protocol return protocol name used by transport
 func (c *baseConfig) Protocol() string {
 	return c.protocol
 }

@@ -41,6 +41,7 @@ func (e PropertyError) Error() string {
 	}
 }
 
+// KVPair user defined properties
 type KVPair struct {
 	Key   string
 	Value string

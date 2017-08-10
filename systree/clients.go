@@ -10,6 +10,7 @@ import (
 	"github.com/troian/surgemq/types"
 )
 
+// ClientConnectStatus is argument to client connected state
 type ClientConnectStatus struct {
 	Address        string
 	Username       string
@@ -28,7 +29,7 @@ type clientDisconnectStatus struct {
 type clients struct {
 	stat
 	topic         string
-	topicsManager Topics
+	topicsManager types.TopicMessenger
 }
 
 func newClients(topicPrefix string, retained *[]types.RetainObject) clients {

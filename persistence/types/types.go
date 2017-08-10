@@ -1,5 +1,6 @@
 package persistenceTypes
 
+// Errors persistence errors
 type Errors int
 
 const (
@@ -9,12 +10,12 @@ const (
 	ErrUnknownProvider
 	// ErrAlreadyExists object already exists
 	ErrAlreadyExists
+	// ErrNotInitialized persistence provider not initialized yet
 	ErrNotInitialized
 	// ErrNotFound object not found
 	ErrNotFound
 	// ErrNotOpen storage is not open
 	ErrNotOpen
-	ErrOverflow
 )
 
 var errorsDesc = map[Errors]string{
@@ -24,7 +25,6 @@ var errorsDesc = map[Errors]string{
 	ErrNotInitialized:  "persistence: not initialized",
 	ErrNotFound:        "persistence: not found",
 	ErrNotOpen:         "persistence: not open",
-	ErrOverflow:        "persistence: overflow",
 }
 
 // Errors description during persistence
@@ -43,6 +43,7 @@ type SessionState struct {
 	UnAckMessages [][]byte
 }
 
+// SystemState system configuration
 type SystemState struct {
 	Version  string
 	NodeName string
@@ -76,10 +77,12 @@ type Sessions interface {
 	Wipe() error
 }
 
+// Session persisted state of the session
 type Session interface {
 	Get([]byte) (*SessionState, error)
 }
 
+// System persistence state of the system configuration
 type System interface {
 	GetInfo() (*SystemState, error)
 	SetInfo(*SystemState) error

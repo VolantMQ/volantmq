@@ -35,10 +35,12 @@ func newAuthMessage() *AuthMessage {
 	return msg
 }
 
+// ReasonCode get authentication reason
 func (msg *AuthMessage) ReasonCode() ReasonCode {
 	return msg.authReason
 }
 
+// SetReasonCode set authentication reason code
 func (msg *AuthMessage) SetReasonCode(c ReasonCode) error {
 	if msg.authReason.IsValidForType(msg.mType) {
 		return ErrInvalidMessageType
