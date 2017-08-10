@@ -226,8 +226,8 @@ func (s *Provider) processIncoming() {
 			return
 		}
 
-		if ok, err := mType.Valid(s.config.ProtoVersion); !ok {
-			s.log.prod.Error("Invalid message type received", zap.String("ClientID", s.config.ID), zap.Error(err))
+		if ok, e := mType.Valid(s.config.ProtoVersion); !ok {
+			s.log.prod.Error("Invalid message type received", zap.String("ClientID", s.config.ID), zap.Error(e))
 			return
 		}
 
