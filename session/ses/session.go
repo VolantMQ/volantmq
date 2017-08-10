@@ -368,7 +368,6 @@ func (s *Type) onReleaseOut(msg message.Provider) {
 	case message.PUBACK:
 		fallthrough
 	case message.PUBCOMP:
-		// TODO: release packet ID
 		id, _ := msg.PacketID()
 		s.releasePacketID(id)
 
