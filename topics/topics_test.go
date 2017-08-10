@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/troian/surgemq/message"
-	"github.com/troian/surgemq/session/subscriber"
+	"github.com/troian/surgemq/subscriber"
 	"github.com/troian/surgemq/topics/types"
 )
 
@@ -54,7 +54,7 @@ func TestTopicsSubscribeInvalidQoS(t *testing.T) {
 		prov, err := New(p.config)
 		require.NoError(t, err)
 
-		_, _, err = prov.Subscribe("test", message.QosType(3), nil)
+		_, _, err = prov.Subscribe("test", message.QosType(3), nil, 0)
 		require.Error(t, message.ErrInvalidQoS, err.Error())
 
 		err = prov.Close()
@@ -67,7 +67,7 @@ func TestTopicsSubscribeInvalidMessage(t *testing.T) {
 		prov, err := New(p.config)
 		require.NoError(t, err)
 
-		_, _, err = prov.Subscribe("test", message.QosType(3), nil)
+		_, _, err = prov.Subscribe("test", message.QosType(3), nil, 0)
 		require.Error(t, message.ErrInvalidQoS, err.Error())
 
 		err = prov.Close()
@@ -81,7 +81,7 @@ func TestTopicsSubscription(t *testing.T) {
 		require.NoError(t, err)
 
 		sub1 := &subscriber.ProviderType{}
-		qos, _, err := prov.Subscribe("sports/tennis/+/stats", message.QoS2, sub1)
+		qos, _, err := prov.Subscribe("sports/tennis/+/stats", message.QoS2, sub1, 0)
 
 		require.NoError(t, err)
 		require.Equal(t, message.QoS2, qos)

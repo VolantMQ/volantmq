@@ -26,12 +26,10 @@ type publishEntry struct {
 type publishEntries map[uintptr][]*publishEntry
 
 type node struct {
-	retained interface{}
-
-	subs     subscribedEntries
-	parent   *node
-	children map[string]*node
-
+	retained       interface{}
+	subs           subscribedEntries
+	parent         *node
+	children       map[string]*node
 	getSubscribers func(p *publishEntries)
 }
 
@@ -51,16 +49,8 @@ func newNode(overlap bool, parent *node) *node {
 	return n
 }
 
-const (
-	topLevelReqular = iota
-	topLevelDollar
-)
-
-func (mT *provider) subscriptionInsert(levels []string, qos message.QosType, sub topicsTypes.Subscriber, id uint32) []*message.PublishMessage {
+func (mT *provider) leafInsertNode(levels []string) *node {
 	root := mT.root
-
-	retainedMessages := []*message.PublishMessage{}
-
 	for _, level := range levels {
 		// Add node if it doesn't already exist
 		node, ok := root.children[level]
@@ -73,6 +63,30 @@ func (mT *provider) subscriptionInsert(levels []string, qos message.QosType, sub
 		root = node
 	}
 
+	return root
+}
+
+func (mT *provider) leafSearchNode(levels []string) *node {
+	root := mT.root
+
+	// run down and try get path matching given topic
+	for _, token := range levels {
+		n, ok := root.children[token]
+		if !ok {
+			return nil
+		}
+
+		root = n
+	}
+
+	return root
+}
+
+func (mT *provider) subscriptionInsert(filter string, qos message.QosType, sub topicsTypes.Subscriber, id uint32) {
+	levels := strings.Split(filter, "/")
+
+	root := mT.leafInsertNode(levels)
+
 	// Let's see if the subscriber is already on the list and just update QoS if so
 	// Otherwise create new entry
 	if s, ok := root.subs[sub.Hash()]; !ok {
@@ -84,24 +98,16 @@ func (mT *provider) subscriptionInsert(levels []string, qos message.QosType, sub
 	} else {
 		s.grantedQoS = qos
 	}
-
-	return retainedMessages
 }
 
-func (mT *provider) subscriptionRemove(levels []string, sub topicsTypes.Subscriber) error {
-	//levels := strings.Split(topic, "/")
+func (mT *provider) subscriptionRemove(topic string, sub topicsTypes.Subscriber) error {
+	levels := strings.Split(topic, "/")
 
 	var err error
-	root := mT.root
 
-	// run down and try get path matching given topic
-	for _, token := range levels {
-		n, ok := root.children[token]
-		if !ok {
-			return topicsTypes.ErrNotFound
-		}
-
-		root = n
+	root := mT.leafSearchNode(levels)
+	if root == nil {
+		return topicsTypes.ErrNotFound
 	}
 
 	// path matching the topic exists.
@@ -161,8 +167,9 @@ func subscriptionRecurseSearch(root *node, levels []string, p *publishEntries) {
 	}
 }
 
-func (mT *provider) subscriptionSearch(levels []string, p *publishEntries) {
+func (mT *provider) subscriptionSearch(topic string, p *publishEntries) {
 	root := mT.root
+	levels := strings.Split(topic, "/")
 	level := levels[0]
 
 	if !strings.HasPrefix(level, "$") {
@@ -172,33 +179,20 @@ func (mT *provider) subscriptionSearch(levels []string, p *publishEntries) {
 	}
 }
 
-func (mT *provider) retainInsert(levels []string, obj types.RetainObject) {
-	root := mT.root
+func (mT *provider) retainInsert(topic string, obj types.RetainObject) {
+	levels := strings.Split(topic, "/")
 
-	for _, token := range levels {
-		// Add node if it doesn't already exist
-		node, ok := root.children[token]
-		if !ok {
-			node = newNode(mT.allowOverlapping, root)
-			root.children[token] = node
-		}
-		root = node
-	}
+	root := mT.leafInsertNode(levels)
 
 	root.retained = obj
 }
 
-func (mT *provider) retainRemove(levels []string) error {
-	root := mT.root
+func (mT *provider) retainRemove(topic string) error {
+	levels := strings.Split(topic, "/")
 
-	// run down and try get path matching given topic
-	for _, token := range levels {
-		n, ok := root.children[token]
-		if !ok {
-			return topicsTypes.ErrNotFound
-		}
-
-		root = n
+	root := mT.leafSearchNode(levels)
+	if root == nil {
+		return topicsTypes.ErrNotFound
 	}
 
 	root.retained = nil
@@ -247,8 +241,10 @@ func retainRecurseSearch(root *node, levels []string, retained *[]*message.Publi
 	}
 }
 
-func (mT *provider) retainSearch(levels []string, retained *[]*message.PublishMessage) {
+func (mT *provider) retainSearch(filter string, retained *[]*message.PublishMessage) {
+	levels := strings.Split(filter, "/")
 	level := levels[0]
+
 	if level == topicsTypes.MWC {
 		for t, n := range mT.root.children {
 			if t != "" && !strings.HasPrefix(t, "$") {

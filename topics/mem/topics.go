@@ -17,8 +17,6 @@ package mem
 import (
 	"sync"
 
-	"strings"
-
 	"github.com/troian/surgemq/configuration"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/persistence/types"
@@ -111,7 +109,7 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 	return p, nil
 }
 
-func (mT *provider) Subscribe(t string, q message.QosType, s topicsTypes.Subscriber, id uint32) (message.QosType, []*message.PublishMessage, error) {
+func (mT *provider) Subscribe(filter string, q message.QosType, s topicsTypes.Subscriber, id uint32) (message.QosType, []*message.PublishMessage, error) {
 	if !q.IsValid() {
 		return message.QosFailure, nil, message.ErrInvalidQoS
 	}
@@ -120,28 +118,24 @@ func (mT *provider) Subscribe(t string, q message.QosType, s topicsTypes.Subscri
 		return message.QosFailure, nil, topicsTypes.ErrInvalidSubscriber
 	}
 
-	levels := strings.Split(t, "/")
-
 	defer mT.smu.Unlock()
 	mT.smu.Lock()
 
-	mT.subscriptionInsert(levels, q, s, id)
+	mT.subscriptionInsert(filter, q, s, id)
 
 	var r []*message.PublishMessage
 
 	// [MQTT-3.3.1-5]
-	mT.retainSearch(levels, &r)
+	mT.retainSearch(filter, &r)
 
 	return q, r, nil
 }
 
 func (mT *provider) UnSubscribe(topic string, sub topicsTypes.Subscriber) error {
-	levels := strings.Split(topic, "/")
-
 	defer mT.smu.Unlock()
 	mT.smu.Lock()
 
-	return mT.subscriptionRemove(levels, sub)
+	return mT.subscriptionRemove(topic, sub)
 }
 
 func (mT *provider) Publish(msg *message.PublishMessage) error {
@@ -156,9 +150,7 @@ func (mT *provider) Retain(obj types.RetainObject) error {
 	return nil
 }
 
-func (mT *provider) Retained(topic string) ([]*message.PublishMessage, error) {
-	levels := strings.Split(topic, "/")
-
+func (mT *provider) Retained(filter string) ([]*message.PublishMessage, error) {
 	// [MQTT-3.3.1-5]
 	var r []*message.PublishMessage
 
@@ -166,7 +158,7 @@ func (mT *provider) Retained(topic string) ([]*message.PublishMessage, error) {
 	mT.smu.Lock()
 
 	// [MQTT-3.3.1-5]
-	mT.retainSearch(levels, &r)
+	mT.retainSearch(filter, &r)
 
 	return r, nil
 }
@@ -215,7 +207,6 @@ func (mT *provider) Close() error {
 }
 
 func (mT *provider) retain(obj types.RetainObject) {
-	levels := strings.Split(obj.Topic(), "/")
 	insert := true
 
 	mT.smu.Lock()
@@ -224,7 +215,7 @@ func (mT *provider) retain(obj types.RetainObject) {
 	case *message.PublishMessage:
 		// [MQTT-3.3.1-10]            [MQTT-3.3.1-7]
 		if len(t.Payload()) == 0 || t.QoS() == message.QoS0 {
-			mT.retainRemove(levels) // nolint: errcheck
+			mT.retainRemove(obj.Topic()) // nolint: errcheck
 			if len(t.Payload()) == 0 {
 				insert = false
 			}
@@ -232,7 +223,7 @@ func (mT *provider) retain(obj types.RetainObject) {
 	}
 
 	if insert {
-		mT.retainInsert(levels, obj)
+		mT.retainInsert(obj.Topic(), obj)
 	}
 
 	mT.smu.Unlock()
@@ -254,11 +245,10 @@ func (mT *provider) publisher() {
 	mT.wgPublisherStarted.Done()
 
 	for msg := range mT.inbound {
-		levels := strings.Split(msg.Topic(), "/")
 		pubEntries := publishEntries{}
 
 		mT.smu.Lock()
-		mT.subscriptionSearch(levels, &pubEntries)
+		mT.subscriptionSearch(msg.Topic(), &pubEntries)
 
 		for _, pub := range pubEntries {
 			for _, e := range pub {
