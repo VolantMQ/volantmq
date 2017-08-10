@@ -1,16 +1,23 @@
 language: go
+sudo: false
+notifications:
+  email: false
 go:
   - 1.8.3
-
-before_script:
-  - go get github.com/alecthomas/gometalinter
-  - gometalinter --install
-
-script:
-  - go build -race -v -gcflags "-N -l" ./...
-  - output=$(goimports -d .) && [[ -z "$output" ]]
-  - gometalinter --fast --exclude=corefoundation.go --deadline=360s --enable-gc --sort=path --vendor --cyclo-over=40 --dupl-threshold=100 --disable=gotype ./...
-  - ./go.test.sh
-
-after_success:
-  - bash <(curl -s https://codecov.io/bash)
+jobs:
+  include:
+    - stage: test
+      install:
+        - npm install -g codeclimate-test-reporter
+        - go get -u github.com/alecthomas/gometalinter
+        - gometalinter --install
+        - go get -u github.com/golang/dep/cmd/dep
+        - dep ensure
+      os: linux
+      script:
+        - go build -race -v -gcflags "-N -l" ./examples/surgemq
+        - gometalinter --fast --exclude=corefoundation.go --deadline=360s --enable-gc --sort=path --vendor --cyclo-over=40 --dupl-threshold=100 --disable=gotype ./...
+        - ./go.test.sh
+      after_success:
+        - bash <(curl -s https://codecov.io/bash)
+        - codeclimate-test-reporter < coverage.txt
