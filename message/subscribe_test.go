@@ -24,15 +24,21 @@ import (
 )
 
 func TestSubscribeMessageFields(t *testing.T) {
-	msg := NewSubscribeMessage()
+	m, err := NewMessage(ProtocolV311, SUBSCRIBE)
+	require.NoError(t, err)
+
+	msg, ok := m.(*SubscribeMessage)
+	require.True(t, ok, "Couldn't cast message type")
 
 	msg.SetPacketID(100)
-	require.Equal(t, 100, int(msg.PacketID()), "Error setting packet ID.")
+
+	id, _ := msg.PacketID()
+	require.Equal(t, PacketID(100), id, "Error setting packet ID.")
 
 	msg.AddTopic("/a/b/#/c", 1) // nolint: errcheck
 	require.Equal(t, 1, msg.Topics().Len(), "Error adding topic.")
 
-	_, ok := msg.Topics().Get("a/b")
+	_, ok = msg.Topics().Get("a/b")
 	require.False(t, ok, "Topic should not exist.")
 
 	msg.RemoveTopic("/a/b/#/c")
@@ -61,7 +67,7 @@ func TestSubscribeMessageDecode(t *testing.T) {
 	}
 
 	//msg := NewSubscribeMessage()
-	m, n, err := Decode(msgBytes)
+	m, n, err := Decode(ProtocolV311, msgBytes)
 	msg, ok := m.(*SubscribeMessage)
 	require.Equal(t, true, ok, "Invalid message type")
 
@@ -70,17 +76,17 @@ func TestSubscribeMessageDecode(t *testing.T) {
 	require.Equal(t, SUBSCRIBE, msg.Type(), "Error decoding message.")
 	require.Equal(t, 3, msg.Topics().Len(), "Error decoding topics.")
 
-	qos, ok := msg.topics.Get("surgemq")
+	ops, ok := msg.topics.Get("surgemq")
 	require.True(t, ok, "Topic 'surgemq' should exist.")
-	require.Equal(t, QoS0, qos, "Incorrect topic qos.")
+	require.Equal(t, SubscriptionOptions(QoS0), ops, "Incorrect topic qos.")
 
-	qos, ok = msg.topics.Get("/a/b/#/c")
+	ops, ok = msg.topics.Get("/a/b/#/c")
 	require.True(t, ok, "Topic '/a/b/#/c' should exist.")
-	require.Equal(t, QoS1, qos, "Incorrect topic qos.")
+	require.Equal(t, SubscriptionOptions(QoS1), ops, "Incorrect topic qos.")
 
-	qos, ok = msg.topics.Get("/a/b/#/cdd")
+	ops, ok = msg.topics.Get("/a/b/#/cdd")
 	require.True(t, ok, "Topic '/a/b/#/cdd' should exist.")
-	require.Equal(t, QoS2, qos, "Incorrect topic qos.")
+	require.Equal(t, SubscriptionOptions(QoS2), ops, "Incorrect topic qos.")
 }
 
 // test empty topic list
@@ -92,7 +98,7 @@ func TestSubscribeMessageDecode2(t *testing.T) {
 		7, // packet ID LSB (7)
 	}
 
-	_, _, err := Decode(msgBytes)
+	_, _, err := Decode(ProtocolV311, msgBytes)
 
 	require.Error(t, err)
 }
@@ -117,7 +123,12 @@ func TestSubscribeMessageEncode(t *testing.T) {
 		2, // QoS
 	}
 
-	msg := NewSubscribeMessage()
+	m, err := NewMessage(ProtocolV311, SUBSCRIBE)
+	require.NoError(t, err)
+
+	msg, ok := m.(*SubscribeMessage)
+	require.True(t, ok, "Couldn't cast message type")
+
 	msg.SetPacketID(7)
 	msg.AddTopic("surgemq", 0)    // nolint: errcheck
 	msg.AddTopic("/a/b/#/c", 1)   // nolint: errcheck
@@ -130,24 +141,24 @@ func TestSubscribeMessageEncode(t *testing.T) {
 
 	//msg1 := NewSubscribeMessage()
 	var m1 Provider
-	m1, n, err = Decode(dst)
+	m1, n, err = Decode(ProtocolV311, dst)
 	msg1, ok := m1.(*SubscribeMessage)
 	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
 
-	qos, ok := msg1.Topics().Get("surgemq")
+	ops, ok := msg1.Topics().Get("surgemq")
 	require.True(t, ok, "Error decoding message.")
-	require.Equal(t, QoS0, qos, "Error decoding message.")
+	require.Equal(t, SubscriptionOptions(QoS0), ops, "Error decoding message.")
 
-	qos, ok = msg1.Topics().Get("/a/b/#/c")
+	ops, ok = msg1.Topics().Get("/a/b/#/c")
 	require.True(t, ok, "Error decoding message.")
-	require.Equal(t, QoS1, qos, "Error decoding message.")
+	require.Equal(t, SubscriptionOptions(QoS1), ops, "Error decoding message.")
 
-	qos, ok = msg1.Topics().Get("/a/b/#/cdd")
+	ops, ok = msg1.Topics().Get("/a/b/#/cdd")
 	require.True(t, ok, "Error decoding message.")
-	require.Equal(t, QoS2, qos, "Error decoding message.")
+	require.Equal(t, SubscriptionOptions(QoS2), ops, "Error decoding message.")
 
 	require.Equal(t, 3, msg1.Topics().Len(), "Error decoding message.")
 }
@@ -175,7 +186,7 @@ func TestSubscribeDecodeEncodeEquiv(t *testing.T) {
 	}
 
 	//msg := NewSubscribeMessage()
-	m, n, err := Decode(msgBytes)
+	m, n, err := Decode(ProtocolV311, msgBytes)
 	msg, ok := m.(*SubscribeMessage)
 	require.Equal(t, true, ok, "Invalid message type")
 
@@ -188,19 +199,19 @@ func TestSubscribeDecodeEncodeEquiv(t *testing.T) {
 	require.NoError(t, err, "Error encoding message")
 	require.Equal(t, len(msgBytes), n2, "Raw message length does not match")
 
-	qos, exists := msg.Topics().Get("surgemq")
+	ops, exists := msg.Topics().Get("surgemq")
 	require.True(t, exists, "Required topic does not exist")
-	require.Equal(t, QoS0, qos, "Invalid QoS for topic")
+	require.Equal(t, SubscriptionOptions(QoS0), ops, "Invalid QoS for topic")
 
-	qos, exists = msg.Topics().Get("/a/b/#/c")
+	ops, exists = msg.Topics().Get("/a/b/#/c")
 	require.True(t, exists, "Required topic does not exist")
-	require.Equal(t, QoS1, qos, "Invalid QoS for topic")
+	require.Equal(t, SubscriptionOptions(QoS1), ops, "Invalid QoS for topic")
 
-	qos, exists = msg.Topics().Get("/a/b/#/cdd")
+	ops, exists = msg.Topics().Get("/a/b/#/cdd")
 	require.True(t, exists, "Required topic does not exist")
-	require.Equal(t, QoS2, qos, "Invalid QoS for topic")
+	require.Equal(t, SubscriptionOptions(QoS2), ops, "Invalid QoS for topic")
 
-	_, n3, err := Decode(dst)
+	_, n3, err := Decode(ProtocolV311, dst)
 	require.NoError(t, err, "Error decoding message")
 	require.Equal(t, len(msgBytes), n3, "Raw message length does not match")
 }
@@ -228,7 +239,7 @@ func TestSubscribeDecodeOrder(t *testing.T) {
 	}
 
 	//msg := NewSubscribeMessage()
-	m, n, err := Decode(msgBytes)
+	m, n, err := Decode(ProtocolV311, msgBytes)
 	msg, ok := m.(*SubscribeMessage)
 	require.Equal(t, true, ok, "Invalid message type")
 	require.NoError(t, err, "Error decoding message")
@@ -240,13 +251,13 @@ func TestSubscribeDecodeOrder(t *testing.T) {
 		switch i {
 		case 0:
 			require.Equal(t, "surgemq", kv.Key.(string))
-			require.Equal(t, QoS0, kv.Value.(QosType))
+			require.Equal(t, SubscriptionOptions(QoS0), kv.Value.(SubscriptionOptions))
 		case 1:
 			require.Equal(t, "/a/b/#/c", kv.Key.(string))
-			require.Equal(t, QoS1, kv.Value.(QosType))
+			require.Equal(t, SubscriptionOptions(QoS1), kv.Value.(SubscriptionOptions))
 		case 2:
 			require.Equal(t, "/a/b/#/cdd", kv.Key.(string))
-			require.Equal(t, QoS2, kv.Value.(QosType))
+			require.Equal(t, SubscriptionOptions(QoS2), kv.Value.(SubscriptionOptions))
 		default:
 			assert.Error(t, errors.New("Invalid topics count"))
 		}

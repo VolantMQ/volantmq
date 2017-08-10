@@ -68,20 +68,4 @@
 //       conformance test because the features are not yet implemented.
 //     - Actually I think there's a bug in the test suite as it calls the PUBLISH
 //       handler function for non-PUBLISH messages.
-//
-// A quick example of how to use SurgeMQ:
-//   func main() {
-//       // Create a new server
-//       svr := &service.Server{
-//           KeepAlive:        300,               // seconds
-//           ConnectTimeout:   2,                 // seconds
-//           SessionsProvider: "mem",             // keeps sessions in memory
-//           Authenticator:    "mockSuccess",     // always succeed
-//           TopicsProvider:   "mem",             // keeps topic subscriptions in memory
-//       }
-//
-//       // Listen and serve connections at localhost:1883
-//       err := svr.ListenAndServe("tcp://:1883")
-//       fmt.Printf("%v", err)
-//   }
 package surgemq

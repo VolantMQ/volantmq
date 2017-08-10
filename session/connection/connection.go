@@ -1,4 +1,4 @@
-package session
+package connection
 
 import (
 	"encoding/binary"
@@ -8,34 +8,63 @@ import (
 
 	"errors"
 	"sync"
-	"sync/atomic"
 
-	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/buffer"
+	"github.com/troian/surgemq/configuration"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/systree"
-	"github.com/troian/surgemq/types"
 	"go.uber.org/zap"
 )
 
-type onProcess struct {
-	publish     func(msg *message.PublishMessage) error
-	ack         func(msg message.Provider) error
-	subscribe   func(msg *message.SubscribeMessage) error
-	unSubscribe func(msg *message.UnSubscribeMessage) (*message.UnSubAckMessage, error)
-	disconnect  func(will bool)
+// OnProcess callbacks to parent session
+type OnProcess struct {
+	// Publish call when PUBLISH message received
+	Publish func(msg *message.PublishMessage) error
+
+	// Ack call when PUBACK/PUBREC/PUBREL/PUBCOMP received
+	Ack func(msg message.Provider) error
+
+	// Subscribe call when SUBSCRIBE message received
+	Subscribe func(msg *message.SubscribeMessage) error
+
+	// UnSubscribe call when UNSUBSCRIBE message received
+	UnSubscribe func(msg *message.UnSubscribeMessage) (*message.UnSubAckMessage, error)
+
+	// Disconnect call when connection falls into error or received DISCONNECT message
+	Disconnect func(will bool)
 }
 
-type connConfig struct {
-	id            string
-	keepAlive     int
-	conn          io.Closer
-	on            onProcess
-	packetsMetric systree.PacketsMetric
+// Config of connection
+type Config struct {
+	// On parent session callbacks
+	On OnProcess
+
+	// Conn is network connection
+	Conn io.Closer
+
+	// PacketsMetric interface to metric packets
+	PacketsMetric systree.PacketsMetric
+
+	// ID ClientID
+	ID string
+
+	// KeepAlive
+	KeepAlive int
+
+	// ProtoVersion MQTT protocol version
+	ProtoVersion message.ProtocolVersion
 }
 
-type connection struct {
-	config connConfig
+// Provider implementation of the connection
+type Provider struct {
+	// Incoming data buffer. Bytes are read from the connection and put in here.
+	in *buffer.Type
+
+	// Outgoing data buffer. Bytes written here are in turn written out to the connection.
+	out *buffer.Type
+
+	config *Config
+
 	// Wait for the various goroutines to finish starting and stopping
 	wg struct {
 		routines struct {
@@ -48,27 +77,19 @@ type connection struct {
 		}
 	}
 
-	wmu sync.Mutex
-
-	// Whether this connection is running or not.
-	running int64
+	log struct {
+		prod *zap.Logger
+		dev  *zap.Logger
+	}
 
 	// Quit signal for determining when this service should end. If channel is closed,
 	// then exit.
 	done chan struct{}
 
-	// Incoming data buffer. Bytes are read from the connection and put in here.
-	in *buffer.Type
-
-	// Outgoing data buffer. Bytes written here are in turn written out to the connection.
-	out *buffer.Type
+	wmu    sync.Mutex
+	onStop sync.Once
 
 	will bool
-
-	log struct {
-		prod *zap.Logger
-		dev  *zap.Logger
-	}
 }
 
 type netReader interface {
@@ -81,15 +102,16 @@ type timeoutReader struct {
 	conn netReader
 }
 
-func newConnection(config connConfig) (conn *connection, err error) {
-	conn = &connection{
+// New connection
+func New(config *Config) (conn *Provider, err error) {
+	conn = &Provider{
 		config: config,
 		done:   make(chan struct{}),
 		will:   true,
 	}
 
-	conn.log.prod = surgemq.GetProdLogger().Named("session.conn." + config.id)
-	conn.log.dev = surgemq.GetDevLogger().Named("session.conn." + config.id)
+	conn.log.prod = configuration.GetProdLogger().Named("session.conn." + config.ID)
+	conn.log.dev = configuration.GetDevLogger().Named("session.conn." + config.ID)
 
 	conn.wg.conn.started.Add(1)
 	conn.wg.conn.stopped.Add(1)
@@ -109,15 +131,8 @@ func newConnection(config connConfig) (conn *connection, err error) {
 	return conn, nil
 }
 
-// start serving messages over this connection
-func (s *connection) start() {
-	// firstly check if connection already runnin
-	if !atomic.CompareAndSwapInt64(&s.running, 0, 1) {
-		// already running. Check if previous call to start has finished before return
-		s.wg.conn.started.Wait()
-		return
-	}
-
+// Start serving messages over this connection
+func (s *Provider) Start() {
 	defer s.wg.conn.started.Done()
 
 	s.wg.routines.stopped.Add(3)
@@ -137,44 +152,38 @@ func (s *connection) start() {
 	s.wg.routines.started.Wait()
 }
 
-func (s *connection) stop() (ret bool) {
+// Stop connection. Effective is only first invoke
+func (s *Provider) Stop() {
+	defer s.onStop.Do(func() {
+		// Close quit channel, effectively telling all the goroutines it's time to quit
+		close(s.done)
+
+		if err := s.config.Conn.Close(); err != nil {
+			s.log.prod.Error("close connection", zap.String("ClientID", s.config.ID), zap.Error(err))
+		}
+
+		if err := s.in.Close(); err != nil {
+			s.log.prod.Error("close input buffer error", zap.String("ClientID", s.config.ID), zap.Error(err))
+		}
+
+		if err := s.out.Close(); err != nil {
+			s.log.prod.Error("close output buffer error", zap.String("ClientID", s.config.ID), zap.Error(err))
+		}
+
+		// Wait for all the connection goroutines are finished
+		s.wg.routines.stopped.Wait()
+
+		s.wg.conn.stopped.Done()
+
+		s.config.On.Disconnect(s.will)
+	})
+
 	// wait if stop invoked before start finished
 	s.wg.conn.started.Wait()
 
-	// if connection stop has already been invoked wait for previous call to finish
-	if !atomic.CompareAndSwapInt64(&s.running, 1, 0) {
-		// already running. Check if previous call to start has finished before return
-		s.wg.conn.stopped.Wait()
-		return false
-	}
-
-	// Close quit channel, effectively telling all the goroutines it's time to quit
-	close(s.done)
-
-	// Close the network connection
-	// we do not check for error here as connection might be already closed by session
-	s.config.conn.Close() // nolint: goling, errcheck, gas
-
-	if err := s.in.Close(); err != nil {
-		s.log.prod.Error("close input buffer error", zap.String("ClientID", s.config.id), zap.Error(err))
-	}
-
-	if err := s.out.Close(); err != nil {
-		s.log.prod.Error("close output buffer error", zap.String("ClientID", s.config.id), zap.Error(err))
-	}
-
-	// Wait for all the connection goroutines are finished
-	s.wg.routines.stopped.Wait()
-
-	s.wg.conn.stopped.Done()
-
-	defer func(will bool, onDisconnect func(will bool)) {
-		onDisconnect(will)
-	}(s.will, s.config.on.disconnect)
-
-	return true
 }
 
+// Read
 func (r timeoutReader) Read(b []byte) (int, error) {
 	if err := r.conn.SetReadDeadline(time.Now().Add(r.d)); err != nil {
 		return 0, err
@@ -182,7 +191,8 @@ func (r timeoutReader) Read(b []byte) (int, error) {
 	return r.conn.Read(b)
 }
 
-func (s *connection) isDone() bool {
+// isDone
+func (s *Provider) isDone() bool {
 	select {
 	case <-s.done:
 		return true
@@ -193,8 +203,15 @@ func (s *connection) isDone() bool {
 	return false
 }
 
+// onRoutineReturn
+func (s *Provider) onRoutineReturn() {
+	s.wg.routines.stopped.Done()
+
+	s.Stop()
+}
+
 // reads message income messages
-func (s *connection) processIncoming() {
+func (s *Provider) processIncoming() {
 	defer s.onRoutineReturn()
 
 	s.wg.routines.started.Done()
@@ -204,13 +221,13 @@ func (s *connection) processIncoming() {
 		mType, total, err := s.peekMessageSize()
 		if err != nil {
 			if err != io.EOF {
-				s.log.prod.Error("Error peeking next message size", zap.String("ClientID", s.config.id), zap.Error(err))
+				s.log.prod.Error("Error peeking next message size", zap.String("ClientID", s.config.ID), zap.Error(err))
 			}
 			return
 		}
 
-		if !mType.Valid() {
-			s.log.prod.Error("Invalid message type received", zap.String("ClientID", s.config.id))
+		if ok, e := mType.Valid(s.config.ProtoVersion); !ok {
+			s.log.prod.Error("Invalid message type received", zap.String("ClientID", s.config.ID), zap.Error(e))
 			return
 		}
 
@@ -221,47 +238,51 @@ func (s *connection) processIncoming() {
 		if err != nil {
 			if err != io.EOF {
 				s.log.prod.Error("Couldn't read message",
-					zap.String("ClientID", s.config.id),
+					zap.String("ClientID", s.config.ID),
 					zap.Error(err),
 					zap.Int("total len", total))
 			}
 			return
 		}
 
-		s.config.packetsMetric.Received(msg.Type())
+		s.config.PacketsMetric.Received(msg.Type())
 
 		// 3. Put message for further processing
 		var resp message.Provider
 		switch m := msg.(type) {
 		case *message.PublishMessage:
-			err = s.config.on.publish(m)
-		case *message.PubAckMessage:
-			err = s.config.on.ack(msg)
-		case *message.PubRecMessage:
-			err = s.config.on.ack(msg)
-		case *message.PubRelMessage:
-			err = s.config.on.ack(msg)
-		case *message.PubCompMessage:
-			err = s.config.on.ack(msg)
+			err = s.config.On.Publish(m)
+		case *message.AckMessage:
+			err = s.config.On.Ack(msg)
 		case *message.SubscribeMessage:
-			err = s.config.on.subscribe(m)
+			err = s.config.On.Subscribe(m)
 		case *message.UnSubscribeMessage:
-			resp, _ = s.config.on.unSubscribe(m)
-			_, err = s.writeMessage(resp)
+			resp, _ = s.config.On.UnSubscribe(m)
+			_, err = s.WriteMessage(resp)
 		//case *message.UnSubAckMessage:
 		//	// For UNSUBACK message, we should send to ack queue
 		//	s.config.ackQueues.unSubAck.Ack(msg) // nolint: errcheck
 		//	s.processAcked(s.config.ackQueues.unSubAck)
 		case *message.PingReqMessage:
 			// For PINGREQ message, we should send back PINGRESP
-			resp = message.NewPingRespMessage()
-			_, err = s.writeMessage(resp)
+			mR, _ := message.NewMessage(s.config.ProtoVersion, message.PINGRESP)
+			resp, _ := mR.(*message.PingRespMessage)
+			_, err = s.WriteMessage(resp)
 		case *message.DisconnectMessage:
 			// For DISCONNECT message, we should quit without sending Will
 			s.will = false
+
+			if s.config.ProtoVersion == message.ProtocolV50 {
+				if m.ReasonCode() == message.CodeDisconnectWithWillMessage {
+					s.will = true
+				}
+			}
+
 			return
 		default:
-			s.log.prod.Error("Unsupported incoming message type", zap.String("ClientID", s.config.id), zap.String("type", msg.Type().Name()))
+			s.log.prod.Error("Unsupported incoming message type",
+				zap.String("ClientID", s.config.ID),
+				zap.String("type", msg.Type().Name()))
 			return
 		}
 
@@ -276,14 +297,14 @@ func (s *connection) processIncoming() {
 }
 
 // receiver reads data from the network, and writes the data into the incoming buffer
-func (s *connection) receiver() {
+func (s *Provider) receiver() {
 	defer s.onRoutineReturn()
 
 	s.wg.routines.started.Done()
 
-	switch conn := s.config.conn.(type) {
+	switch conn := s.config.Conn.(type) {
 	case net.Conn:
-		keepAlive := time.Second * time.Duration(s.config.keepAlive)
+		keepAlive := time.Second * time.Duration(s.config.KeepAlive)
 		r := timeoutReader{
 			d:    keepAlive + (keepAlive / 2),
 			conn: conn,
@@ -295,17 +316,17 @@ func (s *connection) receiver() {
 			}
 		}
 	default:
-		s.log.prod.Error("Invalid connection type", zap.String("ClientID", s.config.id))
+		s.log.prod.Error("Invalid connection type", zap.String("ClientID", s.config.ID))
 	}
 }
 
 // sender writes data from the outgoing buffer to the network
-func (s *connection) sender() {
+func (s *Provider) sender() {
 	defer s.onRoutineReturn()
 
 	s.wg.routines.started.Done()
 
-	switch conn := s.config.conn.(type) {
+	switch conn := s.config.Conn.(type) {
 	case net.Conn:
 		for {
 			if _, err := s.out.WriteTo(conn); err != nil {
@@ -313,29 +334,19 @@ func (s *connection) sender() {
 			}
 		}
 	default:
-		s.log.prod.Error("Invalid connection type", zap.String("ClientID", s.config.id))
-	}
-}
-
-func (s *connection) onRoutineReturn() {
-	s.wg.routines.stopped.Done()
-	s.stop()
-
-	if r := recover(); r != nil {
-		s.log.prod.Error("Recover from panic")
-		//debug.PrintStack()
+		s.log.prod.Error("Invalid connection type", zap.String("ClientID", s.config.ID))
 	}
 }
 
 // peekMessageSize reads, but not commits, enough bytes to determine the size of
 // the next message and returns the type and size.
-func (s *connection) peekMessageSize() (message.Type, int, error) {
+func (s *Provider) peekMessageSize() (message.PacketType, int, error) {
 	var b []byte
 	var err error
 	cnt := 2
 
 	if s.in == nil {
-		err = types.ErrBufferNotReady
+		err = buffer.ErrNotReady
 		return 0, 0, err
 	}
 
@@ -372,9 +383,86 @@ func (s *connection) peekMessageSize() (message.Type, int, error) {
 	// Total message length is remlen + 1 (msg type) + m (remlen bytes)
 	total := int(remLen) + 1 + m
 
-	mType := message.Type(b[0] >> 4)
+	mType := message.PacketType(b[0] >> 4)
 
 	return mType, total, err
+}
+
+// readMessage reads and copies a message from the buffer. The buffer bytes are
+// committed as a result of the read.
+func (s *Provider) readMessage(total int) (message.Provider, int, error) {
+	defer func() {
+		if int64(len(s.in.ExternalBuf)) > s.in.Size() {
+			s.in.ExternalBuf = make([]byte, s.in.Size())
+		}
+	}()
+
+	var err error
+	var n int
+	var msg message.Provider
+
+	if s.in == nil {
+		err = buffer.ErrNotReady
+		return nil, 0, err
+	}
+
+	if len(s.in.ExternalBuf) < total {
+		s.in.ExternalBuf = make([]byte, total)
+	}
+
+	// Read until we get total bytes
+	l := 0
+	toRead := total
+	for l < total {
+		n, err = s.in.Read(s.in.ExternalBuf[l : l+toRead])
+		l += n
+		toRead -= n
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+
+	var dTotal int
+	if msg, dTotal, err = message.Decode(s.config.ProtoVersion, s.in.ExternalBuf[:total]); err == nil && total != dTotal {
+		s.log.prod.Error("Incoming and outgoing length does not match",
+			zap.Int("in", total),
+			zap.Int("out", dTotal))
+		return nil, 0, buffer.ErrNotReady
+	}
+
+	return msg, n, err
+}
+
+// WriteMessage writes a message to the outgoing buffer
+func (s *Provider) WriteMessage(msg message.Provider) (int, error) {
+	// FIXME: Try to find a better way than a mutex...if possible.
+	// This is to serialize writes to the underlying buffer. Multiple goroutines could
+	// potentially get here because of calling Publish() or Subscribe() or other
+	// functions that will send messages. For example, if a message is received in
+	// another connection, and the message needs to be published to this client, then
+	// the Publish() function is called, and at the same time, another client could
+	// do exactly the same thing.
+	//
+	// Not an ideal fix though. If possible we should remove mutex and be lockfree.
+	// Mainly because when there's a large number of goroutines that want to publish
+	// to this client, then they will all block. However, this will do for now.
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+
+	if s.out == nil {
+		return 0, buffer.ErrNotReady
+	}
+
+	var total int
+	var err error
+
+	total, err = message.WriteToBuffer(msg, s.out)
+
+	if err == nil {
+		s.config.PacketsMetric.Sent(msg.Type())
+	}
+
+	return total, err
 }
 
 // peekMessage reads a message from the buffer, but the bytes are NOT committed.
@@ -413,80 +501,3 @@ func (s *connection) peekMessageSize() (message.Type, int, error) {
 //	n, err = msg.decode(b)
 //	return msg, n, err
 //}
-
-// readMessage reads and copies a message from the buffer. The buffer bytes are
-// committed as a result of the read.
-func (s *connection) readMessage(total int) (message.Provider, int, error) {
-	defer func() {
-		if int64(len(s.in.ExternalBuf)) > s.in.Size() {
-			s.in.ExternalBuf = make([]byte, s.in.Size())
-		}
-	}()
-
-	var err error
-	var n int
-	var msg message.Provider
-
-	if s.in == nil {
-		err = types.ErrBufferNotReady
-		return nil, 0, err
-	}
-
-	if len(s.in.ExternalBuf) < total {
-		s.in.ExternalBuf = make([]byte, total)
-	}
-
-	// Read until we get total bytes
-	l := 0
-	toRead := total
-	for l < total {
-		n, err = s.in.Read(s.in.ExternalBuf[l : l+toRead])
-		l += n
-		toRead -= n
-		if err != nil {
-			return nil, 0, err
-		}
-	}
-
-	var dTotal int
-	if msg, dTotal, err = message.Decode(s.in.ExternalBuf[:total]); err == nil && total != dTotal {
-		s.log.prod.Error("Incoming and outgoing length does not match",
-			zap.Int("in", total),
-			zap.Int("out", dTotal))
-		return nil, 0, types.ErrBufferNotReady
-	}
-
-	return msg, n, err
-}
-
-// writeMessage writes a message to the outgoing buffer
-func (s *connection) writeMessage(msg message.Provider) (int, error) {
-	// FIXME: Try to find a better way than a mutex...if possible.
-	// This is to serialize writes to the underlying buffer. Multiple goroutines could
-	// potentially get here because of calling Publish() or Subscribe() or other
-	// functions that will send messages. For example, if a message is received in
-	// another connection, and the message needs to be published to this client, then
-	// the Publish() function is called, and at the same time, another client could
-	// do exactly the same thing.
-	//
-	// Not an ideal fix though. If possible we should remove mutex and be lockfree.
-	// Mainly because when there's a large number of goroutines that want to publish
-	// to this client, then they will all block. However, this will do for now.
-	s.wmu.Lock()
-	defer s.wmu.Unlock()
-
-	if s.out == nil {
-		return 0, types.ErrBufferNotReady
-	}
-
-	var total int
-	var err error
-
-	total, err = message.WriteToBuffer(msg, s.out)
-
-	if err == nil {
-		s.config.packetsMetric.Sent(msg.Type())
-	}
-
-	return total, err
-}

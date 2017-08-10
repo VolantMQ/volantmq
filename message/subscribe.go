@@ -15,9 +15,6 @@
 package message
 
 import (
-	"encoding/binary"
-	"errors"
-
 	"github.com/troian/surgemq/map"
 
 	"unicode/utf8"
@@ -35,16 +32,14 @@ type SubscribeMessage struct {
 	topics omap.Map
 }
 
+// ^\$share/\w+/[\w+]*$
+
 var _ Provider = (*SubscribeMessage)(nil)
 
-// NewSubscribeMessage creates a new SUBSCRIBE message.
-func NewSubscribeMessage() *SubscribeMessage {
+func newSubscribeMessage() *SubscribeMessage {
 	msg := &SubscribeMessage{
 		topics: omap.New(),
 	}
-
-	msg.setType(SUBSCRIBE) // nolint: errcheck
-	msg.sizeCb = msg.size
 
 	return msg
 }
@@ -56,9 +51,15 @@ func (msg *SubscribeMessage) Topics() omap.Map {
 
 // AddTopic adds a single topic to the message, along with the corresponding QoS.
 // An error is returned if QoS is invalid.
-func (msg *SubscribeMessage) AddTopic(topic string, qos QosType) error {
-	if !qos.IsValid() {
-		return ErrInvalidQoS
+func (msg *SubscribeMessage) AddTopic(topic string, ops SubscriptionOptions) error {
+	if msg.version == ProtocolV50 {
+		if byte(ops)&maskSubscriptionReserved != 0 {
+			return ErrInvalidArgs
+		}
+	} else {
+		if !QosType(ops).IsValid() {
+			return ErrInvalidQoS
+		}
 	}
 
 	// [MQTT-3.8.3-1]
@@ -66,7 +67,7 @@ func (msg *SubscribeMessage) AddTopic(topic string, qos QosType) error {
 		return ErrMalformedTopic
 	}
 
-	msg.topics.Set(topic, qos)
+	msg.topics.Set(topic, ops)
 
 	return nil
 }
@@ -77,49 +78,31 @@ func (msg *SubscribeMessage) RemoveTopic(topic string) {
 	msg.topics.Delete(topic)
 }
 
-// TopicQos returns the QoS level of a topic. If topic does not exist, QosFailure
-// is returned.
-//func (msg *SubscribeMessage) TopicQos(topic string) QosType {
-//
-//	if _, ok := msg.topics[topic]; ok {
-//		return msg.topics[topic]
-//	}
-//
-//	return QosFailure
-//}
-
-// Qos returns the list of QoS current in the message.
-//func (msg *SubscribeMessage) Qos() []QosType {
-//	qos := []QosType{}
-//
-//	for _, q := range msg.topics {
-//		qos = append(qos, q)
-//	}
-//
-//	return qos
-//}
-
 // SetPacketID sets the ID of the packet.
-func (msg *SubscribeMessage) SetPacketID(v uint16) {
-	msg.packetID = v
+func (msg *SubscribeMessage) SetPacketID(v PacketID) {
+	msg.setPacketID(v)
 }
 
 // decode message
-func (msg *SubscribeMessage) decode(src []byte) (int, error) {
+func (msg *SubscribeMessage) decodeMessage(src []byte) (int, error) {
 	total := 0
 
-	hn, err := msg.header.decode(src[total:])
-	total += hn
-	if err != nil {
-		return total, err
+	total += msg.decodePacketID(src[total:])
+
+	// v5 [MQTT-3.1.2.11] specifies properties in variable header
+	if msg.version == ProtocolV50 {
+		var n int
+		var err error
+
+		if msg.properties, n, err = decodeProperties(msg.mType, src[total:]); err != nil {
+			return total + n, err
+		}
+		total += n
 	}
 
-	msg.packetID = binary.BigEndian.Uint16(src[total:])
-	total += 2
-
-	remLen := int(msg.remLen) - (total - hn)
+	remLen := int(msg.remLen) - total
 	for remLen > 0 {
-		t, n, err := readLPBytes(src[total:])
+		t, n, err := ReadLPBytes(src[total:])
 		total += n
 		if err != nil {
 			return total, err
@@ -127,17 +110,29 @@ func (msg *SubscribeMessage) decode(src []byte) (int, error) {
 
 		// [MQTT-3.8.3-1]
 		if !utf8.Valid(t) {
-			return total, ErrMalformedTopic
+			rejectReason := CodeProtocolError
+			if msg.version <= ProtocolV50 {
+				rejectReason = CodeRefusedServerUnavailable
+			}
+			return 0, rejectReason
 		}
 
-		qos := QosType(src[total])
+		subsOptions := SubscriptionOptions(src[total])
+
+		if msg.version == ProtocolV50 && (byte(subsOptions)&maskSubscriptionReserved) != 0 {
+			return total, CodeProtocolError
+		}
 
 		// [MQTT-3-8.3-4]
-		if !qos.IsValid() {
-			return total, ErrInvalidQoS
+		if !subsOptions.QoS().IsValid() {
+			rejectReason := CodeProtocolError
+			if msg.version <= ProtocolV50 {
+				rejectReason = CodeRefusedServerUnavailable
+			}
+			return 0, rejectReason
 		}
 
-		msg.topics.Set(string(t), qos)
+		msg.topics.Set(string(t), subsOptions)
 		total++
 
 		remLen = remLen - n - 1
@@ -145,15 +140,19 @@ func (msg *SubscribeMessage) decode(src []byte) (int, error) {
 
 	// [MQTT-3.8.3-3]
 	if msg.topics.Len() == 0 {
-		return 0, errors.New("subscribe/decode: Empty topic list")
+		rejectReason := CodeProtocolError
+		if msg.version <= ProtocolV50 {
+			rejectReason = CodeRefusedServerUnavailable
+		}
+		return 0, rejectReason
 	}
 
 	return total, nil
 }
 
-func (msg *SubscribeMessage) preEncode(dst []byte) (int, error) {
+func (msg *SubscribeMessage) encodeMessage(dst []byte) (int, error) {
 	// [MQTT-2.3.1]
-	if msg.packetID == 0 {
+	if len(msg.packetID) == 0 {
 		return 0, ErrPackedIDZero
 	}
 
@@ -162,43 +161,41 @@ func (msg *SubscribeMessage) preEncode(dst []byte) (int, error) {
 
 	var n int
 
-	total += msg.header.encode(dst[total:])
+	total += msg.encodePacketID(dst[total:])
 
-	binary.BigEndian.PutUint16(dst[total:], msg.packetID)
-	total += 2
+	// V5.0   [MQTT-3.1.2.11]
+	if msg.version == ProtocolV50 {
+		if n, err = encodeProperties(msg.properties, dst[total:]); err != nil {
+			return total + n, err
+		}
+
+		total += n
+	}
 
 	iter := msg.topics.Iterator()
 	for kv, ok := iter(); ok; kv, ok = iter() {
-		n, err = writeLPBytes(dst[total:], []byte(kv.Key.(string)))
+		n, err = WriteLPBytes(dst[total:], []byte(kv.Key.(string)))
 		total += n
 		if err != nil {
 			return total, err
 		}
 
-		dst[total] = byte(kv.Value.(QosType))
+		dst[total] = byte(kv.Value.(SubscriptionOptions))
 		total++
 	}
 
 	return total, err
 }
 
-// Encode message
-func (msg *SubscribeMessage) Encode(dst []byte) (int, error) {
-	expectedSize, err := msg.Size()
-	if err != nil {
-		return 0, err
-	}
-
-	if len(dst) < expectedSize {
-		return expectedSize, ErrInsufficientBufferSize
-	}
-
-	return msg.preEncode(dst)
-}
-
 func (msg *SubscribeMessage) size() int {
 	// packet ID
 	total := 2
+
+	// v5.0 [MQTT-3.1.2.11]
+	if msg.version == ProtocolV50 {
+		pLen, _ := encodeProperties(msg.properties, []byte{})
+		total += pLen
+	}
 
 	iter := msg.topics.Iterator()
 	for kv, ok := iter(); ok; kv, ok = iter() {

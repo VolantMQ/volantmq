@@ -1,0 +1,119 @@
+package systree
+
+import (
+	"sync/atomic"
+	"time"
+
+	"encoding/json"
+
+	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/types"
+)
+
+// ClientConnectStatus is argument to client connected state
+type ClientConnectStatus struct {
+	Address        string
+	Username       string
+	Timestamp      string
+	CleanSession   bool
+	SessionPresent bool
+	Protocol       message.ProtocolVersion
+	ConnAckCode    message.ReasonCode
+}
+
+type clientDisconnectStatus struct {
+	Reason    string
+	Timestamp string
+}
+
+type clients struct {
+	stat
+	topicsManager types.TopicMessenger
+	topic         string
+}
+
+func newClients(topicPrefix string, retained *[]types.RetainObject) clients {
+	c := clients{
+		stat:  newStat(topicPrefix+"/stats/clients", retained),
+		topic: topicPrefix + "/clients/",
+	}
+
+	return c
+}
+
+// Connected add to statistic new client
+func (t *clients) Connected(id string, status *ClientConnectStatus) {
+	newVal := atomic.AddUint64(&t.curr.val, 1)
+	if atomic.LoadUint64(&t.max.val) < newVal {
+		atomic.StoreUint64(&t.max.val, newVal)
+	}
+
+	// notify client connected
+	nm, _ := message.NewMessage(message.ProtocolV311, message.PUBLISH)
+	notifyMsg, _ := nm.(*message.PublishMessage)
+	notifyMsg.SetRetain(false)
+	notifyMsg.SetQoS(message.QoS0)                  // nolint: errcheck
+	notifyMsg.SetTopic(t.topic + id + "/connected") // nolint: errcheck
+
+	if out, err := json.Marshal(&status); err != nil {
+		// todo: put reliable message
+		notifyMsg.SetPayload([]byte("data error"))
+	} else {
+		notifyMsg.SetPayload(out)
+	}
+
+	if t.topicsManager != nil {
+		t.topicsManager.Publish(notifyMsg) // nolint: errcheck
+		t.topicsManager.Retain(notifyMsg)  // nolint: errcheck
+	}
+
+	// notify remove previous disconnect if any
+	nm, _ = message.NewMessage(message.ProtocolV311, message.PUBLISH)
+	notifyMsg, _ = nm.(*message.PublishMessage)
+	notifyMsg.SetRetain(false)
+	notifyMsg.SetQoS(message.QoS0)                     // nolint: errcheck
+	notifyMsg.SetTopic(t.topic + id + "/disconnected") // nolint: errcheck
+
+	if t.topicsManager != nil {
+		t.topicsManager.Retain(notifyMsg) // nolint: errcheck
+	}
+}
+
+// Disconnected remove client from statistic
+func (t *clients) Disconnected(id string, reason message.ReasonCode, retain bool) {
+	atomic.AddUint64(&t.curr.val, ^uint64(0))
+
+	nm, _ := message.NewMessage(message.ProtocolV311, message.PUBLISH)
+	notifyMsg, _ := nm.(*message.PublishMessage)
+	notifyMsg.SetRetain(false)
+	notifyMsg.SetQoS(message.QoS0)                     // nolint: errcheck
+	notifyMsg.SetTopic(t.topic + id + "/disconnected") // nolint: errcheck
+	notifyPayload := clientDisconnectStatus{
+		Reason:    "normal",
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+
+	if out, err := json.Marshal(&notifyPayload); err != nil {
+		notifyMsg.SetPayload([]byte("data error"))
+	} else {
+		notifyMsg.SetPayload(out)
+	}
+
+	if t.topicsManager != nil {
+		if retain {
+			t.topicsManager.Retain(notifyMsg) // nolint: errcheck
+		}
+		t.topicsManager.Publish(notifyMsg) // nolint: errcheck
+	}
+
+	// remove connected retained message
+	nm, _ = message.NewMessage(message.ProtocolV311, message.PUBLISH)
+	notifyMsg, _ = nm.(*message.PublishMessage)
+	notifyMsg.SetRetain(false)
+	notifyMsg.SetQoS(message.QoS0)                  // nolint: errcheck
+	notifyMsg.SetTopic(t.topic + id + "/connected") // nolint: errcheck
+
+	if t.topicsManager != nil {
+		t.topicsManager.Retain(notifyMsg) // nolint: errcheck
+	}
+}

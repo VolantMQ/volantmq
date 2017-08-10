@@ -35,13 +35,8 @@ func TestMessageHeaderFields(t *testing.T) {
 
 	require.Error(t, err)
 
-	err = header.setType(RESERVED)
+	header.setType(PUBREL)
 
-	require.Error(t, err)
-
-	err = header.setType(PUBREL)
-
-	require.NoError(t, err)
 	require.Equal(t, PUBREL, header.Type())
 	require.Equal(t, "PUBREL", header.Name())
 	require.Equal(t, 2, int(header.Flags()))
@@ -63,7 +58,7 @@ func TestMessageHeaderDecode2(t *testing.T) {
 	header := &header{}
 
 	_, err := header.decode(buf)
-	require.EqualError(t, ErrInvalidLength, err.Error())
+	require.EqualError(t, err, ErrInsufficientDataSize.Error())
 }
 
 func TestMessageHeaderDecode3(t *testing.T) {
@@ -77,19 +72,21 @@ func TestMessageHeaderDecode3(t *testing.T) {
 func TestMessageHeaderDecode4(t *testing.T) {
 	buf := []byte{0x62, 0xff, 0xff, 0xff, 0x7f}
 	header := &header{
-		mTypeFlags: byte(PUBREL<<offsetHeaderType | 2),
+		mType:  PUBREL,
+		mFlags: 2,
 	}
 
 	_, err := header.decode(buf)
 
-	require.EqualError(t, ErrInsufficientBufferSize, err.Error())
+	require.EqualError(t, ErrInsufficientDataSize, err.Error())
 	require.Equal(t, maxRemainingLength, header.RemainingLength())
 }
 
 func TestMessageHeaderDecode5(t *testing.T) {
 	buf := []byte{0x62, 0xff, 0x7f}
 	header := &header{
-		mTypeFlags: byte(PUBREL<<offsetHeaderType | 2),
+		mType:  PUBREL,
+		mFlags: 2,
 	}
 
 	_, err := header.decode(buf)
@@ -97,26 +94,27 @@ func TestMessageHeaderDecode5(t *testing.T) {
 }
 
 func TestMessageHeaderDecode6(t *testing.T) {
-	buf := []byte{byte(PUBLISH<<offsetHeaderType | 3<<1), 0xff, 0x7f}
+	buf := []byte{byte(PUBLISH<<offsetPacketType | 3<<1), 0xff, 0x7f}
 
 	// PUBLISH with invalid QoS value
 	header := &header{
-		mTypeFlags: buf[0],
+		mType:  PacketType(buf[0] >> offsetPacketType),
+		mFlags: buf[0] | maskMessageFlags,
 	}
 
 	_, err := header.decode(buf)
-	require.EqualError(t, ErrInvalidQoS, err.Error())
+	require.EqualError(t, err, CodeRefusedServerUnavailable.Error())
 }
 
 func TestMessageHeaderEncode1(t *testing.T) {
 	header := &header{}
 	//headerBytes := []byte{0x62, 193, 2}
 
-	err := header.setType(PUBREL)
+	//header.setVT(ProtocolV311, PUBREL)
 
-	require.NoError(t, err)
+	//require.NoError(t, err)
 
-	err = header.setRemainingLength(321)
+	err := header.setRemainingLength(321)
 
 	require.NoError(t, err)
 
@@ -131,8 +129,8 @@ func TestMessageHeaderEncode1(t *testing.T) {
 func TestMessageHeaderEncode2(t *testing.T) {
 	header := &header{}
 
-	err := header.setType(PUBREL)
-	require.NoError(t, err)
+	//header.setVT(ProtocolV311, PUBREL)
+	//require.NoError(t, err)
 
 	header.remLen = 268435456
 
@@ -146,11 +144,11 @@ func TestMessageHeaderEncode3(t *testing.T) {
 	header := &header{}
 	//headerBytes := []byte{0x62, 0xff, 0xff, 0xff, 0x7f}
 
-	err := header.setType(PUBREL)
+	//header.setVT(ProtocolV311, PUBREL)
 
-	require.NoError(t, err)
+	//require.NoError(t, err)
 
-	err = header.setRemainingLength(maxRemainingLength)
+	err := header.setRemainingLength(maxRemainingLength)
 
 	require.NoError(t, err)
 
@@ -182,10 +180,10 @@ func TestMessageHeaderEncode4(t *testing.T) {
 	}
 
 	var msg testMessage
-	err := msg.setType(PUBLISH)
-	require.NoError(t, err)
+	//msg.setVT(ProtocolV311, PUBLISH)
+	//require.NoError(t, err)
 
-	msg.sizeCb = func() int {
+	msg.cb.size = func() int {
 		return 0xFFFFFFF1
 	}
 

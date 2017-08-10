@@ -21,11 +21,16 @@ import (
 )
 
 func TestPubAckMessageFields(t *testing.T) {
-	msg := NewPubAckMessage()
+	m, err := NewMessage(ProtocolV311, PUBACK)
+	require.NoError(t, err)
+
+	msg, ok := m.(*AckMessage)
+	require.True(t, ok, "Couldn't cast message type")
 
 	msg.SetPacketID(100)
 
-	require.Equal(t, 100, int(msg.PacketID()))
+	id, _ := msg.PacketID()
+	require.Equal(t, PacketID(100), id)
 }
 
 func TestPubAckMessageDecode(t *testing.T) {
@@ -36,14 +41,16 @@ func TestPubAckMessageDecode(t *testing.T) {
 		7, // packet ID LSB (7)
 	}
 
-	m, n, err := Decode(msgBytes)
-	msg, ok := m.(*PubAckMessage)
+	m, n, err := Decode(ProtocolV311, msgBytes)
+	msg, ok := m.(*AckMessage)
 	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "decode length does not match")
 	require.Equal(t, PUBACK, msg.Type(), "Message type does not match")
-	require.Equal(t, 7, int(msg.PacketID()), "PacketID does not match")
+
+	id, _ := msg.PacketID()
+	require.Equal(t, PacketID(7), id, "PacketID does not match")
 }
 
 // test insufficient bytes
@@ -54,7 +61,7 @@ func TestPubAckMessageDecode2(t *testing.T) {
 		7, // packet ID LSB (7)
 	}
 
-	_, _, err := Decode(msgBytes)
+	_, _, err := Decode(ProtocolV311, msgBytes)
 
 	require.Error(t, err)
 }
@@ -67,7 +74,12 @@ func TestPubAckMessageEncode(t *testing.T) {
 		7, // packet ID LSB (7)
 	}
 
-	msg := NewPubAckMessage()
+	m, err := NewMessage(ProtocolV311, PUBACK)
+	require.NoError(t, err)
+
+	msg, ok := m.(*AckMessage)
+	require.True(t, ok, "Couldn't cast message type")
+
 	msg.SetPacketID(7)
 
 	dst := make([]byte, 10)
@@ -88,8 +100,8 @@ func TestPubAckDecodeEncodeEquiv(t *testing.T) {
 		7, // packet ID LSB (7)
 	}
 
-	m, n, err := Decode(msgBytes)
-	msg, ok := m.(*PubAckMessage)
+	m, n, err := Decode(ProtocolV311, msgBytes)
+	msg, ok := m.(*AckMessage)
 	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message.")
@@ -102,7 +114,7 @@ func TestPubAckDecodeEncodeEquiv(t *testing.T) {
 	require.Equal(t, len(msgBytes), n2, "Error decoding message.")
 	require.Equal(t, msgBytes, dst[:n2], "Error decoding message.")
 
-	_, n3, err := Decode(dst)
+	_, n3, err := Decode(ProtocolV311, dst)
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n3, "Error decoding message.")

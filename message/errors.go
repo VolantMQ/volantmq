@@ -3,13 +3,16 @@ package message
 // Error errors
 type Error byte
 
+// nolint: golint
 const (
 	// ErrInvalidUnSubscribe Invalid UNSUBSCRIBE message
 	ErrInvalidUnSubscribe Error = iota
 	// ErrInvalidUnSubAck Invalid UNSUBACK message
 	ErrInvalidUnSubAck
 	// ErrPackedIDNotMatched Packet ID does not match
+	ErrDupViolation
 	ErrPackedIDNotMatched
+	ErrInvalid
 	// ErrPackedIDZero cannot be 0
 	ErrPackedIDZero
 	// ErrOnPublishNil Publisher is nil
@@ -26,6 +29,8 @@ const (
 	ErrProtocolViolation
 	// ErrInsufficientBufferSize Insufficient buffer size
 	ErrInsufficientBufferSize
+	// ErrInsufficientDataSize
+	ErrInsufficientDataSize
 	// ErrInvalidTopic Topic is empty
 	ErrInvalidTopic
 	// ErrEmptyPayload Payload is empty
@@ -38,6 +43,14 @@ const (
 	ErrInvalidLPStringSize
 	// ErrMalformedTopic topic string is not UTF8
 	ErrMalformedTopic
+	ErrMalformedStream
+	ErrInvalidProtocolVersion
+	ErrNotSet
+	ErrPanicDetected
+	ErrInvalidArgs
+	ErrInvalidUtf8
+	ErrNotSupported
+	ErrProtocolInvalidName
 )
 
 // Error returns the corresponding error string for the ConnAckCode
@@ -47,6 +60,8 @@ func (e Error) Error() string {
 		return "Invalid UNSUBSCRIBE message"
 	case ErrInvalidUnSubAck:
 		return "Invalid UNSUBACK message"
+	case ErrDupViolation:
+		return "Duplicate violation"
 	case ErrPackedIDNotMatched:
 		return "Packet ID does not match"
 	case ErrPackedIDZero:
@@ -65,6 +80,8 @@ func (e Error) Error() string {
 		return "Protocol violation"
 	case ErrInsufficientBufferSize:
 		return "Insufficient buffer size"
+	case ErrInsufficientDataSize:
+		return "Insufficient data size"
 	case ErrInvalidTopic:
 		return "Invalid topic name"
 	case ErrEmptyPayload:
@@ -77,6 +94,12 @@ func (e Error) Error() string {
 		return "Invalid LP string size"
 	case ErrMalformedTopic:
 		return "Malformed topic"
+	case ErrMalformedStream:
+		return "Malformed stream"
+	case ErrInvalidArgs:
+		return "Invalid arguments"
+	case ErrInvalidUtf8:
+		return "String is not UTF8"
 	}
 
 	return "Unknown error"

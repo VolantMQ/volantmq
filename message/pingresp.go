@@ -22,37 +22,32 @@ type PingRespMessage struct {
 
 var _ Provider = (*PingRespMessage)(nil)
 
-// NewPingRespMessage creates a new PINGRESP message.
-func NewPingRespMessage() Provider {
-	msg := &PingRespMessage{}
-	msg.setType(PINGRESP) // nolint: errcheck
-	msg.sizeCb = msg.size
-
-	return msg
+func newPingRespMessage() Provider {
+	return &PingRespMessage{}
 }
 
 // decode message
-func (msg *PingRespMessage) decode(src []byte) (int, error) {
-	return msg.header.decode(src)
+func (msg *PingRespMessage) decodeMessage(src []byte) (int, error) {
+	return 0, nil
 }
 
-func (msg *PingRespMessage) preEncode(dst []byte) int {
-	return msg.header.encode(dst)
+func (msg *PingRespMessage) encodeMessage(dst []byte) (int, error) {
+	return 0, nil
 }
 
 // Encode message
-func (msg *PingRespMessage) Encode(dst []byte) (int, error) {
-	expectedSize, err := msg.Size()
-	if err != nil {
-		return 0, err
-	}
-
-	if len(dst) < expectedSize {
-		return 0, ErrInsufficientBufferSize
-	}
-
-	return msg.preEncode(dst), nil
-}
+//func (msg *PingRespMessage) Encode(dst []byte) (int, error) {
+//	expectedSize, err := msg.Size()
+//	if err != nil {
+//		return 0, err
+//	}
+//
+//	if len(dst) < expectedSize {
+//		return 0, ErrInsufficientBufferSize
+//	}
+//
+//	return msg.preEncode(dst), nil
+//}
 
 // Len of message
 func (msg *PingRespMessage) size() int {

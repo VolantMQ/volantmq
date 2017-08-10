@@ -21,10 +21,15 @@ import (
 )
 
 func TestUnSubscribeMessageFields(t *testing.T) {
-	msg := NewUnSubscribeMessage()
+	m, err := NewMessage(ProtocolV311, UNSUBSCRIBE)
+	require.NoError(t, err)
+
+	msg, ok := m.(*UnSubscribeMessage)
+	require.True(t, ok, "Couldn't cast message type")
 
 	msg.SetPacketID(100)
-	require.Equal(t, 100, int(msg.PacketID()), "Error setting packet ID.")
+	id, _ := msg.PacketID()
+	require.Equal(t, PacketID(100), id, "Error setting packet ID.")
 
 	msg.AddTopic("/a/b/#/c") // nolint: errcheck
 	require.Equal(t, 1, msg.Topics().Len(), "Error adding topic.")
@@ -57,7 +62,7 @@ func TestUnSubscribeMessageDecode(t *testing.T) {
 		'/', 'a', '/', 'b', '/', '#', '/', 'c', 'd', 'd',
 	}
 
-	m, n, err := Decode(msgBytes)
+	m, n, err := Decode(ProtocolV311, msgBytes)
 
 	msg, ok := m.(*UnSubscribeMessage)
 
@@ -87,7 +92,7 @@ func TestUnSubscribeMessageDecode2(t *testing.T) {
 		7, // packet ID LSB (7)
 	}
 
-	_, _, err := Decode(msgBytes)
+	_, _, err := Decode(ProtocolV311, msgBytes)
 
 	require.Error(t, err)
 }
@@ -109,7 +114,12 @@ func TestUnSubscribeMessageEncode(t *testing.T) {
 		'/', 'a', '/', 'b', '/', '#', '/', 'c', 'd', 'd',
 	}
 
-	msg := NewUnSubscribeMessage()
+	m, err := NewMessage(ProtocolV311, UNSUBSCRIBE)
+	require.NoError(t, err)
+
+	msg, ok := m.(*UnSubscribeMessage)
+	require.True(t, ok, "Couldn't cast message type")
+
 	msg.SetPacketID(7)
 	msg.AddTopic("surgemq")    // nolint: errcheck
 	msg.AddTopic("/a/b/#/c")   // nolint: errcheck
@@ -124,7 +134,7 @@ func TestUnSubscribeMessageEncode(t *testing.T) {
 	//msg1 := NewUnSubscribeMessage()
 
 	var m1 Provider
-	m1, n, err = Decode(dst)
+	m1, n, err = Decode(ProtocolV311, dst)
 	msg1, ok := m1.(*UnSubscribeMessage)
 	require.Equal(t, true, ok, "Invalid message type")
 
@@ -164,7 +174,7 @@ func TestUnSubscribeDecodeEncodeEquiv(t *testing.T) {
 		'/', 'a', '/', 'b', '/', '#', '/', 'c', 'd', 'd',
 	}
 
-	m, n, err := Decode(msgBytes)
+	m, n, err := Decode(ProtocolV311, msgBytes)
 	msg, ok := m.(*UnSubscribeMessage)
 	require.Equal(t, true, ok, "Invalid message type")
 	require.NoError(t, err, "Error decoding message")
@@ -187,7 +197,7 @@ func TestUnSubscribeDecodeEncodeEquiv(t *testing.T) {
 
 	require.Equal(t, 3, msg.Topics().Len(), "Topics count does not match")
 
-	_, n3, err := Decode(dst)
+	_, n3, err := Decode(ProtocolV311, dst)
 
 	require.NoError(t, err, "Error decoding message")
 	require.Equal(t, len(msgBytes), n3, "Raw message length does not match")

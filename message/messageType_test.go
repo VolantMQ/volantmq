@@ -8,55 +8,48 @@ import (
 
 func TestMessageTypeValid(t *testing.T) {
 	tp := RESERVED
-	require.Equal(t, false, tp.Valid())
+	ok, _ := tp.Valid(ProtocolV311)
+	require.False(t, ok)
 
-	tp = RESERVED2
-	require.Equal(t, false, tp.Valid())
+	tp = AUTH
+	ok, _ = tp.Valid(ProtocolV311)
+	require.False(t, ok)
 
-	tp = Type(200)
-	require.Equal(t, false, tp.Valid())
+	ok, _ = tp.Valid(ProtocolV50)
+	require.True(t, ok)
+
+	tp = PacketType(200)
+	ok, _ = tp.Valid(ProtocolV50)
+	require.False(t, ok)
 
 	tp = PUBLISH
-	require.Equal(t, true, tp.Valid())
+	ok, _ = tp.Valid(ProtocolV50)
+	require.True(t, ok)
 }
 
 func TestMessageTypeNewMessage(t *testing.T) {
 	tp := RESERVED
 
-	msg, err := tp.NewMessage()
+	msg, err := NewMessage(ProtocolV311, tp)
 	require.EqualError(t, ErrInvalidMessageType, err.Error())
-	require.Equal(t, nil, msg)
+	require.Nil(t, msg)
 
-	msg, err = NewMessage(tp)
+	tp = AUTH
+	msg, err = NewMessage(ProtocolV311, tp)
 	require.EqualError(t, ErrInvalidMessageType, err.Error())
-	require.Equal(t, nil, msg)
+	require.Nil(t, msg)
 
-	tp = RESERVED2
-	msg, err = tp.NewMessage()
+	msg, err = NewMessage(ProtocolV50, tp)
+	require.NoError(t, err)
+	require.NotNil(t, msg)
+
+	tp = PacketType(143)
+	msg, err = NewMessage(ProtocolV50, tp)
 	require.EqualError(t, ErrInvalidMessageType, err.Error())
-	require.Equal(t, nil, msg)
-
-	msg, err = NewMessage(tp)
-	require.EqualError(t, ErrInvalidMessageType, err.Error())
-	require.Equal(t, nil, msg)
-
-	tp = Type(143)
-
-	msg, err = tp.NewMessage()
-	require.EqualError(t, ErrInvalidMessageType, err.Error())
-	require.Equal(t, nil, msg)
-
-	msg, err = NewMessage(tp)
-	require.EqualError(t, ErrInvalidMessageType, err.Error())
-	require.Equal(t, nil, msg)
+	require.Nil(t, msg)
 
 	tp = CONNACK
-
-	msg, err = tp.NewMessage()
-	require.NoError(t, err)
-	require.Equal(t, CONNACK, msg.Type())
-
-	msg, err = NewMessage(tp)
+	msg, err = NewMessage(ProtocolV50, tp)
 	require.NoError(t, err)
 	require.Equal(t, CONNACK, msg.Type())
 }
@@ -77,18 +70,18 @@ func TestMessageTypeDefaultFlags(t *testing.T) {
 	require.Equal(t, uint8(0), PINGREQ.DefaultFlags())
 	require.Equal(t, uint8(0), PINGRESP.DefaultFlags())
 	require.Equal(t, uint8(0), DISCONNECT.DefaultFlags())
-	require.Equal(t, uint8(0), RESERVED2.DefaultFlags())
+	require.Equal(t, uint8(0), AUTH.DefaultFlags())
 
-	tp := Type(200)
+	tp := PacketType(200)
 	require.Equal(t, uint8(0), tp.DefaultFlags())
 }
 
 func TestMessageTypeDesc(t *testing.T) {
-	tp := Type(200)
+	tp := PacketType(200)
 	require.Equal(t, "UNKNOWN", tp.Desc())
 }
 
 func TestMessageTypeName(t *testing.T) {
-	tp := Type(200)
+	tp := PacketType(200)
 	require.Equal(t, "UNKNOWN", tp.Name())
 }

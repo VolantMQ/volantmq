@@ -7,7 +7,7 @@
         args:
         - --exclude=corefoundation.go
         - --deadline=60s
-        - --cyclo-over=30
+        - --cyclo-over=40
         - --dupl-threshold=100
         - --disable=gotype
         - --disable=govendor

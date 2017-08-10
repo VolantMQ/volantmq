@@ -14,75 +14,118 @@
 
 package message
 
-import "encoding/binary"
-
-// PubAckMessage A PUBACK Packet is the response to a PUBLISH Packet with QoS level 1.
-type PubAckMessage struct {
+// AckMessage acknowledge packets for PUBLISH messages
+// A PUBACK Packet is the response to a PUBLISH Packet with QoS level 1
+// A PUBREC/PUBREL/PUBCOMP Packet is the response to a PUBLISH Packet with QoS level 2
+type AckMessage struct {
 	header
+
+	reasonCode ReasonCode
 }
 
-var _ Provider = (*PubAckMessage)(nil)
+var _ Provider = (*AckMessage)(nil)
 
-// NewPubAckMessage creates a new PUBACK message.
-func NewPubAckMessage() *PubAckMessage {
-	msg := &PubAckMessage{}
-	msg.setType(PUBACK) // nolint: errcheck
-	msg.sizeCb = msg.size
+func newPubAckMessage() *AckMessage {
+	return &AckMessage{}
+}
 
-	return msg
+func newPubRecMessage() *AckMessage {
+	return &AckMessage{}
+}
+
+func newPubRelMessage() *AckMessage {
+	return &AckMessage{}
+}
+
+func newPubCompMessage() *AckMessage {
+	return &AckMessage{}
 }
 
 // SetPacketID sets the ID of the packet.
-func (msg *PubAckMessage) SetPacketID(v uint16) {
-	msg.packetID = v
+func (msg *AckMessage) SetPacketID(v PacketID) {
+	msg.setPacketID(v)
 }
 
-// decode message
-func (msg *PubAckMessage) decode(src []byte) (int, error) {
-	total := 0
-
-	n, err := msg.header.decode(src[total:])
-	total += n
-	if err != nil {
-		return total, err
+// SetReason of acknowledgment
+func (msg *AckMessage) SetReason(c ReasonCode) {
+	if msg.version != ProtocolV50 {
+		return
 	}
 
-	msg.packetID = binary.BigEndian.Uint16(src[total:])
-	total += 2
+	msg.reasonCode = c
+}
+
+// Reason return acknowledgment reason
+func (msg *AckMessage) Reason() ReasonCode {
+	return msg.reasonCode
+}
+
+func (msg *AckMessage) decodeMessage(src []byte) (int, error) {
+	total := 0
+
+	total += msg.decodePacketID(src[total:])
+
+	if msg.version == ProtocolV50 {
+		msg.reasonCode = ReasonCode(src[total])
+		if !msg.reasonCode.IsValidForType(msg.mType) {
+			return total, CodeMalformedPacket
+		}
+		total++
+
+		// v5 [MQTT-3.1.2.11] specifies properties in variable header
+		var err error
+		var n int
+		if msg.properties, n, err = decodeProperties(msg.mType, src[total:]); err != nil {
+			return total + n, err
+		}
+		total += n
+	}
 
 	return total, nil
 }
 
-func (msg *PubAckMessage) preEncode(dst []byte) (int, error) {
+func (msg *AckMessage) encodeMessage(dst []byte) (int, error) {
 	// [MQTT-2.3.1]
-	if msg.packetID == 0 {
+	if len(msg.packetID) == 0 {
 		return 0, ErrPackedIDZero
 	}
 
 	total := 0
-	total += msg.header.encode(dst[total:])
 
-	binary.BigEndian.PutUint16(dst[total:], msg.packetID)
-	total += 2
+	total += msg.encodePacketID(dst[total:])
+
+	if msg.version == ProtocolV50 {
+		if !msg.reasonCode.IsValidForType(msg.mType) {
+			return total, ErrInvalidReturnCode
+		}
+
+		dst[total] = byte(msg.reasonCode)
+		total++
+
+		// v5 [MQTT-3.1.2.11] specifies properties in variable header
+		var err error
+		var n int
+		if n, err = encodeProperties(msg.properties, dst[total:]); err != nil {
+			return total + n, err
+		}
+
+		total += n
+	}
 
 	return total, nil
 }
 
-// Encode message
-func (msg *PubAckMessage) Encode(dst []byte) (int, error) {
-	expectedSize, err := msg.Size()
-	if err != nil {
-		return 0, err
+func (msg *AckMessage) size() int {
+	total := 2
+
+	if msg.version == ProtocolV50 {
+		// V5.0 [MQTT-3.4.2.1]
+		total++
+
+		// v5.0 [MQTT-3.1.2.11]
+		pLen, _ := encodeProperties(msg.properties, []byte{})
+		total += pLen
 	}
 
-	if len(dst) < expectedSize {
-		return expectedSize, ErrInsufficientBufferSize
-	}
-
-	return msg.preEncode(dst)
-}
-
-func (msg *PubAckMessage) size() int {
-	// packet ID
-	return 2
+	return total
 }

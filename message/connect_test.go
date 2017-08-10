@@ -20,52 +20,42 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func newTestConnect(t *testing.T, p ProtocolVersion) *ConnectMessage {
+	m, err := NewMessage(p, CONNECT)
+	require.NoError(t, err)
+	msg, ok := m.(*ConnectMessage)
+	require.True(t, ok, "Couldn't cast message type")
+
+	return msg
+}
+
 func TestConnectMessageFields(t *testing.T) {
-	msg := NewConnectMessage()
+	msg := newTestConnect(t, ProtocolV31)
 
-	err := msg.SetVersion(0x3)
-	require.NoError(t, err, "Error setting message version.")
+	require.Equal(t, ProtocolV31, msg.Version(), "Incorrect version number")
 
-	require.Equal(t, 0x3, int(msg.Version()), "Incorrect version number")
+	msg.SetCleanStart(true)
+	require.True(t, msg.CleanStart(), "Error setting clean session flag")
 
-	err = msg.SetVersion(0x5)
-	require.Error(t, err)
+	msg.SetCleanStart(false)
+	require.False(t, msg.CleanStart(), "Error setting clean session flag")
 
-	msg.SetCleanSession(true)
-	require.True(t, msg.CleanSession(), "Error setting clean session flag.")
+	err := msg.SetWill("topic", []byte("message"), QoS1, true)
+	require.NoError(t, err)
 
-	msg.SetCleanSession(false)
-	require.False(t, msg.CleanSession(), "Error setting clean session flag.")
+	willTopic, willMessage, willQoS, willRetain, will := msg.Will()
+	require.True(t, will, "Error setting will flag")
+	require.True(t, willRetain, "Error setting will retain")
+	require.Equal(t, "topic", willTopic, "Error setting will topic")
+	require.Equal(t, []byte("message"), willMessage, "Error setting will topic")
+	require.Equal(t, QoS1, willQoS, "Error setting will topic")
 
-	msg.SetWillFlag(true)
-	require.True(t, msg.WillFlag(), "Error setting will flag.")
+	user, pass := msg.Credentials()
+	require.Equal(t, 0, len(user))
+	require.Equal(t, 0, len(pass))
 
-	msg.SetWillFlag(false)
-	require.False(t, msg.WillFlag(), "Error setting will flag.")
-
-	msg.SetWillRetain(true)
-	require.True(t, msg.WillRetain(), "Error setting will retain.")
-
-	msg.SetWillRetain(false)
-	require.False(t, msg.WillRetain(), "Error setting will retain.")
-
-	msg.SetPasswordFlag(true)
-	require.True(t, msg.PasswordFlag(), "Error setting password flag.")
-
-	msg.SetPasswordFlag(false)
-	require.False(t, msg.PasswordFlag(), "Error setting password flag.")
-
-	msg.SetUsernameFlag(true)
-	require.True(t, msg.UsernameFlag(), "Error setting username flag.")
-
-	msg.SetUsernameFlag(false)
-	require.False(t, msg.UsernameFlag(), "Error setting username flag.")
-
-	msg.SetWillQos(1) // nolint: errcheck
-	require.Equal(t, 1, int(msg.WillQos()), "Error setting will QoS.")
-
-	err = msg.SetWillQos(4)
-	require.Error(t, err)
+	err = msg.SetCredentials([]byte("user"), []byte("pass"))
+	require.NoError(t, err)
 
 	err = msg.SetClientID([]byte("j0j0jfajf02j0asdjf"))
 	require.NoError(t, err, "Error setting client ID")
@@ -75,60 +65,60 @@ func TestConnectMessageFields(t *testing.T) {
 	err = msg.SetClientID([]byte("this is good for v3"))
 	require.NoError(t, err)
 
-	msg.SetVersion(0x4) // nolint: errcheck
-
-	err = msg.SetClientID([]byte("this is no good for v4!"))
-	require.Error(t, err)
-
-	msg.SetVersion(0x3) // nolint: errcheck
-
-	msg.SetWillTopic("willtopic")
-	require.Equal(t, "willtopic", string(msg.WillTopic()), "Error setting will topic.")
-
-	require.True(t, msg.WillFlag(), "Error setting will flag.")
-
-	msg.SetWillTopic("")
-	require.Equal(t, "", string(msg.WillTopic()), "Error setting will topic.")
-
-	require.False(t, msg.WillFlag(), "Error setting will flag.")
-
-	msg.SetWillMessage([]byte("this is a will message"))
-	require.Equal(t, "this is a will message", string(msg.WillMessage()), "Error setting will message.")
-
-	require.True(t, msg.WillFlag(), "Error setting will flag.")
-
-	msg.SetWillMessage([]byte(""))
-	require.Equal(t, "", string(msg.WillMessage()), "Error setting will topic.")
-
-	require.False(t, msg.WillFlag(), "Error setting will flag.")
-
-	msg.SetWillTopic("willtopic")
-	msg.SetWillMessage([]byte("this is a will message"))
-	msg.SetWillTopic("")
-	require.True(t, msg.WillFlag(), "Error setting will topic.")
-
-	msg.SetUsername([]byte("myname"))
-	require.Equal(t, "myname", string(msg.Username()), "Error setting will message.")
-
-	require.True(t, msg.UsernameFlag(), "Error setting will flag.")
-
-	msg.SetUsername([]byte(""))
-	require.Equal(t, "", string(msg.Username()), "Error setting will message.")
-
-	require.False(t, msg.UsernameFlag(), "Error setting will flag.")
-
-	msg.SetPassword([]byte("myname"))
-	require.Equal(t, "myname", string(msg.Password()), "Error setting will message.")
-
-	require.True(t, msg.PasswordFlag(), "Error setting will flag.")
-
-	msg.SetPassword([]byte(""))
-	require.Equal(t, "", string(msg.Password()), "Error setting will message.")
-
-	require.False(t, msg.PasswordFlag(), "Error setting will flag.")
+	//msg.SetVersion(0x4) // nolint: errcheck
+	//
+	//err = msg.SetClientID([]byte("this is no good for v4!"))
+	//require.Error(t, err)
+	//
+	//msg.SetVersion(0x3) // nolint: errcheck
+	//
+	//msg.SetWillTopic("willtopic")
+	//require.Equal(t, "willtopic", string(msg.WillTopic()), "Error setting will topic.")
+	//
+	//require.True(t, msg.WillFlag(), "Error setting will flag.")
+	//
+	//msg.SetWillTopic("")
+	//require.Equal(t, "", string(msg.WillTopic()), "Error setting will topic.")
+	//
+	//require.False(t, msg.WillFlag(), "Error setting will flag.")
+	//
+	//msg.SetWillMessage([]byte("this is a will message"))
+	//require.Equal(t, "this is a will message", string(msg.WillMessage()), "Error setting will message.")
+	//
+	//require.True(t, msg.WillFlag(), "Error setting will flag.")
+	//
+	//msg.SetWillMessage([]byte(""))
+	//require.Equal(t, "", string(msg.WillMessage()), "Error setting will topic.")
+	//
+	//require.False(t, msg.WillFlag(), "Error setting will flag.")
+	//
+	//msg.SetWillTopic("willtopic")
+	//msg.SetWillMessage([]byte("this is a will message"))
+	//msg.SetWillTopic("")
+	//require.True(t, msg.WillFlag(), "Error setting will topic.")
+	//
+	//msg.SetUsername([]byte("myname"))
+	//require.Equal(t, "myname", string(msg.Username()), "Error setting will message.")
+	//
+	//require.True(t, msg.UsernameFlag(), "Error setting will flag.")
+	//
+	//msg.SetUsername([]byte(""))
+	//require.Equal(t, "", string(msg.Username()), "Error setting will message.")
+	//
+	//require.False(t, msg.UsernameFlag(), "Error setting will flag.")
+	//
+	//msg.SetPassword([]byte("myname"))
+	//require.Equal(t, "myname", string(msg.Password()), "Error setting will message.")
+	//
+	//require.True(t, msg.PasswordFlag(), "Error setting will flag.")
+	//
+	//msg.SetPassword([]byte(""))
+	//require.Equal(t, "", string(msg.Password()), "Error setting will message.")
+	//
+	//require.False(t, msg.PasswordFlag(), "Error setting will flag.")
 }
 
-func TestConnectMessageDecode(t *testing.T) {
+func TestConnectMessageDecodeV3(t *testing.T) {
 	msgBytes := []byte{
 		byte(CONNECT << 4),
 		60,
@@ -156,7 +146,7 @@ func TestConnectMessageDecode(t *testing.T) {
 		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e', 't',
 	}
 
-	m, n, err := Decode(msgBytes)
+	m, n, err := Decode(ProtocolV311, msgBytes)
 	msg, ok := m.(*ConnectMessage)
 	require.Equal(t, true, ok, "Invalid message type")
 
@@ -165,10 +155,21 @@ func TestConnectMessageDecode(t *testing.T) {
 	require.Equal(t, 206, int(msg.connectFlags), "Incorrect flag value.")
 	require.Equal(t, 10, int(msg.KeepAlive()), "Incorrect KeepAlive value.")
 	require.Equal(t, "surgemq", string(msg.ClientID()), "Incorrect client ID value.")
-	require.Equal(t, "will", string(msg.WillTopic()), "Incorrect will topic value.")
-	require.Equal(t, "send me home", string(msg.WillMessage()), "Incorrect will message value.")
-	require.Equal(t, "surgemq", string(msg.Username()), "Incorrect username value.")
-	require.Equal(t, "verysecret", string(msg.Password()), "Incorrect password value.")
+
+	willTopic, willMessage, willQos, willRetain, will := msg.Will()
+
+	require.Equal(t, QoS1, willQos, "Incorrect will QoS")
+	require.Equal(t, "will", willTopic, "Incorrect will topic value.")
+	require.Equal(t, "send me home", string(willMessage), "Incorrect will message value.")
+	require.True(t, will, "Incorrect will flag")
+	require.False(t, willRetain, "Incorrect will retain flag")
+
+	username, password := msg.Credentials()
+	require.Equal(t, "surgemq", string(username), "Incorrect username value.")
+	require.Equal(t, "verysecret", string(password), "Incorrect password value.")
+
+	_, _, err = Decode(ProtocolV50, msgBytes)
+	require.NoError(t, err)
 }
 
 func TestConnectMessageDecode2(t *testing.T) {
@@ -200,12 +201,83 @@ func TestConnectMessageDecode2(t *testing.T) {
 		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e',
 	}
 
-	_, _, err := Decode(msgBytes)
+	_, _, err := Decode(ProtocolV311, msgBytes)
+	require.EqualError(t, err, ErrInsufficientDataSize.Error())
 
+	_, _, err = Decode(ProtocolV50, msgBytes)
+	require.EqualError(t, err, ErrInsufficientDataSize.Error())
+
+	// missing last byte 't'
+	msgBytes = []byte{
+		byte(CONNECT << 4),
+		60,
+		0, // Length MSB (0)
+		4, // Length LSB (4)
+		'M', 'Q', 'T', 'T',
+		5,    // Protocol level 4
+		206,  // connect flags 11001110, will QoS = 01
+		0,    // Keep Alive MSB (0)
+		10,   // Keep Alive LSB (10)
+		0xFF, // Wrong proprty size
+		0,    // Client ID MSB (0)
+		7,    // Client ID LSB (7)
+		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		0, // Will Topic MSB (0)
+		4, // Will Topic LSB (4)
+		'w', 'i', 'l', 'l',
+		0,  // Will Message MSB (0)
+		12, // Will Message LSB (12)
+		's', 'e', 'n', 'd', ' ', 'm', 'e', ' ', 'h', 'o', 'm', 'e',
+		0, // Username ID MSB (0)
+		7, // Username ID LSB (7)
+		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		0,  // Password ID MSB (0)
+		10, // Password ID LSB (10)
+		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e', 't',
+	}
+
+	_, _, err = Decode(ProtocolV50, msgBytes)
 	require.Error(t, err)
 }
 
 func TestConnectMessageDecode3(t *testing.T) {
+	// missing last byte 't'
+	msgBytes := []byte{
+		byte(CONNECT << 4),
+		60,
+		0, // Length MSB (0)
+		4, // Length LSB (4)
+		'M', 'Q', 'T', 'T',
+		4,   // Protocol level 4
+		206, // connect flags 11001110, will QoS = 01
+		0,   // Keep Alive MSB (0)
+		10,  // Keep Alive LSB (10)
+		0,
+		0, // Client ID MSB (0)
+		7, // Client ID LSB (7)
+		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		0, // Will Topic MSB (0)
+		4, // Will Topic LSB (4)
+		'w', 'i', 'l', 'l',
+		0,  // Will Message MSB (0)
+		12, // Will Message LSB (12)
+		's', 'e', 'n', 'd', ' ', 'm', 'e', ' ', 'h', 'o', 'm', 'e',
+		0, // Username ID MSB (0)
+		7, // Username ID LSB (7)
+		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		0,  // Password ID MSB (0)
+		10, // Password ID LSB (10)
+		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e', 't',
+	}
+
+	_, _, err := Decode(ProtocolV311, msgBytes)
+	require.EqualError(t, err, ErrInsufficientDataSize.Error())
+
+	_, _, err = Decode(ProtocolV50, msgBytes)
+	require.EqualError(t, err, ErrInsufficientDataSize.Error())
+}
+
+func TestConnectMessageDecode4(t *testing.T) {
 	// extra bytes
 	msgBytes := []byte{
 		byte(CONNECT << 4),
@@ -235,13 +307,80 @@ func TestConnectMessageDecode3(t *testing.T) {
 		'e', 'x', 't', 'r', 'a',
 	}
 
-	_, n, err := Decode(msgBytes)
+	_, n, err := Decode(ProtocolV311, msgBytes)
 
 	require.NoError(t, err)
 	require.Equal(t, 62, n)
+
+	// extra bytes
+	msgBytes = []byte{
+		byte(CONNECT << 4),
+		60,
+		0, // Length MSB (0)
+		4, // Length LSB (4)
+		'M', 'Q', 'T', 'T',
+		5,   // Protocol level 4
+		206, // connect flags 11001110, will QoS = 01
+		0,   // Keep Alive MSB (0)
+		10,  // Keep Alive LSB (10)
+		0,   // Client ID MSB (0)
+		7,   // Client ID LSB (7)
+		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		0, // Will Topic MSB (0)
+		4, // Will Topic LSB (4)
+		'w', 'i', 'l', 'l',
+		0,  // Will Message MSB (0)
+		12, // Will Message LSB (12)
+		's', 'e', 'n', 'd', ' ', 'm', 'e', ' ', 'h', 'o', 'm', 'e',
+		0, // Username ID MSB (0)
+		7, // Username ID LSB (7)
+		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		0,  // Password ID MSB (0)
+		10, // Password ID LSB (10)
+		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e', 't',
+		'e', 'x', 't', 'r', 'a',
+	}
+
+	_, _, err = Decode(ProtocolV311, msgBytes)
+
+	require.Error(t, err)
+
+	// extra bytes
+	msgBytes = []byte{
+		byte(CONNECT << 4),
+		60,
+		0, // Length MSB (0)
+		4, // Length LSB (4)
+		'M', 'Q', 'T', 'T',
+		5,   // Protocol level 4
+		206, // connect flags 11001110, will QoS = 01
+		0,   // Keep Alive MSB (0)
+		10,  // Keep Alive LSB (10)
+		0,
+		0, // Client ID MSB (0)
+		7, // Client ID LSB (7)
+		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		0, // Will Topic MSB (0)
+		4, // Will Topic LSB (4)
+		'w', 'i', 'l', 'l',
+		0,  // Will Message MSB (0)
+		12, // Will Message LSB (12)
+		's', 'e', 'n', 'd', ' ', 'm', 'e', ' ', 'h', 'o', 'm', 'e',
+		0, // Username ID MSB (0)
+		7, // Username ID LSB (7)
+		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		0,  // Password ID MSB (0)
+		10, // Password ID LSB (10)
+		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e', 't',
+		'e', 'x', 't', 'r', 'a',
+	}
+
+	_, n, err = Decode(ProtocolV311, msgBytes)
+	require.NoError(t, err)
+	require.Equal(t, 63, n)
 }
 
-func TestConnectMessageDecode4(t *testing.T) {
+func TestConnectMessageDecode5(t *testing.T) {
 	// missing client Id, clean session == 0
 	msgBytes := []byte{
 		byte(CONNECT << 4),
@@ -269,7 +408,7 @@ func TestConnectMessageDecode4(t *testing.T) {
 		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e', 't',
 	}
 
-	_, _, err := Decode(msgBytes)
+	_, _, err := Decode(ProtocolV311, msgBytes)
 
 	require.Error(t, err)
 }
@@ -302,21 +441,76 @@ func TestConnectMessageEncode(t *testing.T) {
 		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e', 't',
 	}
 
-	msg := NewConnectMessage()
-	msg.SetWillQos(1) // nolint: errcheck
-	msg.SetVersion(4) // nolint: errcheck
-	msg.SetCleanSession(true)
-	msg.SetClientID([]byte("surgemq")) // nolint: errcheck
+	msg := newTestConnect(t, ProtocolV311)
+
+	err := msg.SetWill("will", []byte("send me home"), QoS1, false)
+	require.NoError(t, err)
+
+	msg.SetCleanStart(true)
+	err = msg.SetClientID([]byte("surgemq"))
+	require.NoError(t, err)
+
 	msg.SetKeepAlive(10)
-	msg.SetWillTopic("will")
-	msg.SetWillMessage([]byte("send me home"))
-	msg.SetUsername([]byte("surgemq"))
-	msg.SetPassword([]byte("verysecret"))
+
+	err = msg.SetCredentials([]byte("surgemq"), []byte("verysecret"))
+	require.NoError(t, err)
 
 	dst := make([]byte, 100)
 	n, err := msg.Encode(dst)
 
 	require.NoError(t, err, "Error decoding message.")
+	require.Equal(t, len(msgBytes), n, "Error decoding message.")
+	require.Equal(t, msgBytes, dst[:n], "Error decoding message.")
+	require.Equal(t, ProtocolV311, msg.Version())
+
+	// V5.0
+	msgBytes = []byte{
+		byte(CONNECT << 4),
+		61,
+		0, // Length MSB (0)
+		4, // Length LSB (4)
+		'M', 'Q', 'T', 'T',
+		5,   // Protocol level 4
+		206, // connect flags 11001110, will QoS = 01
+		0,   // Keep Alive MSB (0)
+		10,  // Keep Alive LSB (10)
+		0,
+		0, // Client ID MSB (0)
+		7, // Client ID LSB (7)
+		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		0, // Will Topic MSB (0)
+		4, // Will Topic LSB (4)
+		'w', 'i', 'l', 'l',
+		0,  // Will Message MSB (0)
+		12, // Will Message LSB (12)
+		's', 'e', 'n', 'd', ' ', 'm', 'e', ' ', 'h', 'o', 'm', 'e',
+		0, // Username ID MSB (0)
+		7, // Username ID LSB (7)
+		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		0,  // Password ID MSB (0)
+		10, // Password ID LSB (10)
+		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e', 't',
+	}
+
+	msg = newTestConnect(t, ProtocolV50)
+
+	err = msg.SetWill("will", []byte("send me home"), QoS1, false)
+	require.NoError(t, err)
+
+	msg.SetCleanStart(true)
+	err = msg.SetClientID([]byte("surgemq"))
+	require.NoError(t, err)
+
+	msg.SetKeepAlive(10)
+
+	err = msg.SetCredentials([]byte("surgemq"), []byte("verysecret"))
+	require.NoError(t, err)
+
+	dst = make([]byte, 100)
+	n, err = msg.Encode(dst)
+
+	require.NoError(t, err, "Error decoding message.")
+	require.Equal(t, ProtocolV50, msg.Version())
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
 	require.Equal(t, msgBytes, dst[:n], "Error decoding message.")
 }
@@ -351,7 +545,7 @@ func TestConnectDecodeEncodeEquiv(t *testing.T) {
 		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e', 't',
 	}
 
-	m, n, err := Decode(msgBytes)
+	m, n, err := Decode(ProtocolV50, msgBytes)
 	msg, ok := m.(*ConnectMessage)
 	require.Equal(t, true, ok, "Invalid message type")
 
@@ -365,7 +559,7 @@ func TestConnectDecodeEncodeEquiv(t *testing.T) {
 	require.Equal(t, len(msgBytes), n2, "Error decoding message.")
 	require.Equal(t, msgBytes, dst[:n2], "Error decoding message.")
 
-	_, n3, err := Decode(dst)
+	_, n3, err := Decode(ProtocolV50, dst)
 
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n3, "Error decoding message.")
