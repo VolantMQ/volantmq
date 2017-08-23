@@ -22,42 +22,46 @@ const ( ///////////////////////////////////////////////////////    |   \    |
 	CodeRefusedServerUnavailable           ReasonCode = 0x03 //    |   \    |
 	CodeRefusedBadUsernameOrPassword       ReasonCode = 0x04 //    |   \    |
 	CodeRefusedNotAuthorized               ReasonCode = 0x05 // <--|   \    |
-	CodeNoMatchingSubscribers              ReasonCode = 0x10 //        \    |
-	CodeNoSubscriptionExisted              ReasonCode = 0x11 //        \    |
-	CodeContinueAuthentication             ReasonCode = 0x18 //        \    |
-	CodeReAuthenticate                     ReasonCode = 0x19 //        \    |
-	CodeUnspecifiedError                   ReasonCode = 0x80 //        \    |
-	CodeMalformedPacket                    ReasonCode = 0x81 //        \    |
-	CodeProtocolError                      ReasonCode = 0x82 //        \    |
-	CodeImplementationSpecificError        ReasonCode = 0x83 //        \    |
-	CodeUnsupportedProtocol                ReasonCode = 0x84 //        \    |
-	CodeInvalidClientID                    ReasonCode = 0x85 //        \    |
-	CodeBadUserOrPassword                  ReasonCode = 0x86 //        \    |
-	CodeNotAuthorized                      ReasonCode = 0x87 //        \    |
-	CodeServerUnavailable                  ReasonCode = 0x88 //        \    |
-	CodeServerBusy                         ReasonCode = 0x89 //        \    |
-	CodeBanned                             ReasonCode = 0x8A //        \    |
-	CodeServerShuttingDown                 ReasonCode = 0x8B //        \    |
-	CodeBadAuthMethod                      ReasonCode = 0x8C //        \    |
-	CodeSessionTakenOver                   ReasonCode = 0x8E //        \    |
-	CodeKeepAliveTimeout                   ReasonCode = 0x8F //        \    |
-	CodeTopicFilterNotValid                ReasonCode = 0x90 //        \    |
-	CodePacketIDInUse                      ReasonCode = 0x91 //        \    |
-	CodePacketIDNotFound                   ReasonCode = 0x92 //        \    |
-	CodePacketTooLarge                     ReasonCode = 0x95 //        \    |
-	CodeMessageRateTooHigh                 ReasonCode = 0x96 //        \    |
-	CodeQuotaExceeded                      ReasonCode = 0x97 //        \    |
-	CodeAdministrativeAction               ReasonCode = 0x98 //        \    |
-	CodeDisconnectWithWillMessage          ReasonCode = 0x99 //        \    |
-	CodeRetainUnavailable                  ReasonCode = 0x9A //        \    |
-	CodeMaximumQoS                         ReasonCode = 0x9B //        \    |
-	CodeUseAnotherServer                   ReasonCode = 0x9C //        \    |
-	CodeServerMoved                        ReasonCode = 0x9D //        \    |
-	CodeSharedSubscriptionNotSupported     ReasonCode = 0x9E //        \    |
-	CodeConnectionRateExceeded             ReasonCode = 0x9F //        \    |
-	CodeMaximumConnectTime                 ReasonCode = 0xA0 //        \    |
-	CodeSubscriptionIDNotSupported         ReasonCode = 0xA1 //        \    |
-	CodeWildcardSubscriptionsNotSupported  ReasonCode = 0xA2 //        \ <--|
+	//CodeDisconnectWithWillMessage          ReasonCode = 0x04 //        \    |
+	CodeNoMatchingSubscribers             ReasonCode = 0x10 //        \    |
+	CodeNoSubscriptionExisted             ReasonCode = 0x11 //        \    |
+	CodeContinueAuthentication            ReasonCode = 0x18 //        \    |
+	CodeReAuthenticate                    ReasonCode = 0x19 //        \    |
+	CodeUnspecifiedError                  ReasonCode = 0x80 //        \    |
+	CodeMalformedPacket                   ReasonCode = 0x81 //        \    |
+	CodeProtocolError                     ReasonCode = 0x82 //        \    |
+	CodeImplementationSpecificError       ReasonCode = 0x83 //        \    |
+	CodeUnsupportedProtocol               ReasonCode = 0x84 //        \    |
+	CodeInvalidClientID                   ReasonCode = 0x85 //        \    |
+	CodeBadUserOrPassword                 ReasonCode = 0x86 //        \    |
+	CodeNotAuthorized                     ReasonCode = 0x87 //        \    |
+	CodeServerUnavailable                 ReasonCode = 0x88 //        \    |
+	CodeServerBusy                        ReasonCode = 0x89 //        \    |
+	CodeBanned                            ReasonCode = 0x8A //        \    |
+	CodeServerShuttingDown                ReasonCode = 0x8B //        \    |
+	CodeBadAuthMethod                     ReasonCode = 0x8C //        \    |
+	CodeKeepAliveTimeout                  ReasonCode = 0x8D //        \    |
+	CodeSessionTakenOver                  ReasonCode = 0x8E //        \    |
+	CodeInvalidTopicFilter                ReasonCode = 0x8F //        \    |
+	CodeInvalidTopicName                  ReasonCode = 0x90 //        \    |
+	CodePacketIDInUse                     ReasonCode = 0x91 //        \    |
+	CodePacketIDNotFound                  ReasonCode = 0x92 //        \    |
+	CodeReceiveMaximumExceeded            ReasonCode = 0x93 //        \    |
+	CodeInvalidTopicAlias                 ReasonCode = 0x94 //        \    |
+	CodePacketTooLarge                    ReasonCode = 0x95 //        \    |
+	CodeMessageRateTooHigh                ReasonCode = 0x96 //        \    |
+	CodeQuotaExceeded                     ReasonCode = 0x97 //        \    |
+	CodeAdministrativeAction              ReasonCode = 0x98 //        \    |
+	CodeInvalidPayloadFormat              ReasonCode = 0x99 //        \    |
+	CodeRetainNotSupported                ReasonCode = 0x9A //        \    |
+	CodeNotSupportedQoS                   ReasonCode = 0x9B //        \    |
+	CodeUseAnotherServer                  ReasonCode = 0x9C //        \    |
+	CodeServerMoved                       ReasonCode = 0x9D //        \    |
+	CodeSharedSubscriptionNotSupported    ReasonCode = 0x9E //        \    |
+	CodeConnectionRateExceeded            ReasonCode = 0x9F //        \    |
+	CodeMaximumConnectTime                ReasonCode = 0xA0 //        \    |
+	CodeSubscriptionIDNotSupported        ReasonCode = 0xA1 //        \    |
+	CodeWildcardSubscriptionsNotSupported ReasonCode = 0xA2 //        \ <--|
 )
 
 var packetTypeCodeMap = map[PacketType]map[ReasonCode]struct {
@@ -82,8 +86,11 @@ var packetTypeCodeMap = map[PacketType]map[ReasonCode]struct {
 		CodeServerBusy:                         {iss: CodeIssuerServer, desc: "The Server is busy. Try again later"},
 		CodeBanned:                             {iss: CodeIssuerServer, desc: "This Client has been banned by administrative action. Contact the server administrator"},
 		CodeBadAuthMethod:                      {iss: CodeIssuerServer, desc: "The authentication method is not supported or does not match the authentication method currently in use"},
-		CodeTopicFilterNotValid:                {iss: CodeIssuerServer, desc: "The Will Topic Is Invalid"},
+		CodeInvalidTopicName:                   {iss: CodeIssuerServer, desc: "The Will Topic Name is not malformed, but is not accepted by this Server"},
 		CodePacketTooLarge:                     {iss: CodeIssuerServer, desc: "The Connect Packet exceeded the maximum permissible size"},
+		CodeQuotaExceeded:                      {iss: CodeIssuerServer, desc: "An implementation or administrative imposed limit has been exceeded"},
+		CodeRetainNotSupported:                 {iss: CodeIssuerServer, desc: "The Server does not support retained messages, and Will Retain was set to 1"},
+		CodeNotSupportedQoS:                    {iss: CodeIssuerServer, desc: "The Server does not support the QoS set in Will QoS"},
 		CodeUseAnotherServer:                   {iss: CodeIssuerServer, desc: "The Client should temporarily use another server"},
 		CodeServerMoved:                        {iss: CodeIssuerServer, desc: "The Client should permanently use another server"},
 		CodeConnectionRateExceeded:             {iss: CodeIssuerServer, desc: "The connection rate limit has been exceeded"},
@@ -94,8 +101,9 @@ var packetTypeCodeMap = map[PacketType]map[ReasonCode]struct {
 		CodeUnspecifiedError:            {iss: CodeIssuerBoth, desc: "The receiver does not accept the publish but either does not want to reveal the reason, or it does not match one of the other values"},
 		CodeImplementationSpecificError: {iss: CodeIssuerBoth, desc: "The PUBLISH is valid but the receiver is not willing to accept it"},
 		CodeNotAuthorized:               {iss: CodeIssuerBoth, desc: "The PUBLISH is not authorized"},
-		CodeTopicFilterNotValid:         {iss: CodeIssuerBoth, desc: "The topic name is valid, but is not accepted"},
+		CodeInvalidTopicName:            {iss: CodeIssuerBoth, desc: "The topic name is valid, but is not accepted"},
 		CodeQuotaExceeded:               {iss: CodeIssuerBoth, desc: "An implementation imposed limit has been exceeded"},
+		CodeInvalidPayloadFormat:        {iss: CodeIssuerBoth, desc: "The payload format does not match the one specified in the Payload Format Indicator"},
 	},
 	PUBREC: {
 		CodeSuccess:                     {iss: CodeIssuerBoth, desc: "The message is accepted. Publication of the QoS 2 message proceeds"},
@@ -103,9 +111,10 @@ var packetTypeCodeMap = map[PacketType]map[ReasonCode]struct {
 		CodeUnspecifiedError:            {iss: CodeIssuerBoth, desc: "The receiver does not accept the publish but either does not want to reveal the reason, or it does not match one of the other values"},
 		CodeImplementationSpecificError: {iss: CodeIssuerBoth, desc: "The PUBLISH is valid but the receiver is not willing to accept it"},
 		CodeNotAuthorized:               {iss: CodeIssuerBoth, desc: "The PUBLISH is not authorized"},
-		CodeTopicFilterNotValid:         {iss: CodeIssuerBoth, desc: "The topic name is valid, but is not accepted"},
+		CodeInvalidTopicName:            {iss: CodeIssuerBoth, desc: "The topic name is valid, but is not accepted"},
 		CodePacketIDInUse:               {iss: CodeIssuerBoth, desc: "The PacketID is already in use. Possible mismatch in the session state between the Client and Server"},
 		CodeQuotaExceeded:               {iss: CodeIssuerBoth, desc: "An implementation imposed limit has been exceeded"},
+		CodeInvalidPayloadFormat:        {iss: CodeIssuerBoth, desc: "The payload format does not match the one specified in the Payload Format Indicator"},
 	},
 	PUBREL: {
 		CodeSuccess:          {iss: CodeIssuerBoth, desc: "Message released. Publication of QoS 2 message is complete"},
@@ -122,7 +131,7 @@ var packetTypeCodeMap = map[PacketType]map[ReasonCode]struct {
 		CodeUnspecifiedError:                  {iss: CodeIssuerBoth, desc: "The subscription is not accepted and the Server either does not wish to reveal the reason or none of the other Return Codes apply"},
 		CodeImplementationSpecificError:       {iss: CodeIssuerBoth, desc: "The SUBSCRIBE is valid but the Server does not accept i"},
 		CodeNotAuthorized:                     {iss: CodeIssuerBoth, desc: "The Client is not authorized to make this subscription"},
-		CodeTopicFilterNotValid:               {iss: CodeIssuerBoth, desc: "The Topic Filter is correctly formed but is not allowed for this client"},
+		CodeInvalidTopicFilter:                {iss: CodeIssuerBoth, desc: "The Topic Filter is correctly formed but is not allowed for this client"},
 		CodePacketIDInUse:                     {iss: CodeIssuerBoth, desc: "The specified packet identifier is already in use"},
 		CodeQuotaExceeded:                     {iss: CodeIssuerBoth, desc: "An implementation imposed limit has been exceeded"},
 		CodeSharedSubscriptionNotSupported:    {iss: CodeIssuerBoth, desc: "The Server does not support shared subscriptions for this Client"},
@@ -135,11 +144,12 @@ var packetTypeCodeMap = map[PacketType]map[ReasonCode]struct {
 		CodeUnspecifiedError:            {iss: CodeIssuerBoth, desc: "The unsubscribe could not be completed and the Server either does not wish to reveal the reason or none of the other Return Codes apply"},
 		CodeImplementationSpecificError: {iss: CodeIssuerBoth, desc: "The UNSUBSCRIBE is valid but the Server does not accept it"},
 		CodeNotAuthorized:               {iss: CodeIssuerBoth, desc: "The client is not authorized to unsubscribe"},
-		CodeTopicFilterNotValid:         {iss: CodeIssuerBoth, desc: "The topic filter is correctly formed but is not allowed for this client"},
+		CodeInvalidTopicFilter:          {iss: CodeIssuerBoth, desc: "The topic filter is correctly formed but is not allowed for this client"},
 		CodePacketIDInUse:               {iss: CodeIssuerBoth, desc: "The specified packet identifier is already in use"},
 	},
 	DISCONNECT: {
 		CodeSuccess:                           {iss: CodeIssuerClient, desc: "Close the connection normally. Do not send the Will Message"},
+		CodeRefusedBadUsernameOrPassword:      {iss: CodeIssuerClient, desc: "The client wishes to disconnect but requires that the Server also publishes its Will message"},
 		CodeUnspecifiedError:                  {iss: CodeIssuerBoth, desc: "The Connection is closed but the sender either does not wish to reveal the reason, or none of the other Return Codes apply"},
 		CodeMalformedPacket:                   {iss: CodeIssuerBoth, desc: "The received packet does not conform to this specification"},
 		CodeProtocolError:                     {iss: CodeIssuerBoth, desc: "An unexpected or out of order packet was received"},
@@ -147,16 +157,19 @@ var packetTypeCodeMap = map[PacketType]map[ReasonCode]struct {
 		CodeNotAuthorized:                     {iss: CodeIssuerServer, desc: "The request is not authorized"},
 		CodeServerBusy:                        {iss: CodeIssuerServer, desc: "The Server is busy and cannot continue processing this Client"},
 		CodeServerShuttingDown:                {iss: CodeIssuerServer, desc: "The Server is shutting down"},
-		CodeSessionTakenOver:                  {iss: CodeIssuerServer, desc: "Another Connection using the same ClientId has connected causing this Connection to be closed"},
 		CodeKeepAliveTimeout:                  {iss: CodeIssuerServer, desc: "The Connection is closed because no Packet has been received for 1.5 times the Keep alive time"},
-		CodeTopicFilterNotValid:               {iss: CodeIssuerBoth, desc: "The topic name or filter is valid, but is not accepted"},
+		CodeSessionTakenOver:                  {iss: CodeIssuerServer, desc: "Another Connection using the same ClientId has connected causing this Connection to be closed"},
+		CodeInvalidTopicFilter:                {iss: CodeIssuerServer, desc: "The topic filter is valid, but is not accepted"},
+		CodeInvalidTopicName:                  {iss: CodeIssuerBoth, desc: "The topic name is valid, but is not accepted"},
 		CodePacketTooLarge:                    {iss: CodeIssuerBoth, desc: "The packet size is too large"},
+		CodeReceiveMaximumExceeded:            {iss: CodeIssuerBoth, desc: "The Client or Server has received more than Receive Maximum publication for which it has not sent PUBACK or PUBCOMP"},
+		CodeInvalidTopicAlias:                 {iss: CodeIssuerBoth, desc: "The Client or Server has received a PUBLISH packet containing a Topic Alias which is greater than the Maximum Topic Alias it sent in the CONNECT or CONNACK packet"},
 		CodeMessageRateTooHigh:                {iss: CodeIssuerBoth, desc: "The rate of publish is too high"},
 		CodeQuotaExceeded:                     {iss: CodeIssuerBoth, desc: "An implementation imposed limit has been exceeded"},
 		CodeAdministrativeAction:              {iss: CodeIssuerBoth, desc: "The Connection is closed due to an administrative action"},
-		CodeDisconnectWithWillMessage:         {iss: CodeIssuerClient, desc: "The client wishes to disconnect but requires that the Server also publishes its Will message"},
-		CodeRetainUnavailable:                 {iss: CodeIssuerServer, desc: "The Server has specified Retain unavailable in the CONNACK"},
-		CodeMaximumQoS:                        {iss: CodeIssuerServer, desc: "The Client specified a QoS greater then the QoS specified in a Maximum QoS in the CONNACK"},
+		CodeInvalidPayloadFormat:              {iss: CodeIssuerBoth, desc: "The payload format does not match the one specified by the Payload Format Indicator"},
+		CodeRetainNotSupported:                {iss: CodeIssuerServer, desc: "The Server has does not support retained messages"},
+		CodeNotSupportedQoS:                   {iss: CodeIssuerServer, desc: "The Client specified a QoS greater then the QoS specified in a Maximum QoS in the CONNACK"},
 		CodeUseAnotherServer:                  {iss: CodeIssuerServer, desc: "The Client should temporarily change its Server"},
 		CodeServerMoved:                       {iss: CodeIssuerServer, desc: "The Server is moved and the client should permanently change its server location"},
 		CodeSharedSubscriptionNotSupported:    {iss: 0, desc: ""},
@@ -188,42 +201,46 @@ var codeDescMap = map[ReasonCode]string{
 	CodeRefusedServerUnavailable:           "Server refused connection",
 	CodeRefusedBadUsernameOrPassword:       "The data in the user name or password is malformed",
 	CodeRefusedNotAuthorized:               "The Client is not authorized to connect",
-	CodeNoMatchingSubscribers:              "The message is accepted but there are no subscribers",
-	CodeNoSubscriptionExisted:              "No matching subscription existed",
-	CodeContinueAuthentication:             "Continue the authentication with another step",
-	CodeReAuthenticate:                     "Initiate a re-authentication",
-	CodeUnspecifiedError:                   "Return code not specified by application",
-	CodeMalformedPacket:                    "Data within the Packet was not consistent with this specification",
-	CodeProtocolError:                      "",
-	CodeImplementationSpecificError:        "",
-	CodeUnsupportedProtocol:                "",
-	CodeInvalidClientID:                    "",
-	CodeBadUserOrPassword:                  "",
-	CodeNotAuthorized:                      "",
-	CodeServerUnavailable:                  "",
-	CodeServerBusy:                         "",
-	CodeBanned:                             "",
-	CodeServerShuttingDown:                 "",
-	CodeBadAuthMethod:                      "",
-	CodeSessionTakenOver:                   "",
-	CodeKeepAliveTimeout:                   "",
-	CodeTopicFilterNotValid:                "",
-	CodePacketIDInUse:                      "",
-	CodePacketIDNotFound:                   "",
-	CodePacketTooLarge:                     "",
-	CodeMessageRateTooHigh:                 "",
-	CodeQuotaExceeded:                      "",
-	CodeAdministrativeAction:               "",
-	CodeDisconnectWithWillMessage:          "",
-	CodeRetainUnavailable:                  "",
-	CodeMaximumQoS:                         "",
-	CodeUseAnotherServer:                   "",
-	CodeServerMoved:                        "",
-	CodeSharedSubscriptionNotSupported:     "",
-	CodeConnectionRateExceeded:             "",
-	CodeMaximumConnectTime:                 "",
-	CodeSubscriptionIDNotSupported:         "",
-	CodeWildcardSubscriptionsNotSupported:  "",
+	//CodeRefusedBadUsernameOrPassword:       "",
+	CodeNoMatchingSubscribers:             "The message is accepted but there are no subscribers",
+	CodeNoSubscriptionExisted:             "No matching subscription existed",
+	CodeContinueAuthentication:            "Continue the authentication with another step",
+	CodeReAuthenticate:                    "Initiate a re-authentication",
+	CodeUnspecifiedError:                  "Return code not specified by application",
+	CodeMalformedPacket:                   "Data within the Packet was not consistent with this specification",
+	CodeProtocolError:                     "",
+	CodeImplementationSpecificError:       "",
+	CodeUnsupportedProtocol:               "",
+	CodeInvalidClientID:                   "",
+	CodeBadUserOrPassword:                 "",
+	CodeNotAuthorized:                     "",
+	CodeServerUnavailable:                 "",
+	CodeServerBusy:                        "",
+	CodeBanned:                            "",
+	CodeServerShuttingDown:                "",
+	CodeBadAuthMethod:                     "",
+	CodeKeepAliveTimeout:                  "",
+	CodeSessionTakenOver:                  "",
+	CodeInvalidTopicFilter:                "",
+	CodeInvalidTopicName:                  "",
+	CodePacketIDInUse:                     "",
+	CodePacketIDNotFound:                  "",
+	CodeReceiveMaximumExceeded:            "",
+	CodeInvalidTopicAlias:                 "",
+	CodePacketTooLarge:                    "",
+	CodeMessageRateTooHigh:                "",
+	CodeQuotaExceeded:                     "",
+	CodeAdministrativeAction:              "",
+	CodeInvalidPayloadFormat:              "",
+	CodeRetainNotSupported:                "",
+	CodeNotSupportedQoS:                   "",
+	CodeUseAnotherServer:                  "",
+	CodeServerMoved:                       "",
+	CodeSharedSubscriptionNotSupported:    "",
+	CodeConnectionRateExceeded:            "",
+	CodeMaximumConnectTime:                "",
+	CodeSubscriptionIDNotSupported:        "",
+	CodeWildcardSubscriptionsNotSupported: "",
 }
 
 // PacketTypeDir check direction of packet type

@@ -1,4 +1,4 @@
-package session
+package connection
 
 import (
 	"container/list"

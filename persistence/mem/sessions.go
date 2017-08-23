@@ -1,98 +1,196 @@
 package mem
 
 import (
-	"sync"
-
 	"github.com/troian/surgemq/persistence/types"
+	"golang.org/x/sync/syncmap"
 )
 
 type sessions struct {
-	status *dbStatus
-
-	lock sync.Mutex
-
-	sessions map[string]*persistenceTypes.SessionState
+	status        *dbStatus
+	messages      syncmap.Map
+	state         syncmap.Map
+	subscriptions syncmap.Map
 }
 
-func (s *sessions) PutOutMessage(id []byte, data []byte) error {
+func (s *sessions) SubscriptionsIterate(load func([]byte, []byte) error) error {
 	select {
 	case <-s.status.done:
 		return persistenceTypes.ErrNotOpen
 	default:
 	}
 
-	defer s.lock.Unlock()
-	s.lock.Lock()
+	s.subscriptions.Range(func(k, v interface{}) bool {
+		id := k.([]byte)
+		val := v.([]byte)
 
-	if _, ok := s.sessions[string(id)]; !ok {
-		s.sessions[string(id)] = &persistenceTypes.SessionState{}
-	}
-
-	s.sessions[string(id)].OutMessages = append(s.sessions[string(id)].OutMessages, data)
+		if err := load(id, val); err != nil {
+			return false
+		}
+		return true
+	})
 
 	return nil
 }
 
-// Get
-func (s *sessions) Get(id []byte) (*persistenceTypes.SessionState, error) {
+func (s *sessions) SubscriptionStore(id []byte, data []byte) error {
+	select {
+	case <-s.status.done:
+		return persistenceTypes.ErrNotOpen
+	default:
+	}
+
+	s.subscriptions.Store(id, data)
+
+	return nil
+}
+
+func (s *sessions) SubscriptionDelete(id []byte) error {
+	select {
+	case <-s.status.done:
+		return persistenceTypes.ErrNotOpen
+	default:
+	}
+
+	s.subscriptions.Delete(id)
+
+	return nil
+}
+
+func (s *sessions) SubscriptionsWipe() error {
+	select {
+	case <-s.status.done:
+		return persistenceTypes.ErrNotOpen
+	default:
+	}
+
+	s.subscriptions.Range(func(k, v interface{}) bool {
+		s.subscriptions.Delete(k)
+		return true
+	})
+
+	return nil
+}
+
+func (s *sessions) MessageStore(id []byte, data []byte) error {
+	select {
+	case <-s.status.done:
+		return persistenceTypes.ErrNotOpen
+	default:
+	}
+
+	messages := &persistenceTypes.SessionMessages{}
+	messages.OutMessages = append(messages.OutMessages, data)
+
+	if state, ok := s.messages.LoadOrStore(id, messages); ok {
+		msg := state.(*persistenceTypes.SessionMessages)
+		msg.OutMessages = append(msg.OutMessages, data)
+	}
+
+	return nil
+}
+
+func (s *sessions) MessagesLoad(id []byte) (*persistenceTypes.SessionMessages, error) {
 	select {
 	case <-s.status.done:
 		return nil, persistenceTypes.ErrNotOpen
 	default:
 	}
 
-	defer s.lock.Unlock()
-	s.lock.Lock()
-
-	ses, ok := s.sessions[string(id)]
-
-	if !ok {
-		return nil, persistenceTypes.ErrNotFound
+	if st, ok := s.messages.Load(id); ok {
+		state := st.(*persistenceTypes.SessionMessages)
+		return state, nil
 	}
 
-	return ses, nil
+	return nil, persistenceTypes.ErrNotFound
 }
 
-// Load
-func (s *sessions) Load(load func([]byte, *persistenceTypes.SessionState)) error {
+func (s *sessions) MessagesStore(id []byte, state *persistenceTypes.SessionMessages) error {
 	select {
 	case <-s.status.done:
 		return persistenceTypes.ErrNotOpen
 	default:
 	}
 
-	defer s.lock.Unlock()
-	s.lock.Lock()
-
-	for id, state := range s.sessions {
-		load([]byte(id), state)
+	if st, ok := s.messages.LoadOrStore(id, state); ok {
+		state := st.(*persistenceTypes.SessionMessages)
+		state.OutMessages = append(state.OutMessages, state.OutMessages...)
+		state.UnAckMessages = append(state.UnAckMessages, state.UnAckMessages...)
 	}
 
 	return nil
 }
 
-// Store session state
-func (s *sessions) Store(id []byte, state *persistenceTypes.SessionState) error {
+func (s *sessions) MessagesWipe(id []byte) error {
 	select {
 	case <-s.status.done:
 		return persistenceTypes.ErrNotOpen
 	default:
 	}
 
-	defer s.lock.Unlock()
-	s.lock.Lock()
-
-	if st, ok := s.sessions[string(id)]; ok {
-		st.OutMessages = append(st.OutMessages, state.OutMessages...)
-		st.UnAckMessages = append(st.UnAckMessages, state.UnAckMessages...)
-	} else {
-		s.sessions[string(id)] = state
-	}
+	s.messages.Delete(id)
 
 	return nil
 }
 
-// Delete
+func (s *sessions) StateStore(id []byte, state *persistenceTypes.SessionState) error {
+	select {
+	case <-s.status.done:
+		return persistenceTypes.ErrNotOpen
+	default:
+	}
+
+	s.state.Store(id, state)
+
+	return nil
+}
+
+func (s *sessions) StatesIterate(load func([]byte, *persistenceTypes.SessionState) error) error {
+	select {
+	case <-s.status.done:
+		return persistenceTypes.ErrNotOpen
+	default:
+	}
+
+	s.state.Range(func(k, v interface{}) bool {
+		id := k.([]byte)
+		state := v.(*persistenceTypes.SessionState)
+		if err := load(id, state); err != nil {
+			return false
+		}
+
+		return true
+	})
+
+	return nil
+}
+
+func (s *sessions) StateWipe(id []byte) error {
+	select {
+	case <-s.status.done:
+		return persistenceTypes.ErrNotOpen
+	default:
+	}
+
+	s.state.Delete(id)
+
+	return nil
+}
+
+func (s *sessions) StatesWipe() error {
+	select {
+	case <-s.status.done:
+		return persistenceTypes.ErrNotOpen
+	default:
+	}
+
+	s.state.Range(func(k, v interface{}) bool {
+		s.state.Delete(k)
+		return true
+	})
+
+	return nil
+}
+
 func (s *sessions) Delete(id []byte) error {
 	select {
 	case <-s.status.done:
@@ -100,26 +198,9 @@ func (s *sessions) Delete(id []byte) error {
 	default:
 	}
 
-	defer s.lock.Unlock()
-	s.lock.Lock()
-
-	delete(s.sessions, string(id))
-
-	return nil
-}
-
-// Wipe
-func (s *sessions) Wipe() error {
-	select {
-	case <-s.status.done:
-		return persistenceTypes.ErrNotOpen
-	default:
-	}
-
-	defer s.lock.Unlock()
-	s.lock.Lock()
-
-	s.sessions = make(map[string]*persistenceTypes.SessionState)
+	s.messages.Delete(id)
+	s.state.Delete(id)
+	s.subscriptions.Delete(id)
 
 	return nil
 }

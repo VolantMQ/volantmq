@@ -12,7 +12,7 @@ type Provider interface {
 	Topics() TopicsStat
 	Subscriptions() SubscriptionsStat
 	Clients() Clients
-	Sessions() SessionsStat
+	Sessions() Sessions
 }
 
 // Metric is wrap around all of metrics
@@ -34,9 +34,9 @@ type BytesMetric interface {
 }
 
 // SessionsStat Statistic of sessions
-type SessionsStat interface {
-	Created()
-	Removed()
+type Sessions interface {
+	Created(id string, status *SessionCreatedStatus)
+	Removed(id string, status *SessionDeletedStatus)
 }
 
 // Clients Statistic of sessions

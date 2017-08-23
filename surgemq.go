@@ -11,11 +11,11 @@ import (
 
 	"github.com/pborman/uuid"
 	"github.com/troian/surgemq/auth"
+	"github.com/troian/surgemq/clients"
 	"github.com/troian/surgemq/configuration"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/persistence"
 	persistTypes "github.com/troian/surgemq/persistence/types"
-	"github.com/troian/surgemq/session"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics"
 	"github.com/troian/surgemq/topics/types"
@@ -94,6 +94,7 @@ func NewServerConfig() *ServerConfig {
 	return &ServerConfig{
 		Authenticators:                "mockSuccess",
 		Persistence:                   persistTypes.MemConfig{},
+		OnDuplicate:                   func(string, bool) {},
 		OfflineQoS0:                   false,
 		AllowDuplicates:               false,
 		AllowOverlappingSubscriptions: true,
@@ -132,7 +133,7 @@ type server struct {
 	authMgr *auth.Manager
 
 	// sessionsMgr is the sessions manager for keeping track of the sessions
-	sessionsMgr *sessions.Manager
+	sessionsMgr *clients.Manager
 
 	log types.LogInterface
 
@@ -264,18 +265,18 @@ func NewServer(config *ServerConfig) (Server, error) {
 		}
 	}
 
-	mConfig := sessions.Config{
-		TopicsMgr:       s.topicsMgr,
-		ConnectTimeout:  s.config.ConnectTimeout,
-		Persist:         s.persist,
-		AllowDuplicates: s.config.AllowDuplicates,
-		OnDuplicate:     s.config.OnDuplicate,
-		OfflineQoS0:     s.config.OfflineQoS0,
-		Systree:         s.sysTree,
-		NodeName:        s.config.NodeName,
+	mConfig := &clients.Config{
+		TopicsMgr:        s.topicsMgr,
+		ConnectTimeout:   s.config.ConnectTimeout,
+		Persist:          s.persist,
+		AllowReplace:     s.config.AllowDuplicates,
+		OnReplaceAttempt: s.config.OnDuplicate,
+		OfflineQoS0:      s.config.OfflineQoS0,
+		Systree:          s.sysTree,
+		NodeName:         s.config.NodeName,
 	}
 
-	if s.sessionsMgr, err = sessions.New(mConfig); err != nil {
+	if s.sessionsMgr, err = clients.NewManager(mConfig); err != nil {
 		return nil, err
 	}
 

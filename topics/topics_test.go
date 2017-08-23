@@ -80,7 +80,7 @@ func TestTopicsSubscription(t *testing.T) {
 		prov, err := New(p.config)
 		require.NoError(t, err)
 
-		sub1 := &subscriber.ProviderType{}
+		sub1 := &subscriber.Type{}
 		qos, _, err := prov.Subscribe("sports/tennis/+/stats", message.QoS2, sub1, 0)
 
 		require.NoError(t, err)

@@ -1,17 +1,16 @@
 package transport
 
 import (
+	"errors"
+	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
-	"sync"
-
 	"github.com/troian/surgemq/auth"
+	"github.com/troian/surgemq/clients"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/routines"
-	"github.com/troian/surgemq/session"
 	"github.com/troian/surgemq/systree"
+	"go.uber.org/zap"
 )
 
 // Config is base configuration object used by all transports
@@ -21,10 +20,6 @@ type Config struct {
 
 	// Port tcp port to listen on
 	Port int
-
-	// Anonymous either allow or deny anonymous access
-	// If not set than default is false
-	Anonymous bool
 }
 
 // InternalConfig used by server implementation to configure internal specific needs
@@ -33,7 +28,7 @@ type InternalConfig struct {
 	// If not set than defaults to 0x3 and 0x04
 	AllowedVersions map[message.ProtocolVersion]bool
 
-	Sessions *sessions.Manager
+	Sessions *clients.Manager
 
 	Metric systree.Metric
 
@@ -125,56 +120,44 @@ func (c *baseConfig) handleConnection(conn conn) {
 			m, _ := message.NewMessage(req.Version(), message.CONNACK)
 			resp, _ := m.(*message.ConnAckMessage)
 
+			var reason message.ReasonCode
 			// If protocol version is not in allowed list then give reject and pass control to session manager
 			// to handle response
 			if allowed, ok := c.AllowedVersions[r.Version()]; !ok || !allowed {
-				reason := message.CodeRefusedUnacceptableProtocolVersion
+				reason = message.CodeRefusedUnacceptableProtocolVersion
 				if r.Version() == message.ProtocolV50 {
 					reason = message.CodeUnsupportedProtocol
 				}
-				resp.SetReturnCode(reason) // nolint: errcheck
 			} else {
-				c.handleConnectionPermission(r, resp)
-			}
+				user, pass := r.Credentials()
 
-			c.Sessions.Start(r, resp, conn)
+				if status := c.config.AuthManager.Password(string(user), string(pass)); status == auth.StatusAllow {
+					reason = message.CodeSuccess
+					if r.KeepAlive() == 0 {
+						r.SetKeepAlive(uint16(c.KeepAlive))
+						resp.PropertySet(message.PropertyServerKeepAlive, uint16(c.KeepAlive)) // nolint: errcheck
+					}
+				} else {
+					reason = message.CodeRefusedBadUsernameOrPassword
+					if req.Version() == message.ProtocolV50 {
+						reason = message.CodeBadUserOrPassword
+					}
+				}
+			}
+			resp.SetReturnCode(reason) // nolint: errcheck
+
+			c.Sessions.NewSession(
+				&clients.StartConfig{
+					Req:  r,
+					Resp: resp,
+					Conn: conn,
+					Auth: c.config.AuthManager,
+				})
 		default:
 			c.log.Error("Unexpected message type",
 				zap.String("expected", "CONNECT"),
 				zap.String("received", r.Type().Name()))
+			err = errors.New("unexpected message type")
 		}
 	}
-}
-
-func (c *baseConfig) handleConnectionPermission(req *message.ConnectMessage, resp *message.ConnAckMessage) {
-	user, pass := req.Credentials()
-
-	var reason message.ReasonCode
-
-	if len(user) > 0 {
-		if err := c.config.AuthManager.Password(string(user), string(pass)); err == nil {
-			reason = message.CodeSuccess
-		} else {
-			reason = message.CodeRefusedBadUsernameOrPassword
-			if req.Version() == message.ProtocolV50 {
-				reason = message.CodeBadUserOrPassword
-			}
-		}
-	} else {
-		if c.config.Anonymous {
-			reason = message.CodeSuccess
-		} else {
-			reason = message.CodeRefusedBadUsernameOrPassword
-			if req.Version() == message.ProtocolV50 {
-				reason = message.CodeBadUserOrPassword
-			}
-		}
-	}
-
-	if req.KeepAlive() == 0 {
-		req.SetKeepAlive(uint16(c.KeepAlive))
-		resp.PropertySet(message.PropertyServerKeepAlive, uint16(c.KeepAlive)) // nolint: errcheck
-	}
-
-	resp.SetReturnCode(reason) // nolint: errcheck
 }

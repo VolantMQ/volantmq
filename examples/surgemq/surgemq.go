@@ -15,46 +15,22 @@
 package main
 
 import (
+	"net/http"
 	"os"
-	_ "runtime/debug"
-
 	"os/signal"
 	"syscall"
 
 	"github.com/spf13/viper"
 	"github.com/troian/surgemq"
 	"github.com/troian/surgemq/auth"
-	authTypes "github.com/troian/surgemq/auth/types"
 	"github.com/troian/surgemq/configuration"
-	persistType "github.com/troian/surgemq/persistence/types"
+	"github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/transport"
 	"go.uber.org/zap"
 
-	"net/http"
 	_ "net/http/pprof"
+	_ "runtime/debug"
 )
-
-type internalAuth struct {
-	creds map[string]string
-}
-
-func (a internalAuth) Password(user, password string) error {
-	if hash, ok := a.creds[user]; ok {
-		if password == hash {
-			return nil
-		}
-	}
-	return auth.ErrAuthFailure
-}
-
-// nolint: golint
-func (a internalAuth) AclCheck(clientID, user, topic string, access authTypes.AccessType) error {
-	return auth.ErrAuthFailure
-}
-
-func (a internalAuth) PskKey(hint, identity string, key []byte, maxKeyLen int) error {
-	return auth.ErrAuthFailure
-}
 
 func main() {
 	ops := configuration.Options{
@@ -112,7 +88,7 @@ func main() {
 
 	serverConfig.OfflineQoS0 = true
 	//serverConfig.Persistence = &persistType.MemConfig{}
-	serverConfig.Persistence = &persistType.BoltDBConfig{
+	serverConfig.Persistence = &persistenceTypes.BoltDBConfig{
 		File: "./persist.db",
 	}
 	serverConfig.TransportStatus = listenerStatus
@@ -137,7 +113,6 @@ func main() {
 		&transport.Config{
 			Port:        1883,
 			AuthManager: authMng,
-			Anonymous:   true,
 		})
 
 	if err = srv.ListenAndServe(config); err != nil {
@@ -148,7 +123,6 @@ func main() {
 		&transport.Config{
 			Port:        8080,
 			AuthManager: authMng,
-			Anonymous:   true,
 		})
 
 	if err = srv.ListenAndServe(configWs); err != nil {

@@ -3,12 +3,12 @@ package systree
 import "github.com/troian/surgemq/types"
 
 type impl struct {
-	broker        broker
+	server        server
 	metrics       metric
 	topics        topicStat
 	subscriptions subscriptionsStat
 	clients       clients
-	sessions      sessionsStat
+	sessions      sessions
 }
 
 // NewTree allocate systree provider
@@ -17,12 +17,12 @@ func NewTree(base string) (Provider, []types.RetainObject, []DynamicValue, error
 	staticRetains := []types.RetainObject{}
 
 	tr := &impl{
-		newBroker(base, &retains, &staticRetains),
+		newServer(base, &retains, &staticRetains),
 		newMetric(base, &retains),
 		newStatTopic(base+"/stats", &retains),
 		newStatSubscription(base+"/stats", &retains),
 		newClients(base, &retains),
-		newStatSessions(base+"/stats", &retains),
+		newSessions(base, &retains),
 	}
 
 	dynUpdates := []DynamicValue{}
@@ -37,10 +37,11 @@ func NewTree(base string) (Provider, []types.RetainObject, []DynamicValue, error
 
 func (t *impl) SetCallbacks(cb types.TopicMessenger) {
 	t.clients.topicsManager = cb
+	t.sessions.topicsManager = cb
 }
 
 // Sessions get sessions stat provider
-func (t *impl) Sessions() SessionsStat {
+func (t *impl) Sessions() Sessions {
 	return &t.sessions
 }
 

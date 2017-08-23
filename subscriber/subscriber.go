@@ -1,40 +1,30 @@
 package subscriber
 
 import (
-	"sync"
-
-	"go.uber.org/zap"
-
 	"unsafe"
 
-	"github.com/troian/surgemq/configuration"
+	"sync"
+
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/topics/types"
 )
+
+// ConnectionProvider passed to present network connection
+type ConnectionProvider interface {
+	Subscriptions() Subscriptions
+	Subscribe(string, *SubscriptionParams) (message.QosType, []*message.PublishMessage, error)
+	UnSubscribe(string) error
+	HasSubscriptions() bool
+	Online(c OnlinePublish)
+	Offline(bool)
+	Version() message.ProtocolVersion
+}
 
 // OnlinePublish invoked when subscriber respective to sessions receive message
 type OnlinePublish func(*message.PublishMessage) error
 
 // OfflinePublish invoked when subscriber respective to sessions receive message
 type OfflinePublish func(string, *message.PublishMessage)
-
-// Provider general provider
-type Provider interface {
-	Subscribe(string, *SubscriptionParams) (message.QosType, []*message.PublishMessage, error)
-	UnSubscribe(string) error
-	SetOnlineCallback(OnlinePublish)
-	Subscriptions() Subscriptions
-	PutOffline(bool)
-	Version() message.ProtocolVersion
-}
-
-// SessionProvider passed to session
-type SessionProvider interface {
-	Subscribe(string, *SubscriptionParams) (message.QosType, []*message.PublishMessage, error)
-	UnSubscribe(string) error
-	SetOnlineCallback(OnlinePublish)
-	PutOffline(bool)
-}
 
 // SubscriptionParams parameters of the subscription
 type SubscriptionParams struct {
@@ -52,103 +42,76 @@ type SubscriptionParams struct {
 // Subscriptions contains active subscriptions with respective subscription parameters
 type Subscriptions map[string]*SubscriptionParams
 
-// Config of subscriber
 type Config struct {
-	// ID client id
-	ID string
-
-	// Callback to invoke when subscriber is offline
-	Offline OfflinePublish
-
-	// Topics manager
-	Topics topicsTypes.SubscriberInterface
-
-	// Version MQTT protocol version
-	Version message.ProtocolVersion
-
-	// OfflineQoS0 either queue QoS0 messages when offline or not
-	OfflineQoS0 bool
+	ID               string
+	Topics           topicsTypes.SubscriberInterface
+	OnOfflinePublish OfflinePublish
+	OfflineQoS0      bool
+	Version          message.ProtocolVersion
 }
 
-// ProviderType the subscription object
-// It is public definition only for topics tests
-type ProviderType struct {
-	id string
-
-	topics topicsTypes.SubscriberInterface
-
-	subscriptions Subscriptions
-
-	isOnline chan struct{}
-
-	writers struct {
-		online struct {
-			wg      sync.WaitGroup
-			publish OnlinePublish
-		}
-		offline struct {
-			wg      sync.WaitGroup
-			publish OfflinePublish
-		}
-	}
-
-	access sync.WaitGroup
-
-	log *zap.Logger
-
-	version     message.ProtocolVersion
-	offlineQoS0 bool
-
-	publishLock sync.RWMutex // todo: find better way
+type Type struct {
+	id             string
+	subscriptions  Subscriptions
+	topics         topicsTypes.SubscriberInterface
+	publishOffline OfflinePublish
+	publishOnline  OnlinePublish
+	access         sync.WaitGroup
+	wgOffline      sync.WaitGroup
+	wgOnline       sync.WaitGroup
+	publishLock    sync.RWMutex // todo: find better way
+	isOnline       chan struct{}
+	offlineQoS0    bool
+	version        message.ProtocolVersion
 }
 
-// New subscriber object
-func New(config *Config) Provider {
-	p := &ProviderType{
-		id:            config.ID,
-		topics:        config.Topics,
-		version:       config.Version,
-		log:           configuration.GetProdLogger().Named("subscriber").Named(config.ID),
-		subscriptions: make(Subscriptions),
-		isOnline:      make(chan struct{}),
-		offlineQoS0:   config.OfflineQoS0,
+func New(c *Config) *Type {
+	p := &Type{
+		isOnline:       make(chan struct{}),
+		subscriptions:  make(Subscriptions),
+		id:             c.ID,
+		publishOffline: c.OnOfflinePublish,
+		version:        c.Version,
+		offlineQoS0:    c.OfflineQoS0,
+		topics:         c.Topics,
 	}
 
 	close(p.isOnline)
-
-	p.writers.offline.publish = config.Offline
 
 	return p
 }
 
 // Hash returns address of the provider struct.
 // Used by topics provider as a key to subscriber object
-func (s *ProviderType) Hash() uintptr {
+func (s *Type) Hash() uintptr {
 	return uintptr(unsafe.Pointer(s))
 }
 
+func (s *Type) HasSubscriptions() bool {
+	return len(s.subscriptions) != 0
+}
+
 // Acquire prevent subscriber being deleted before active writes finished
-func (s *ProviderType) Acquire() {
+func (s *Type) Acquire() {
 	s.access.Add(1)
 }
 
 // Release subscriber once topics provider finished write
-func (s *ProviderType) Release() {
+func (s *Type) Release() {
 	s.access.Done()
 }
 
-// Subscriptions list active subscriptions
-func (s *ProviderType) Subscriptions() Subscriptions {
-	return s.subscriptions
-}
-
-// Version MQTT protocol version
-func (s *ProviderType) Version() message.ProtocolVersion {
+func (s *Type) Version() message.ProtocolVersion {
 	return s.version
 }
 
+// Subscriptions list active subscriptions
+func (s *Type) Subscriptions() Subscriptions {
+	return s.subscriptions
+}
+
 // Subscribe to given topic
-func (s *ProviderType) Subscribe(topic string, params *SubscriptionParams) (message.QosType, []*message.PublishMessage, error) {
+func (s *Type) Subscribe(topic string, params *SubscriptionParams) (message.QosType, []*message.PublishMessage, error) {
 	q, r, err := s.topics.Subscribe(topic, params.Requested.QoS(), s, params.ID)
 
 	params.Granted = q
@@ -158,50 +121,16 @@ func (s *ProviderType) Subscribe(topic string, params *SubscriptionParams) (mess
 }
 
 // UnSubscribe from given topic
-func (s *ProviderType) UnSubscribe(topic string) error {
+func (s *Type) UnSubscribe(topic string) error {
 	err := s.topics.UnSubscribe(topic, s)
 	delete(s.subscriptions, topic)
 	return err
 }
 
-// SetOnlineCallback moves subscriber to online state
-// since this moment all of publishes are forwarded to provided callback
-func (s *ProviderType) SetOnlineCallback(c OnlinePublish) {
-	s.writers.online.publish = c
-	s.isOnline = make(chan struct{})
-	s.writers.offline.wg.Wait()
-}
-
-// PutOffline put subscriber offline
-// if shutdown is true it does unsubscribe from all active subscriptions
-func (s *ProviderType) PutOffline(shutdown bool) {
-	if shutdown {
-		for topic := range s.subscriptions {
-			s.topics.UnSubscribe(topic, s) // nolint: errcheck
-			delete(s.subscriptions, topic)
-		}
-	}
-
-	select {
-	case <-s.isOnline:
-	default:
-		close(s.isOnline)
-		// Wait all of online publishes done
-		s.publishLock.Lock()
-		s.writers.online.wg.Wait()
-		s.publishLock.Unlock()
-	}
-
-	if shutdown {
-		s.access.Wait()
-		s.writers.offline.wg.Wait()
-	}
-}
-
 // Publish message accordingly to subscriber state
 // online: forward message to session
 // offline: persist message
-func (s *ProviderType) Publish(m *message.PublishMessage, grantedQoS message.QosType, ids []uint32) error {
+func (s *Type) Publish(m *message.PublishMessage, grantedQoS message.QosType, ids []uint32) error {
 	// message version should be same as session as encode/decode depends on it
 	mP, _ := message.NewMessage(s.version, message.PUBLISH)
 	msg, _ := mP.(*message.PublishMessage)
@@ -243,18 +172,49 @@ func (s *ProviderType) Publish(m *message.PublishMessage, grantedQoS message.Qos
 		// only with QoS1 and QoS2 and QoS0 if set by config
 		qos := msg.QoS()
 		if qos != message.QoS0 || (s.offlineQoS0 && qos == message.QoS0) {
-			defer s.writers.offline.wg.Done()
-			s.writers.offline.wg.Add(1)
-			s.writers.offline.publish(s.id, msg)
+			defer s.wgOffline.Done()
+			s.wgOffline.Add(1)
+			s.publishOffline(s.id, msg)
 		}
 	default:
 		// forward message to publish queue
-		defer s.writers.online.wg.Done()
+		defer s.wgOnline.Done()
 		s.publishLock.RLock()
-		s.writers.online.wg.Add(1)
+		s.wgOnline.Add(1)
 		s.publishLock.RUnlock()
-		return s.writers.online.publish(msg)
+		return s.publishOnline(msg)
 	}
 
 	return nil
+}
+
+// Online moves subscriber to online state
+// since this moment all of publishes are forwarded to provided callback
+func (s *Type) Online(c OnlinePublish) {
+	s.publishOnline = c
+	s.isOnline = make(chan struct{})
+	s.wgOffline.Wait()
+}
+
+// Offline put session offline
+// if shutdown is true it does unsubscribe from all active subscriptions
+func (s *Type) Offline(shutdown bool) {
+	// if session is clean then remove all remaining subscriptions
+	if shutdown {
+		for topic := range s.subscriptions {
+			s.topics.UnSubscribe(topic, s) // nolint: errcheck
+			delete(s.subscriptions, topic)
+		}
+	}
+
+	// wait all of remaining publishes are finished
+	select {
+	case <-s.isOnline:
+	default:
+		close(s.isOnline)
+		// Wait all of online publishes done
+		s.publishLock.Lock()
+		s.wgOnline.Wait()
+		s.publishLock.Unlock()
+	}
 }

@@ -90,6 +90,7 @@ type Provider interface {
 
 // SubscriberInterface used by subscriber to handle messages
 type SubscriberInterface interface {
+	Publish(interface{}) error
 	Subscribe(string, message.QosType, Subscriber, uint32) (message.QosType, []*message.PublishMessage, error)
 	UnSubscribe(string, Subscriber) error
 	Retain(types.RetainObject) error

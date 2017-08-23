@@ -5,6 +5,10 @@
 				{
 					"user" : "testuser",
 					"password" : "testpassword"
+				},
+				{
+					"user" : "",
+					"password" : ""
 				}
 			]
 		}

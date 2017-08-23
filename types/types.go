@@ -1,6 +1,10 @@
 package types
 
 import (
+	"sync/atomic"
+
+	"sync"
+
 	"go.uber.org/zap"
 )
 
@@ -31,4 +35,36 @@ type RetainObject interface {
 type TopicMessenger interface {
 	Publish(interface{}) error
 	Retain(RetainObject) error
+}
+
+type OnceWait struct {
+	val  uintptr
+	wait sync.WaitGroup
+	lock sync.Mutex
+}
+
+type Once struct {
+	val uintptr
+}
+
+func (o *OnceWait) Do(f func()) {
+	o.lock.Lock()
+	res := atomic.CompareAndSwapUintptr(&o.val, 0, 1)
+	if res {
+		o.wait.Add(1)
+	}
+	o.lock.Unlock()
+
+	if res {
+		f()
+		o.wait.Done()
+	} else {
+		o.wait.Wait()
+	}
+}
+
+func (o *Once) Do(f func()) {
+	if atomic.CompareAndSwapUintptr(&o.val, 0, 1) {
+		f()
+	}
 }

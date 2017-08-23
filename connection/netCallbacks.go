@@ -1,108 +1,118 @@
-package session
+package connection
 
 import (
 	"container/list"
-
 	"sync/atomic"
 
-	"time"
-
+	"github.com/troian/surgemq/auth"
 	"github.com/troian/surgemq/message"
 	"github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/subscriber"
 	"go.uber.org/zap"
 )
 
-func (s *Type) onConnectionClose(will bool) {
-	defer func() {
-		var persist *persistenceTypes.SessionState
+func (s *Type) getState() *persistenceTypes.SessionMessages {
+	var next *list.Element
 
-		if !s.clean {
-			var next *list.Element
+	encodeMessage := func(m message.Provider) ([]byte, error) {
+		sz, err := m.Size()
+		if err != nil {
+			return nil, err
+		}
 
-			encodeMessage := func(m message.Provider) ([]byte, error) {
-				sz, err := m.Size()
-				if err != nil {
-					return nil, err
-				}
+		buf := make([]byte, sz)
+		if _, err = m.Encode(buf); err != nil {
+			return nil, err
+		}
 
-				buf := make([]byte, sz)
-				if _, err = m.Encode(buf); err != nil {
-					return nil, err
-				}
+		return buf, nil
+	}
 
-				return buf, nil
-			}
+	outMessages := [][]byte{}
+	unAckMessages := [][]byte{}
 
-			outMessages := [][]byte{}
+	for elem := s.publisher.messages.Front(); elem != nil; elem = next {
+		next = elem.Next()
 
-			for elem := s.publisher.messages.Front(); elem != nil; elem = next {
-				next = elem.Next()
-
-				m, _ := s.publisher.messages.Remove(elem).(*message.PublishMessage)
-				qos := m.QoS()
-				if qos != message.QoS0 || (s.offlineQoS0 && qos == message.QoS0) {
-					// make sure message has some PacketID to prevent encode error
-					m.SetPacketID(0)
-					if buf, err := encodeMessage(m); err != nil {
-						s.log.prod.Error("Couldn't encode message for persistence", zap.Error(err))
-					} else {
-						outMessages = append(outMessages, buf)
-					}
-				}
-			}
-
-			unAckMessages := [][]byte{}
-
-			for _, m := range s.pubOut.get() {
-				switch msg := m.(type) {
-				case *message.PublishMessage:
-					if msg.QoS() == message.QoS1 {
-						msg.SetDup(true)
-					}
-				}
-
+		switch m := s.publisher.messages.Remove(elem).(type) {
+		case *message.PublishMessage:
+			qos := m.QoS()
+			if qos != message.QoS0 || (s.offlineQoS0 && qos == message.QoS0) {
+				// make sure message has some PacketID to prevent encode error
+				m.SetPacketID(0)
 				if buf, err := encodeMessage(m); err != nil {
 					s.log.prod.Error("Couldn't encode message for persistence", zap.Error(err))
 				} else {
-					unAckMessages = append(unAckMessages, buf)
+					outMessages = append(outMessages, buf)
 				}
 			}
+		case *unacknowledgedPublish:
+			if buf, err := encodeMessage(m.msg); err != nil {
+				s.log.prod.Error("Couldn't encode message for persistence", zap.Error(err))
+			} else {
+				unAckMessages = append(unAckMessages, buf)
+			}
+		}
+	}
 
-			persist = &persistenceTypes.SessionState{
-				Timestamp:     time.Now().Format(time.RFC3339),
-				OutMessages:   outMessages,
-				UnAckMessages: unAckMessages,
+	for _, m := range s.pubOut.get() {
+		switch msg := m.(type) {
+		case *message.PublishMessage:
+			if msg.QoS() == message.QoS1 {
+				msg.SetDup(true)
 			}
 		}
 
-		go s.callbacks.OnStop(s.id, s.version, persist)
-	}()
-
-	s.started.Wait()
-
-	s.subscriber.PutOffline(s.clean)
-
-	// [MQTT-3.1.3.3]
-	if will && s.will != nil {
-		s.log.dev.Debug("Connection unexpectedly closed. Sending Will", zap.String("ClientID", s.id))
-		s.publishToTopic(s.will) // nolint: errcheck
+		if buf, err := encodeMessage(m); err != nil {
+			s.log.prod.Error("Couldn't encode message for persistence", zap.Error(err))
+		} else {
+			unAckMessages = append(unAckMessages, buf)
+		}
 	}
 
-	close(s.publisher.quit)
-	s.publisher.cond.Broadcast()
+	return &persistenceTypes.SessionMessages{
+		OutMessages:   outMessages,
+		UnAckMessages: unAckMessages,
+	}
+}
 
-	// Wait writer to finish it's job
-	s.publisher.stopped.Wait()
+func (s *Type) onConnectionClose(will bool) {
+	s.onConnDisconnect.Do(func() {
+		params := &DisconnectParams{
+			Will:     will,
+			ExpireAt: nil,
+		}
 
-	// [MQTT-3.3.1-7]
-	// Discard retained messages with QoS 0
-	s.retained.lock.Lock()
-	//for _, m := range s.retained.list {
-	//	s.topics.Retain(m) // nolint: errcheck
-	//}
-	s.retained.list = []*message.PublishMessage{}
-	s.retained.lock.Unlock()
+		s.started.Wait()
+
+		s.subscriber.Offline(s.clean)
+
+		close(s.quit)
+		s.publisher.cond.L.Lock()
+		s.publisher.cond.Broadcast()
+		s.publisher.cond.L.Unlock()
+
+		// Wait writer to finish it's job
+		s.publisher.stopped.Wait()
+
+		if !s.clean {
+			s.publisher.lock.Lock()
+			params.State = s.getState()
+			s.publisher.lock.Unlock()
+		}
+
+		// [MQTT-3.3.1-7]
+		// Discard retained messages with QoS 0
+		s.retained.lock.Lock()
+		//for _, m := range s.retained.list {
+		//	s.topics.Retain(m) // nolint: errcheck
+		//}
+		s.retained.list = []*message.PublishMessage{}
+		s.retained.lock.Unlock()
+		s.conn = nil
+
+		s.onDisconnect(params)
+	})
 }
 
 // onPublish invoked when server receives PUBLISH message from remote
@@ -115,6 +125,14 @@ func (s *Type) onPublish(msg *message.PublishMessage) error {
 
 	reason := message.CodeSuccess
 
+	// This case is for V5.0 actually as ack messages may return status.
+	// To deal with V3.1.1 two ways left:
+	//   - ignore the message but send acks
+	//   - return error which leads to disconnect
+	if status := s.auth.ACL(s.id, s.username, msg.Topic(), auth.AccessTypeWrite); status == auth.StatusDeny {
+		reason = message.CodeAdministrativeAction
+	}
+
 	switch msg.QoS() {
 	case message.QoS2:
 		m, _ := message.NewMessage(s.version, message.PUBREC)
@@ -124,7 +142,7 @@ func (s *Type) onPublish(msg *message.PublishMessage) error {
 		resp.SetPacketID(id)
 		resp.SetReason(reason)
 
-		_, err = s.conn.WriteMessage(resp)
+		_, err = s.conn.WriteMessage(resp, false)
 		// [MQTT-4.3.3-9]
 		// store incoming QoS 2 message before sending PUBREC as theoretically PUBREL
 		// might come before store in case message store done after write PUBREC
@@ -140,7 +158,7 @@ func (s *Type) onPublish(msg *message.PublishMessage) error {
 
 		resp.SetPacketID(id)
 		resp.SetReason(reason)
-		_, err = s.conn.WriteMessage(resp)
+		_, err = s.conn.WriteMessage(resp, false)
 
 		// [MQTT-4.3.2-4]
 		if err == nil && reason < message.CodeUnspecifiedError {
@@ -195,7 +213,7 @@ func (s *Type) onAck(msg message.Provider) error {
 				s.pubOut.store(resp)
 
 				// 2. Try send PUBREL reply
-				if _, err = s.conn.WriteMessage(resp); err != nil {
+				if _, err = s.conn.WriteMessage(resp, false); err != nil {
 					s.log.dev.Debug("Couldn't deliver PUBREL", zap.String("ClientID", s.id))
 				}
 			}
@@ -209,7 +227,7 @@ func (s *Type) onAck(msg message.Provider) error {
 
 			s.pubIn.release(msg)
 
-			if _, err = s.conn.WriteMessage(resp); err != nil {
+			if _, err = s.conn.WriteMessage(resp, false); err != nil {
 				s.log.prod.Error("Couldn't deliver PUBCOMP", zap.String("ClientID", s.id))
 			}
 		case message.PUBCOMP:
@@ -288,7 +306,7 @@ func (s *Type) onSubscribe(msg *message.SubscribeMessage) error {
 		return err
 	}
 
-	if _, err := s.conn.WriteMessage(resp); err != nil {
+	if _, err := s.conn.WriteMessage(resp, false); err != nil {
 		s.log.prod.Error("Couldn't send SUBACK. Proceed to unsubscribe",
 			zap.String("ClientID", s.id),
 			zap.Error(err))

@@ -12,13 +12,19 @@ import (
 
 // ClientConnectStatus is argument to client connected state
 type ClientConnectStatus struct {
-	Address        string
-	Username       string
-	Timestamp      string
-	CleanSession   bool
-	SessionPresent bool
-	Protocol       message.ProtocolVersion
-	ConnAckCode    message.ReasonCode
+	Address           string
+	Username          string
+	Timestamp         string
+	ReceiveMaximum    uint32
+	MaximumPacketSize uint32
+	KeepAlive         uint16
+	GeneratedId       bool
+	CleanSession      bool
+	SessionPresent    bool
+	PreserveOrder     bool
+	MaximumQoS        message.QosType
+	Protocol          message.ProtocolVersion
+	ConnAckCode       message.ReasonCode
 }
 
 type clientDisconnectStatus struct {

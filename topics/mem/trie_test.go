@@ -35,7 +35,7 @@ func allocProvider(t *testing.T) *provider {
 
 func TestMatch1(t *testing.T) {
 	prov := allocProvider(t)
-	sub := &subscriber.ProviderType{}
+	sub := &subscriber.Type{}
 
 	prov.Subscribe("sport/tennis/player1/#", message.QoS1, sub, 0) // nolint: errcheck
 
@@ -48,7 +48,7 @@ func TestMatch1(t *testing.T) {
 func TestMatch2(t *testing.T) {
 	prov := allocProvider(t)
 
-	sub := &subscriber.ProviderType{}
+	sub := &subscriber.Type{}
 
 	prov.Subscribe("sport/tennis/player1/#", message.QoS2, sub, 0) // nolint: errcheck
 
@@ -61,7 +61,7 @@ func TestMatch2(t *testing.T) {
 func TestSNodeMatch3(t *testing.T) {
 	prov := allocProvider(t)
 
-	sub := &subscriber.ProviderType{}
+	sub := &subscriber.Type{}
 
 	prov.Subscribe("sport/tennis/#", message.QoS2, sub, 0) // nolint: errcheck
 
@@ -72,7 +72,7 @@ func TestSNodeMatch3(t *testing.T) {
 
 func TestMatch4(t *testing.T) {
 	prov := allocProvider(t)
-	sub := &subscriber.ProviderType{}
+	sub := &subscriber.Type{}
 
 	prov.Subscribe("#", message.QoS2, sub, 0) // nolint: errcheck
 
@@ -126,8 +126,8 @@ func TestMatch4(t *testing.T) {
 
 func TestMatch5(t *testing.T) {
 	prov := allocProvider(t)
-	sub1 := &subscriber.ProviderType{}
-	sub2 := &subscriber.ProviderType{}
+	sub1 := &subscriber.Type{}
+	sub2 := &subscriber.Type{}
 
 	prov.subscriptionInsert("sport/tennis/+/+/#", message.QoS1, sub1, 0)
 	prov.subscriptionInsert("sport/tennis/player1/anzel", message.QoS1, sub2, 0)
@@ -140,8 +140,8 @@ func TestMatch5(t *testing.T) {
 
 func TestMatch6(t *testing.T) {
 	prov := allocProvider(t)
-	sub1 := &subscriber.ProviderType{}
-	sub2 := &subscriber.ProviderType{}
+	sub1 := &subscriber.Type{}
+	sub2 := &subscriber.Type{}
 
 	prov.subscriptionInsert("sport/tennis/+/+/+/+/#", message.QoS1, sub1, 0)
 	prov.subscriptionInsert("sport/tennis/player1/anzel", message.QoS1, sub2, 0)
@@ -154,8 +154,8 @@ func TestMatch6(t *testing.T) {
 func TestMatch7(t *testing.T) {
 	prov := allocProvider(t)
 
-	sub1 := &subscriber.ProviderType{}
-	sub2 := &subscriber.ProviderType{}
+	sub1 := &subscriber.Type{}
+	sub2 := &subscriber.Type{}
 
 	prov.subscriptionInsert("sport/tennis/#", message.QoS2, sub1, 0)
 
@@ -170,7 +170,7 @@ func TestMatch7(t *testing.T) {
 func TestMatch8(t *testing.T) {
 	prov := allocProvider(t)
 
-	sub1 := &subscriber.ProviderType{}
+	sub1 := &subscriber.Type{}
 
 	prov.subscriptionInsert("+/+", message.QoS2, sub1, 0)
 
@@ -183,7 +183,7 @@ func TestMatch8(t *testing.T) {
 func TestMatch9(t *testing.T) {
 	prov := allocProvider(t)
 
-	sub1 := &subscriber.ProviderType{}
+	sub1 := &subscriber.Type{}
 
 	prov.subscriptionInsert("/+", message.QoS2, sub1, 0)
 
@@ -196,7 +196,7 @@ func TestMatch9(t *testing.T) {
 func TestMatch10(t *testing.T) {
 	prov := allocProvider(t)
 
-	sub1 := &subscriber.ProviderType{}
+	sub1 := &subscriber.Type{}
 
 	prov.subscriptionInsert("+", message.QoS2, sub1, 0)
 
@@ -208,7 +208,7 @@ func TestMatch10(t *testing.T) {
 
 func TestInsertRemove(t *testing.T) {
 	prov := allocProvider(t)
-	sub := &subscriber.ProviderType{}
+	sub := &subscriber.Type{}
 
 	prov.subscriptionInsert("#", message.QoS2, sub, 0)
 
@@ -248,7 +248,7 @@ func TestInsert1(t *testing.T) {
 	prov := allocProvider(t)
 	topic := "sport/tennis/player1/#"
 
-	sub1 := &subscriber.ProviderType{}
+	sub1 := &subscriber.Type{}
 	prov.subscriptionInsert(topic, message.QoS1, sub1, 0)
 	require.Equal(t, 1, len(prov.root.children))
 	require.Equal(t, 0, len(prov.root.subs))
@@ -287,7 +287,7 @@ func TestSNodeInsert2(t *testing.T) {
 	prov := allocProvider(t)
 	topic := "#"
 
-	sub1 := &subscriber.ProviderType{}
+	sub1 := &subscriber.Type{}
 
 	prov.subscriptionInsert(topic, message.QoS1, sub1, 0)
 	require.Equal(t, 1, len(prov.root.children))
@@ -310,7 +310,7 @@ func TestSNodeInsert3(t *testing.T) {
 	prov := allocProvider(t)
 	topic := "+/tennis/#"
 
-	sub1 := &subscriber.ProviderType{}
+	sub1 := &subscriber.Type{}
 
 	prov.subscriptionInsert(topic, message.QoS1, sub1, 0)
 	require.Equal(t, 1, len(prov.root.children))
@@ -345,7 +345,7 @@ func TestSNodeInsert4(t *testing.T) {
 	prov := allocProvider(t)
 	topic := "/finance"
 
-	sub1 := &subscriber.ProviderType{}
+	sub1 := &subscriber.Type{}
 
 	prov.subscriptionInsert(topic, message.QoS1, sub1, 0)
 	require.Equal(t, 1, len(prov.root.children))
@@ -374,7 +374,7 @@ func TestSNodeInsertDup(t *testing.T) {
 	prov := allocProvider(t)
 	topic := "/finance"
 
-	sub1 := &subscriber.ProviderType{}
+	sub1 := &subscriber.Type{}
 
 	prov.subscriptionInsert(topic, message.QoS1, sub1, 0)
 	prov.subscriptionInsert(topic, message.QoS1, sub1, 0)
@@ -405,7 +405,7 @@ func TestSNodeRemove1(t *testing.T) {
 	prov := allocProvider(t)
 	topic := "sport/tennis/player1/#"
 
-	sub1 := &subscriber.ProviderType{}
+	sub1 := &subscriber.Type{}
 
 	prov.subscriptionInsert(topic, message.QoS1, sub1, 0)
 
@@ -420,7 +420,7 @@ func TestSNodeRemove2(t *testing.T) {
 	prov := allocProvider(t)
 	topic := "sport/tennis/player1/#"
 
-	sub1 := &subscriber.ProviderType{}
+	sub1 := &subscriber.Type{}
 
 	prov.subscriptionInsert(topic, message.QoS1, sub1, 0)
 
@@ -432,8 +432,8 @@ func TestSNodeRemove3(t *testing.T) {
 	prov := allocProvider(t)
 	topic := "sport/tennis/player1/#"
 
-	sub1 := &subscriber.ProviderType{}
-	sub2 := &subscriber.ProviderType{}
+	sub1 := &subscriber.Type{}
+	sub2 := &subscriber.Type{}
 
 	prov.subscriptionInsert(topic, message.QoS1, sub1, 0)
 	prov.subscriptionInsert(topic, message.QoS1, sub2, 0)
@@ -446,7 +446,7 @@ func TestSNodeRemove3(t *testing.T) {
 
 func TestRetain1(t *testing.T) {
 	prov := allocProvider(t)
-	sub := &subscriber.ProviderType{}
+	sub := &subscriber.Type{}
 
 	for _, m := range retainedSystree {
 		prov.retain(m)
@@ -464,7 +464,7 @@ func TestRetain1(t *testing.T) {
 
 func TestRetain2(t *testing.T) {
 	prov := allocProvider(t)
-	sub := &subscriber.ProviderType{}
+	sub := &subscriber.Type{}
 
 	for _, m := range retainedSystree {
 		prov.retain(m)

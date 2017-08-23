@@ -26,8 +26,8 @@ func New(config *persistenceTypes.MemConfig) (p persistenceTypes.Provider, err e
 	}
 
 	pl.s = sessions{
-		status:   &pl.status,
-		sessions: make(map[string]*persistenceTypes.SessionState),
+		status: &pl.status,
+		//sessions: make(map[string]*sessionState),
 	}
 
 	pl.subs = subscriptions{
@@ -72,17 +72,6 @@ func (p *impl) Retained() (persistenceTypes.Retained, error) {
 	}
 
 	return &p.r, nil
-}
-
-// Subscriptions
-func (p *impl) Subscriptions() (persistenceTypes.Subscriptions, error) {
-	select {
-	case <-p.status.done:
-		return nil, persistenceTypes.ErrNotOpen
-	default:
-	}
-
-	return &p.subs, nil
 }
 
 // Shutdown provider

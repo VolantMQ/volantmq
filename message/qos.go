@@ -42,3 +42,17 @@ func (c QosType) IsValidFull() bool {
 
 	return true
 }
+
+// Desc get string representation of QoS value
+func (c QosType) Desc() string {
+	switch c {
+	case QoS0:
+		return "QoS0"
+	case QoS1:
+		return "QoS1"
+	case QoS2:
+		return "QoS2"
+	default:
+		return "Invalid value"
+	}
+}

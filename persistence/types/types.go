@@ -1,5 +1,11 @@
 package persistenceTypes
 
+import (
+	"time"
+
+	"github.com/troian/surgemq/message"
+)
+
 // Errors persistence errors
 type Errors int
 
@@ -37,10 +43,21 @@ func (e Errors) Error() string {
 }
 
 // SessionState persisted session state
-type SessionState struct {
-	Timestamp     string
+type SessionMessages struct {
 	OutMessages   [][]byte
 	UnAckMessages [][]byte
+}
+
+type SessionWill struct {
+	Delay   time.Duration
+	Message []byte
+}
+
+type SessionState struct {
+	Timestamp string
+	ExpireIn  *time.Duration
+	Will      *SessionWill
+	Version   message.ProtocolVersion
 }
 
 // SystemState system configuration
@@ -59,27 +76,24 @@ type Retained interface {
 	Wipe() error
 }
 
-// Subscriptions interface within session
-type Subscriptions interface {
-	Store([]byte, []byte) error
-	Load(func([]byte, []byte) error) error
-	Delete([]byte) error
-	Wipe() error
-}
-
 // Sessions interface allows operating with sessions inside backend
 type Sessions interface {
-	Load(func([]byte, *SessionState)) error
-	Get([]byte) (*SessionState, error)
-	PutOutMessage([]byte, []byte) error
-	Store([]byte, *SessionState) error
-	Delete([]byte) error
-	Wipe() error
-}
+	StatesIterate(func([]byte, *SessionState) error) error
+	StateStore([]byte, *SessionState) error
+	StateWipe([]byte) error
+	StatesWipe() error
 
-// Session persisted state of the session
-type Session interface {
-	Get([]byte) (*SessionState, error)
+	MessagesLoad([]byte) (*SessionMessages, error)
+	MessagesStore([]byte, *SessionMessages) error
+	MessageStore([]byte, []byte) error
+	MessagesWipe([]byte) error
+
+	SubscriptionsIterate(func([]byte, []byte) error) error
+	SubscriptionStore([]byte, []byte) error
+	SubscriptionDelete([]byte) error
+	SubscriptionsWipe() error
+
+	Delete([]byte) error
 }
 
 // System persistence state of the system configuration
@@ -91,7 +105,6 @@ type System interface {
 // Provider interface implemented by different backends
 type Provider interface {
 	Sessions() (Sessions, error)
-	Subscriptions() (Subscriptions, error)
 	Retained() (Retained, error)
 	System() (System, error)
 	Shutdown() error

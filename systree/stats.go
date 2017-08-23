@@ -19,10 +19,6 @@ type subscriptionsStat struct {
 	stat
 }
 
-type sessionsStat struct {
-	stat
-}
-
 func newStat(topicPrefix string, retained *[]types.RetainObject) stat {
 	s := stat{
 		curr: newDynamicValueInteger(topicPrefix + "/current"),
@@ -45,25 +41,6 @@ func newStatSubscription(topicPrefix string, retained *[]types.RetainObject) sub
 	return subscriptionsStat{
 		stat: newStat(topicPrefix+"/subscriptions", retained),
 	}
-}
-
-func newStatSessions(topicPrefix string, retained *[]types.RetainObject) sessionsStat {
-	return sessionsStat{
-		stat: newStat(topicPrefix+"/sessions", retained),
-	}
-}
-
-// Created add to statistic new session
-func (t *sessionsStat) Created() {
-	newVal := atomic.AddUint64(&t.curr.val, 1)
-	if atomic.LoadUint64(&t.max.val) < newVal {
-		atomic.StoreUint64(&t.max.val, newVal)
-	}
-}
-
-// Removed remove from statistic session
-func (t *sessionsStat) Removed() {
-	atomic.AddUint64(&t.curr.val, ^uint64(0))
 }
 
 // Subscribed add to statistic subscriber

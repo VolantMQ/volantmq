@@ -9,10 +9,14 @@ import (
 )
 
 var (
-	bucketRetained      = []byte("retained")
-	bucketSessions      = []byte("sessions")
-	bucketSystem        = []byte("system")
-	bucketSubscriptions = []byte("subscriptions")
+	bucketRetained              = []byte("retained")
+	bucketSessionsStates        = []byte("sessionsStates")
+	bucketSessionsSubscriptions = []byte("sessionsSubscriptions")
+	bucketSessionsMessages      = []byte("sessionsMessages")
+	bucketSystem                = []byte("system")
+	//bucketMessages              = []byte("messages")
+	//bucketState                 = []byte("state")
+	//bucketSubscriptions = []byte("subscriptions")
 )
 
 type dbStatus struct {
@@ -27,10 +31,17 @@ type impl struct {
 	wgTx sync.WaitGroup
 	lock sync.Mutex
 
-	r    retained
-	s    sessions
-	subs subscriptions
-	sys  system
+	r   retained
+	s   sessions
+	sys system
+}
+
+var initialBuckets = [][]byte{
+	bucketRetained,
+	bucketSessionsStates,
+	bucketSessionsSubscriptions,
+	bucketSessionsMessages,
+	bucketSystem,
 }
 
 // New allocate new persistence provider of boltDB type
@@ -57,12 +68,6 @@ func New(config *persistenceTypes.BoltDBConfig) (p persistenceTypes.Provider, er
 		lock: &pl.lock,
 	}
 
-	pl.subs = subscriptions{
-		db:   &pl.db,
-		wgTx: &pl.wgTx,
-		lock: &pl.lock,
-	}
-
 	pl.sys = system{
 		db:   &pl.db,
 		wgTx: &pl.wgTx,
@@ -70,17 +75,10 @@ func New(config *persistenceTypes.BoltDBConfig) (p persistenceTypes.Provider, er
 	}
 
 	err = pl.db.db.Update(func(tx *bolt.Tx) error {
-		if _, e := tx.CreateBucketIfNotExists(bucketSessions); e != nil {
-			return e
-		}
-		if _, e := tx.CreateBucketIfNotExists(bucketRetained); e != nil {
-			return e
-		}
-		if _, e := tx.CreateBucketIfNotExists(bucketSubscriptions); e != nil {
-			return e
-		}
-		if _, e := tx.CreateBucketIfNotExists(bucketSystem); e != nil {
-			return e
+		for _, b := range initialBuckets {
+			if _, e := tx.CreateBucketIfNotExists(b); e != nil {
+				return e
+			}
 		}
 		return nil
 	})
@@ -101,16 +99,6 @@ func (p *impl) System() (persistenceTypes.System, error) {
 	default:
 	}
 
-	err := p.db.db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists(bucketSystem)
-
-		return err
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
 	return &p.sys, nil
 }
 
@@ -120,16 +108,6 @@ func (p *impl) Sessions() (persistenceTypes.Sessions, error) {
 	case <-p.db.done:
 		return nil, persistenceTypes.ErrNotOpen
 	default:
-	}
-
-	err := p.db.db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists(bucketSessions)
-
-		return err
-	})
-
-	if err != nil {
-		return nil, err
 	}
 
 	return &p.s, nil
@@ -143,38 +121,7 @@ func (p *impl) Retained() (persistenceTypes.Retained, error) {
 	default:
 	}
 
-	err := p.db.db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists(bucketRetained)
-
-		return err
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
 	return &p.r, nil
-}
-
-// Subscriptions
-func (p *impl) Subscriptions() (persistenceTypes.Subscriptions, error) {
-	select {
-	case <-p.db.done:
-		return nil, persistenceTypes.ErrNotOpen
-	default:
-	}
-
-	err := p.db.db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists(bucketSubscriptions)
-
-		return err
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &p.subs, nil
 }
 
 // Shutdown provider
