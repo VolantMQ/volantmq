@@ -18,7 +18,7 @@ type ClientConnectStatus struct {
 	ReceiveMaximum    uint32
 	MaximumPacketSize uint32
 	KeepAlive         uint16
-	GeneratedId       bool
+	GeneratedID       bool
 	CleanSession      bool
 	SessionPresent    bool
 	PreserveOrder     bool

@@ -8,6 +8,7 @@ import (
 	"github.com/troian/surgemq/types"
 )
 
+// SessionCreatedStatus report when session status once created
 type SessionCreatedStatus struct {
 	ExpiryInterval string `json:"expiryInterval,omitempty"`
 	WillDelay      string `json:"willDelay,omitempty"`
@@ -15,6 +16,7 @@ type SessionCreatedStatus struct {
 	Clean          bool   `json:"clean"`
 }
 
+// SessionDeletedStatus report when session status once deleted
 type SessionDeletedStatus struct {
 	Timestamp string `json:"timestamp"`
 	Reason    string `json:"reason"`

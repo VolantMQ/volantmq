@@ -42,17 +42,19 @@ func (e Errors) Error() string {
 	return "unknown error"
 }
 
-// SessionState persisted session state
+// SessionMessages persisted session messages
 type SessionMessages struct {
 	OutMessages   [][]byte
 	UnAckMessages [][]byte
 }
 
+// SessionWill object
 type SessionWill struct {
 	Delay   time.Duration
 	Message []byte
 }
 
+// SessionState object
 type SessionState struct {
 	Timestamp string
 	ExpireIn  *time.Duration

@@ -184,7 +184,7 @@ func (m *Manager) NewSession(config *StartConfig) {
 						ReceiveMaximum:    uint32(sesProperties.ReceiveMaximum),
 						MaximumPacketSize: sesProperties.MaximumPacketSize,
 						KeepAlive:         config.Req.KeepAlive(),
-						GeneratedId:       idGenerated,
+						GeneratedID:       idGenerated,
 						CleanSession:      config.Req.CleanStart(),
 						SessionPresent:    sessionPresent,
 						Protocol:          config.Req.Version(),

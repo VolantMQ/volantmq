@@ -20,7 +20,7 @@ type server struct {
 		ReceiveMaximum                uint16
 		RetainAvailable               bool
 		WildcardSubscriptionAvailable bool
-		SubscriptionIdAvailable       bool
+		SubscriptionIDAvailable       bool
 		SharedSubscriptionAvailable   bool
 	}
 }

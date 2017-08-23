@@ -33,7 +33,7 @@ type BytesMetric interface {
 	Received(bytes uint64)
 }
 
-// SessionsStat Statistic of sessions
+// Sessions Statistic of sessions
 type Sessions interface {
 	Created(id string, status *SessionCreatedStatus)
 	Removed(id string, status *SessionDeletedStatus)

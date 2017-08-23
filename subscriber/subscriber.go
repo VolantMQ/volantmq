@@ -42,6 +42,7 @@ type SubscriptionParams struct {
 // Subscriptions contains active subscriptions with respective subscription parameters
 type Subscriptions map[string]*SubscriptionParams
 
+// Config subscriber config options
 type Config struct {
 	ID               string
 	Topics           topicsTypes.SubscriberInterface
@@ -50,6 +51,7 @@ type Config struct {
 	Version          message.ProtocolVersion
 }
 
+// Type subscriber object
 type Type struct {
 	id             string
 	subscriptions  Subscriptions
@@ -65,6 +67,7 @@ type Type struct {
 	version        message.ProtocolVersion
 }
 
+// New allocate new subscriber
 func New(c *Config) *Type {
 	p := &Type{
 		isOnline:       make(chan struct{}),
@@ -87,6 +90,7 @@ func (s *Type) Hash() uintptr {
 	return uintptr(unsafe.Pointer(s))
 }
 
+// HasSubscriptions either has active subscriptions or not
 func (s *Type) HasSubscriptions() bool {
 	return len(s.subscriptions) != 0
 }
@@ -101,6 +105,7 @@ func (s *Type) Release() {
 	s.access.Done()
 }
 
+// Version return MQTT protocol version
 func (s *Type) Version() message.ProtocolVersion {
 	return s.version
 }
