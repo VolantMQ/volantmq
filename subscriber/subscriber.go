@@ -5,26 +5,26 @@ import (
 
 	"sync"
 
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 	"github.com/troian/surgemq/topics/types"
 )
 
 // ConnectionProvider passed to present network connection
 type ConnectionProvider interface {
 	Subscriptions() Subscriptions
-	Subscribe(string, *SubscriptionParams) (message.QosType, []*message.PublishMessage, error)
+	Subscribe(string, *SubscriptionParams) (packet.QosType, []*packet.Publish, error)
 	UnSubscribe(string) error
 	HasSubscriptions() bool
 	Online(c OnlinePublish)
 	Offline(bool)
-	Version() message.ProtocolVersion
+	Version() packet.ProtocolVersion
 }
 
 // OnlinePublish invoked when subscriber respective to sessions receive message
-type OnlinePublish func(*message.PublishMessage) error
+type OnlinePublish func(*packet.Publish) error
 
 // OfflinePublish invoked when subscriber respective to sessions receive message
-type OfflinePublish func(string, *message.PublishMessage)
+type OfflinePublish func(string, *packet.Publish)
 
 // SubscriptionParams parameters of the subscription
 type SubscriptionParams struct {
@@ -33,10 +33,10 @@ type SubscriptionParams struct {
 	ID uint32
 
 	// Requested QoS requested by subscriber
-	Requested message.SubscriptionOptions
+	Requested packet.SubscriptionOptions
 
 	// Granted QoS granted by topics manager
-	Granted message.QosType
+	Granted packet.QosType
 }
 
 // Subscriptions contains active subscriptions with respective subscription parameters
@@ -48,7 +48,7 @@ type Config struct {
 	Topics           topicsTypes.SubscriberInterface
 	OnOfflinePublish OfflinePublish
 	OfflineQoS0      bool
-	Version          message.ProtocolVersion
+	Version          packet.ProtocolVersion
 }
 
 // Type subscriber object
@@ -64,7 +64,7 @@ type Type struct {
 	publishLock    sync.RWMutex // todo: find better way
 	isOnline       chan struct{}
 	offlineQoS0    bool
-	version        message.ProtocolVersion
+	version        packet.ProtocolVersion
 }
 
 // New allocate new subscriber
@@ -106,7 +106,7 @@ func (s *Type) Release() {
 }
 
 // Version return MQTT protocol version
-func (s *Type) Version() message.ProtocolVersion {
+func (s *Type) Version() packet.ProtocolVersion {
 	return s.version
 }
 
@@ -116,7 +116,7 @@ func (s *Type) Subscriptions() Subscriptions {
 }
 
 // Subscribe to given topic
-func (s *Type) Subscribe(topic string, params *SubscriptionParams) (message.QosType, []*message.PublishMessage, error) {
+func (s *Type) Subscribe(topic string, params *SubscriptionParams) (packet.QosType, []*packet.Publish, error) {
 	q, r, err := s.topics.Subscribe(topic, params.Requested.QoS(), s, params.ID)
 
 	params.Granted = q
@@ -135,10 +135,10 @@ func (s *Type) UnSubscribe(topic string) error {
 // Publish message accordingly to subscriber state
 // online: forward message to session
 // offline: persist message
-func (s *Type) Publish(m *message.PublishMessage, grantedQoS message.QosType, ids []uint32) error {
+func (s *Type) Publish(m *packet.Publish, grantedQoS packet.QosType, ids []uint32) error {
 	// message version should be same as session as encode/decode depends on it
-	mP, _ := message.NewMessage(s.version, message.PUBLISH)
-	msg, _ := mP.(*message.PublishMessage)
+	mP, _ := packet.NewMessage(s.version, packet.PUBLISH)
+	msg, _ := mP.(*packet.Publish)
 
 	// TODO: copy properties for V5.0
 	msg.SetDup(false)
@@ -147,9 +147,9 @@ func (s *Type) Publish(m *message.PublishMessage, grantedQoS message.QosType, id
 	msg.SetRetain(false)
 	msg.SetPayload(m.Payload())
 
-	msg.PropertySet(message.PropertySubscriptionIdentifier, ids) // nolint: errcheck
+	msg.PropertySet(packet.PropertySubscriptionIdentifier, ids) // nolint: errcheck
 
-	if msg.QoS() != message.QoS0 {
+	if msg.QoS() != packet.QoS0 {
 		msg.SetPacketID(0)
 	}
 
@@ -159,9 +159,9 @@ func (s *Type) Publish(m *message.PublishMessage, grantedQoS message.QosType, id
 	// that at most one copy of the message is received by the Client. On the other hand, a QoS 2
 	// Message published to the same topic is downgraded by the Server to QoS 1 for delivery to the
 	// Client, so that Client might receive duplicate copies of the Message.
-	case message.QoS1:
-		if msg.QoS() == message.QoS2 {
-			msg.SetQoS(message.QoS1) // nolint: errcheck
+	case packet.QoS1:
+		if msg.QoS() == packet.QoS2 {
+			msg.SetQoS(packet.QoS1) // nolint: errcheck
 		}
 
 		// If the subscribing Client has been granted maximum QoS 0, then an Application Message
@@ -176,7 +176,7 @@ func (s *Type) Publish(m *message.PublishMessage, grantedQoS message.QosType, id
 		// if session is offline forward message to persisted storage
 		// only with QoS1 and QoS2 and QoS0 if set by config
 		qos := msg.QoS()
-		if qos != message.QoS0 || (s.offlineQoS0 && qos == message.QoS0) {
+		if qos != packet.QoS0 || (s.offlineQoS0 && qos == packet.QoS0) {
 			defer s.wgOffline.Done()
 			s.wgOffline.Add(1)
 			s.publishOffline(s.id, msg)

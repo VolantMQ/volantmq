@@ -5,16 +5,14 @@ import (
 	"sync/atomic"
 
 	"github.com/troian/surgemq/auth"
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 	"github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/subscriber"
 	"go.uber.org/zap"
 )
 
 func (s *Type) getState() *persistenceTypes.SessionMessages {
-	var next *list.Element
-
-	encodeMessage := func(m message.Provider) ([]byte, error) {
+	encodeMessage := func(m packet.Provider) ([]byte, error) {
 		sz, err := m.Size()
 		if err != nil {
 			return nil, err
@@ -31,14 +29,17 @@ func (s *Type) getState() *persistenceTypes.SessionMessages {
 	outMessages := [][]byte{}
 	unAckMessages := [][]byte{}
 
+	//messages := s.publisher.messages.GetAll()
+
+	//for _, v := range messages {
+	var next *list.Element
 	for elem := s.publisher.messages.Front(); elem != nil; elem = next {
 		next = elem.Next()
-
 		switch m := s.publisher.messages.Remove(elem).(type) {
-		case *message.PublishMessage:
+		case *packet.Publish:
 			qos := m.QoS()
-			if qos != message.QoS0 || (s.offlineQoS0 && qos == message.QoS0) {
-				// make sure message has some PacketID to prevent encode error
+			if qos != packet.QoS0 || (s.offlineQoS0 && qos == packet.QoS0) {
+				// make sure message has some IDType to prevent encode error
 				m.SetPacketID(0)
 				if buf, err := encodeMessage(m); err != nil {
 					s.log.prod.Error("Couldn't encode message for persistence", zap.Error(err))
@@ -57,8 +58,8 @@ func (s *Type) getState() *persistenceTypes.SessionMessages {
 
 	for _, m := range s.pubOut.get() {
 		switch msg := m.(type) {
-		case *message.PublishMessage:
-			if msg.QoS() == message.QoS1 {
+		case *packet.Publish:
+			if msg.QoS() == packet.QoS1 {
 				msg.SetDup(true)
 			}
 		}
@@ -105,7 +106,7 @@ func (s *Type) onConnectionClose(will bool) {
 		//for _, m := range s.retained.list {
 		//	s.topics.Retain(m) // nolint: errcheck
 		//}
-		s.retained.list = []*message.PublishMessage{}
+		s.retained.list = []*packet.Publish{}
 		s.retained.lock.Unlock()
 		s.conn = nil
 
@@ -117,25 +118,25 @@ func (s *Type) onConnectionClose(will bool) {
 // On QoS == 0, we should just take the next step, no ack required
 // On QoS == 1, send back PUBACK, then take the next step
 // On QoS == 2, we need to put it in the ack queue, send back PUBREC
-func (s *Type) onPublish(msg *message.PublishMessage) error {
+func (s *Type) onPublish(msg *packet.Publish) error {
 	// check for topic access
 	var err error
 
-	reason := message.CodeSuccess
+	reason := packet.CodeSuccess
 
 	// This case is for V5.0 actually as ack messages may return status.
 	// To deal with V3.1.1 two ways left:
 	//   - ignore the message but send acks
 	//   - return error which leads to disconnect
 	if status := s.auth.ACL(s.id, s.username, msg.Topic(), auth.AccessTypeWrite); status == auth.StatusDeny {
-		reason = message.CodeAdministrativeAction
+		reason = packet.CodeAdministrativeAction
 	}
 
 	switch msg.QoS() {
-	case message.QoS2:
-		m, _ := message.NewMessage(s.version, message.PUBREC)
-		resp, _ := m.(*message.AckMessage)
-		id, _ := msg.PacketID()
+	case packet.QoS2:
+		m, _ := packet.NewMessage(s.version, packet.PUBREC)
+		resp, _ := m.(*packet.Ack)
+		id, _ := msg.ID()
 
 		resp.SetPacketID(id)
 		resp.SetReason(reason)
@@ -144,22 +145,22 @@ func (s *Type) onPublish(msg *message.PublishMessage) error {
 		// [MQTT-4.3.3-9]
 		// store incoming QoS 2 message before sending PUBREC as theoretically PUBREL
 		// might come before store in case message store done after write PUBREC
-		if err == nil && reason < message.CodeUnspecifiedError {
+		if err == nil && reason < packet.CodeUnspecifiedError {
 			s.pubIn.store(msg)
 		}
-	case message.QoS1:
-		m, _ := message.NewMessage(s.version, message.PUBACK)
-		resp, _ := m.(*message.AckMessage)
+	case packet.QoS1:
+		m, _ := packet.NewMessage(s.version, packet.PUBACK)
+		resp, _ := m.(*packet.Ack)
 
-		id, _ := msg.PacketID()
-		reason := message.CodeSuccess
+		id, _ := msg.ID()
+		reason := packet.CodeSuccess
 
 		resp.SetPacketID(id)
 		resp.SetReason(reason)
 		_, err = s.conn.WriteMessage(resp, false)
 
 		// [MQTT-4.3.2-4]
-		if err == nil && reason < message.CodeUnspecifiedError {
+		if err == nil && reason < packet.CodeUnspecifiedError {
 			if err = s.publishToTopic(msg); err != nil {
 				s.log.prod.Error("Couldn't publish message",
 					zap.String("ClientID", s.id),
@@ -167,7 +168,7 @@ func (s *Type) onPublish(msg *message.PublishMessage) error {
 					zap.Error(err))
 			}
 		}
-	case message.QoS0: // QoS 0
+	case packet.QoS0: // QoS 0
 		// [MQTT-4.3.1]
 		err = s.publishToTopic(msg)
 	}
@@ -176,22 +177,22 @@ func (s *Type) onPublish(msg *message.PublishMessage) error {
 }
 
 // onAck handle ack acknowledgment received from remote
-func (s *Type) onAck(msg message.Provider) error {
+func (s *Type) onAck(msg packet.Provider) error {
 	var err error
 
 	switch mIn := msg.(type) {
-	case *message.AckMessage:
+	case *packet.Ack:
 		switch msg.Type() {
-		case message.PUBACK:
+		case packet.PUBACK:
 			// remote acknowledged PUBLISH QoS 1 message sent by this server
 			s.pubOut.release(msg)
-		case message.PUBREC:
+		case packet.PUBREC:
 			// remote received PUBLISH message sent by this server
 			s.pubOut.release(msg)
 
 			discard := false
 
-			if s.version == message.ProtocolV50 && mIn.Reason() >= message.CodeUnspecifiedError {
+			if s.version == packet.ProtocolV50 && mIn.Reason() >= packet.CodeUnspecifiedError {
 				// v5.9 [MQTT-4.9]
 				atomic.AddInt32(&s.sendQuota, 1)
 
@@ -199,10 +200,10 @@ func (s *Type) onAck(msg message.Provider) error {
 			}
 
 			if !discard {
-				m, _ := message.NewMessage(s.version, message.PUBREL)
-				resp, _ := m.(*message.AckMessage)
+				m, _ := packet.NewMessage(s.version, packet.PUBREL)
+				resp, _ := m.(*packet.Ack)
 
-				id, _ := msg.PacketID()
+				id, _ := msg.ID()
 				resp.SetPacketID(id)
 
 				// 2. Put PUBREL into ack queue
@@ -211,24 +212,20 @@ func (s *Type) onAck(msg message.Provider) error {
 				s.pubOut.store(resp)
 
 				// 2. Try send PUBREL reply
-				if _, err = s.conn.WriteMessage(resp, false); err != nil {
-					s.log.dev.Debug("Couldn't deliver PUBREL", zap.String("ClientID", s.id))
-				}
+				_, err = s.conn.WriteMessage(resp, false)
 			}
-		case message.PUBREL:
+		case packet.PUBREL:
 			// Remote has released PUBLISH
-			m, _ := message.NewMessage(s.version, message.PUBCOMP)
-			resp, _ := m.(*message.AckMessage)
+			m, _ := packet.NewMessage(s.version, packet.PUBCOMP)
+			resp, _ := m.(*packet.Ack)
 
-			id, _ := msg.PacketID()
+			id, _ := msg.ID()
 			resp.SetPacketID(id)
 
 			s.pubIn.release(msg)
 
-			if _, err = s.conn.WriteMessage(resp, false); err != nil {
-				s.log.prod.Error("Couldn't deliver PUBCOMP", zap.String("ClientID", s.id))
-			}
-		case message.PUBCOMP:
+			_, err = s.conn.WriteMessage(resp, false)
+		case packet.PUBCOMP:
 			// PUBREL message has been acknowledged, release from queue
 			s.pubOut.release(msg)
 		default:
@@ -243,15 +240,15 @@ func (s *Type) onAck(msg message.Provider) error {
 	return err
 }
 
-func (s *Type) onSubscribe(msg *message.SubscribeMessage) error {
-	m, _ := message.NewMessage(s.version, message.SUBACK)
-	resp, _ := m.(*message.SubAckMessage)
+func (s *Type) onSubscribe(msg *packet.Subscribe) error {
+	m, _ := packet.NewMessage(s.version, packet.SUBACK)
+	resp, _ := m.(*packet.SubAck)
 
-	id, _ := msg.PacketID()
+	id, _ := msg.ID()
 	resp.SetPacketID(id)
 
-	var retCodes []message.ReasonCode
-	var retainedMessages []*message.PublishMessage
+	var retCodes []packet.ReasonCode
+	var retainedMessages []*packet.Publish
 
 	iter := msg.Topics().Iterator()
 	for kv, ok := iter(); ok; kv, ok = iter() {
@@ -259,9 +256,9 @@ func (s *Type) onSubscribe(msg *message.SubscribeMessage) error {
 		// Let topic manager know we want to listen to given topic
 		//qos := msg.TopicQos(t)
 		t := kv.Key.(string)
-		ops := kv.Value.(message.SubscriptionOptions)
+		ops := kv.Value.(packet.SubscriptionOptions)
 
-		reason := message.CodeSuccess
+		reason := packet.CodeSuccess
 		//authorized := true
 		// TODO: check permissions here
 
@@ -269,7 +266,7 @@ func (s *Type) onSubscribe(msg *message.SubscribeMessage) error {
 		subsID := uint32(0)
 
 		// V5.0 [MQTT-3.8.2.1.2]
-		if sID, err := msg.PropertyGet(message.PropertySubscriptionIdentifier); err == nil {
+		if sID, err := msg.PropertyGet(packet.PropertySubscriptionIdentifier); err == nil {
 			subsID = sID.(uint32)
 		}
 
@@ -280,13 +277,13 @@ func (s *Type) onSubscribe(msg *message.SubscribeMessage) error {
 
 		if rQoS, retained, err := s.subscriber.Subscribe(t, &subsParams); err != nil {
 			// [MQTT-3.9.3]ƒ
-			if s.version == message.ProtocolV50 {
-				reason = message.CodeUnspecifiedError
+			if s.version == packet.ProtocolV50 {
+				reason = packet.CodeUnspecifiedError
 			} else {
-				reason = message.QosFailure
+				reason = packet.QosFailure
 			}
 		} else {
-			reason = message.ReasonCode(rQoS)
+			reason = packet.ReasonCode(rQoS)
 			retainedMessages = append(retainedMessages, retained...)
 		}
 
@@ -321,14 +318,11 @@ func (s *Type) onSubscribe(msg *message.SubscribeMessage) error {
 
 	// Now put retained messages into publish queue
 	for _, rm := range retainedMessages {
-		m, _ := message.NewMessage(s.version, message.PUBLISH)
-		msg, _ := m.(*message.PublishMessage)
+		m, _ := packet.NewMessage(s.version, packet.PUBLISH)
+		msg, _ := m.(*packet.Publish)
 
 		// [MQTT-3.3.1-8]
-		msg.SetRetain(true)
-		msg.SetQoS(rm.QoS()) // nolint: errcheck
-		msg.SetPayload(rm.Payload())
-		msg.SetTopic(rm.Topic()) // nolint: errcheck
+		msg.Set(rm.Topic(), rm.Payload(), rm.QoS(), true, false) // nolint: errcheck
 
 		s.publisher.pushBack(m)
 	}
@@ -336,34 +330,34 @@ func (s *Type) onSubscribe(msg *message.SubscribeMessage) error {
 	return nil
 }
 
-func (s *Type) onUnSubscribe(msg *message.UnSubscribeMessage) (*message.UnSubAckMessage, error) {
+func (s *Type) onUnSubscribe(msg *packet.UnSubscribe) (*packet.UnSubAck, error) {
 	iter := msg.Topics().Iterator()
 
-	var retCodes []message.ReasonCode
+	var retCodes []packet.ReasonCode
 
 	for kv, ok := iter(); ok; kv, ok = iter() {
 		t := kv.Key.(string)
 		// TODO: check permissions here
 		authorized := true
-		reason := message.CodeSuccess
+		reason := packet.CodeSuccess
 
 		if authorized {
 			if err := s.subscriber.UnSubscribe(t); err != nil {
 				s.log.prod.Error("Couldn't unsubscribe from topic", zap.Error(err))
 			} else {
-				reason = message.CodeNoSubscriptionExisted
+				reason = packet.CodeNoSubscriptionExisted
 			}
 		} else {
-			reason = message.CodeNotAuthorized
+			reason = packet.CodeNotAuthorized
 		}
 
 		retCodes = append(retCodes, reason)
 	}
 
-	m, _ := message.NewMessage(s.version, message.UNSUBACK)
-	resp, _ := m.(*message.UnSubAckMessage)
+	m, _ := packet.NewMessage(s.version, packet.UNSUBACK)
+	resp, _ := m.(*packet.UnSubAck)
 
-	id, _ := msg.PacketID()
+	id, _ := msg.ID()
 	resp.SetPacketID(id)
 	resp.AddReturnCodes(retCodes) // nolint: errcheck
 

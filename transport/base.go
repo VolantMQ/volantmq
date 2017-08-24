@@ -7,7 +7,7 @@ import (
 
 	"github.com/troian/surgemq/auth"
 	"github.com/troian/surgemq/clients"
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 	"github.com/troian/surgemq/routines"
 	"github.com/troian/surgemq/systree"
 	"go.uber.org/zap"
@@ -26,7 +26,7 @@ type Config struct {
 type InternalConfig struct {
 	// AllowedVersions what protocol version server will handle
 	// If not set than defaults to 0x3 and 0x04
-	AllowedVersions map[message.ProtocolVersion]bool
+	AllowedVersions map[packet.ProtocolVersion]bool
 
 	Sessions *clients.Manager
 
@@ -98,7 +98,7 @@ func (c *baseConfig) handleConnection(conn conn) {
 	// to client. Exit regardless of error type.
 	conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(c.ConnectTimeout))) // nolint: errcheck, gas
 
-	var req message.Provider
+	var req packet.Provider
 
 	var buf []byte
 	if buf, err = routines.GetMessageBuffer(conn); err != nil {
@@ -106,41 +106,41 @@ func (c *baseConfig) handleConnection(conn conn) {
 		return
 	}
 
-	if req, _, err = message.Decode(message.ProtocolV50, buf); err != nil {
+	if req, _, err = packet.Decode(packet.ProtocolV50, buf); err != nil {
 		c.log.Warn("Couldn't decode message", zap.Error(err))
 
-		if _, ok := err.(message.ReasonCode); ok {
+		if _, ok := err.(packet.ReasonCode); ok {
 			if req != nil {
 				c.Metric.Packets().Received(req.Type())
 			}
 		}
 	} else {
 		switch r := req.(type) {
-		case *message.ConnectMessage:
-			m, _ := message.NewMessage(req.Version(), message.CONNACK)
-			resp, _ := m.(*message.ConnAckMessage)
+		case *packet.Connect:
+			m, _ := packet.NewMessage(req.Version(), packet.CONNACK)
+			resp, _ := m.(*packet.ConnAck)
 
-			var reason message.ReasonCode
+			var reason packet.ReasonCode
 			// If protocol version is not in allowed list then give reject and pass control to session manager
 			// to handle response
 			if allowed, ok := c.AllowedVersions[r.Version()]; !ok || !allowed {
-				reason = message.CodeRefusedUnacceptableProtocolVersion
-				if r.Version() == message.ProtocolV50 {
-					reason = message.CodeUnsupportedProtocol
+				reason = packet.CodeRefusedUnacceptableProtocolVersion
+				if r.Version() == packet.ProtocolV50 {
+					reason = packet.CodeUnsupportedProtocol
 				}
 			} else {
 				user, pass := r.Credentials()
 
 				if status := c.config.AuthManager.Password(string(user), string(pass)); status == auth.StatusAllow {
-					reason = message.CodeSuccess
+					reason = packet.CodeSuccess
 					if r.KeepAlive() == 0 {
 						r.SetKeepAlive(uint16(c.KeepAlive))
-						resp.PropertySet(message.PropertyServerKeepAlive, uint16(c.KeepAlive)) // nolint: errcheck
+						resp.PropertySet(packet.PropertyServerKeepAlive, uint16(c.KeepAlive)) // nolint: errcheck
 					}
 				} else {
-					reason = message.CodeRefusedBadUsernameOrPassword
-					if req.Version() == message.ProtocolV50 {
-						reason = message.CodeBadUserOrPassword
+					reason = packet.CodeRefusedBadUsernameOrPassword
+					if req.Version() == packet.ProtocolV50 {
+						reason = packet.CodeBadUserOrPassword
 					}
 				}
 			}

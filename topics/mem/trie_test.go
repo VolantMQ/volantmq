@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 	"github.com/troian/surgemq/subscriber"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics/types"
@@ -37,7 +37,7 @@ func TestMatch1(t *testing.T) {
 	prov := allocProvider(t)
 	sub := &subscriber.Type{}
 
-	prov.Subscribe("sport/tennis/player1/#", message.QoS1, sub, 0) // nolint: errcheck
+	prov.Subscribe("sport/tennis/player1/#", packet.QoS1, sub, 0) // nolint: errcheck
 
 	subscribers := publishEntries{}
 
@@ -50,7 +50,7 @@ func TestMatch2(t *testing.T) {
 
 	sub := &subscriber.Type{}
 
-	prov.Subscribe("sport/tennis/player1/#", message.QoS2, sub, 0) // nolint: errcheck
+	prov.Subscribe("sport/tennis/player1/#", packet.QoS2, sub, 0) // nolint: errcheck
 
 	subscribers := publishEntries{}
 
@@ -63,7 +63,7 @@ func TestSNodeMatch3(t *testing.T) {
 
 	sub := &subscriber.Type{}
 
-	prov.Subscribe("sport/tennis/#", message.QoS2, sub, 0) // nolint: errcheck
+	prov.Subscribe("sport/tennis/#", packet.QoS2, sub, 0) // nolint: errcheck
 
 	subscribers := publishEntries{}
 	prov.subscriptionSearch("sport/tennis/player1/anzel", &subscribers)
@@ -74,7 +74,7 @@ func TestMatch4(t *testing.T) {
 	prov := allocProvider(t)
 	sub := &subscriber.Type{}
 
-	prov.Subscribe("#", message.QoS2, sub, 0) // nolint: errcheck
+	prov.Subscribe("#", packet.QoS2, sub, 0) // nolint: errcheck
 
 	subscribers := publishEntries{}
 
@@ -92,7 +92,7 @@ func TestMatch4(t *testing.T) {
 	prov.subscriptionSearch("#", &subscribers)
 	require.Equal(t, 0, len(subscribers), "should not return subscribers")
 
-	prov.subscriptionInsert("/#", message.QoS2, sub, 0)
+	prov.subscriptionInsert("/#", packet.QoS2, sub, 0)
 
 	subscribers = publishEntries{}
 	prov.subscriptionSearch("bla", &subscribers)
@@ -105,7 +105,7 @@ func TestMatch4(t *testing.T) {
 	err = prov.subscriptionRemove("/#", sub)
 	require.NoError(t, err)
 
-	prov.subscriptionInsert("bla/bla/#", message.QoS2, sub, 0)
+	prov.subscriptionInsert("bla/bla/#", packet.QoS2, sub, 0)
 
 	subscribers = publishEntries{}
 	prov.subscriptionSearch("bla", &subscribers)
@@ -129,8 +129,8 @@ func TestMatch5(t *testing.T) {
 	sub1 := &subscriber.Type{}
 	sub2 := &subscriber.Type{}
 
-	prov.subscriptionInsert("sport/tennis/+/+/#", message.QoS1, sub1, 0)
-	prov.subscriptionInsert("sport/tennis/player1/anzel", message.QoS1, sub2, 0)
+	prov.subscriptionInsert("sport/tennis/+/+/#", packet.QoS1, sub1, 0)
+	prov.subscriptionInsert("sport/tennis/player1/anzel", packet.QoS1, sub2, 0)
 
 	subscribers := publishEntries{}
 	prov.subscriptionSearch("sport/tennis/player1/anzel", &subscribers)
@@ -143,8 +143,8 @@ func TestMatch6(t *testing.T) {
 	sub1 := &subscriber.Type{}
 	sub2 := &subscriber.Type{}
 
-	prov.subscriptionInsert("sport/tennis/+/+/+/+/#", message.QoS1, sub1, 0)
-	prov.subscriptionInsert("sport/tennis/player1/anzel", message.QoS1, sub2, 0)
+	prov.subscriptionInsert("sport/tennis/+/+/+/+/#", packet.QoS1, sub1, 0)
+	prov.subscriptionInsert("sport/tennis/player1/anzel", packet.QoS1, sub2, 0)
 
 	subscribers := publishEntries{}
 	prov.subscriptionSearch("sport/tennis/player1/anzel/bla/bla", &subscribers)
@@ -157,9 +157,9 @@ func TestMatch7(t *testing.T) {
 	sub1 := &subscriber.Type{}
 	sub2 := &subscriber.Type{}
 
-	prov.subscriptionInsert("sport/tennis/#", message.QoS2, sub1, 0)
+	prov.subscriptionInsert("sport/tennis/#", packet.QoS2, sub1, 0)
 
-	prov.subscriptionInsert("sport/tennis", message.QoS1, sub2, 0)
+	prov.subscriptionInsert("sport/tennis", packet.QoS1, sub2, 0)
 
 	subscribers := publishEntries{}
 	prov.subscriptionSearch("sport/tennis/player1/anzel", &subscribers)
@@ -172,7 +172,7 @@ func TestMatch8(t *testing.T) {
 
 	sub1 := &subscriber.Type{}
 
-	prov.subscriptionInsert("+/+", message.QoS2, sub1, 0)
+	prov.subscriptionInsert("+/+", packet.QoS2, sub1, 0)
 
 	subscribers := publishEntries{}
 
@@ -185,7 +185,7 @@ func TestMatch9(t *testing.T) {
 
 	sub1 := &subscriber.Type{}
 
-	prov.subscriptionInsert("/+", message.QoS2, sub1, 0)
+	prov.subscriptionInsert("/+", packet.QoS2, sub1, 0)
 
 	subscribers := publishEntries{}
 
@@ -198,7 +198,7 @@ func TestMatch10(t *testing.T) {
 
 	sub1 := &subscriber.Type{}
 
-	prov.subscriptionInsert("+", message.QoS2, sub1, 0)
+	prov.subscriptionInsert("+", packet.QoS2, sub1, 0)
 
 	subscribers := publishEntries{}
 
@@ -210,7 +210,7 @@ func TestInsertRemove(t *testing.T) {
 	prov := allocProvider(t)
 	sub := &subscriber.Type{}
 
-	prov.subscriptionInsert("#", message.QoS2, sub, 0)
+	prov.subscriptionInsert("#", packet.QoS2, sub, 0)
 
 	subscribers := publishEntries{}
 	prov.subscriptionSearch("bla", &subscribers)
@@ -227,7 +227,7 @@ func TestInsertRemove(t *testing.T) {
 	prov.subscriptionSearch("#", &subscribers)
 	require.Equal(t, 0, len(subscribers))
 
-	prov.subscriptionInsert("/#", message.QoS2, sub, 0)
+	prov.subscriptionInsert("/#", packet.QoS2, sub, 0)
 
 	subscribers = publishEntries{}
 	prov.subscriptionSearch("bla", &subscribers)
@@ -249,7 +249,7 @@ func TestInsert1(t *testing.T) {
 	topic := "sport/tennis/player1/#"
 
 	sub1 := &subscriber.Type{}
-	prov.subscriptionInsert(topic, message.QoS1, sub1, 0)
+	prov.subscriptionInsert(topic, packet.QoS1, sub1, 0)
 	require.Equal(t, 1, len(prov.root.children))
 	require.Equal(t, 0, len(prov.root.subs))
 
@@ -289,7 +289,7 @@ func TestSNodeInsert2(t *testing.T) {
 
 	sub1 := &subscriber.Type{}
 
-	prov.subscriptionInsert(topic, message.QoS1, sub1, 0)
+	prov.subscriptionInsert(topic, packet.QoS1, sub1, 0)
 	require.Equal(t, 1, len(prov.root.children))
 	require.Equal(t, 0, len(prov.root.subs))
 
@@ -312,7 +312,7 @@ func TestSNodeInsert3(t *testing.T) {
 
 	sub1 := &subscriber.Type{}
 
-	prov.subscriptionInsert(topic, message.QoS1, sub1, 0)
+	prov.subscriptionInsert(topic, packet.QoS1, sub1, 0)
 	require.Equal(t, 1, len(prov.root.children))
 	require.Equal(t, 0, len(prov.root.subs))
 
@@ -347,7 +347,7 @@ func TestSNodeInsert4(t *testing.T) {
 
 	sub1 := &subscriber.Type{}
 
-	prov.subscriptionInsert(topic, message.QoS1, sub1, 0)
+	prov.subscriptionInsert(topic, packet.QoS1, sub1, 0)
 	require.Equal(t, 1, len(prov.root.children))
 	require.Equal(t, 0, len(prov.root.subs))
 
@@ -376,8 +376,8 @@ func TestSNodeInsertDup(t *testing.T) {
 
 	sub1 := &subscriber.Type{}
 
-	prov.subscriptionInsert(topic, message.QoS1, sub1, 0)
-	prov.subscriptionInsert(topic, message.QoS1, sub1, 0)
+	prov.subscriptionInsert(topic, packet.QoS1, sub1, 0)
+	prov.subscriptionInsert(topic, packet.QoS1, sub1, 0)
 
 	require.Equal(t, 1, len(prov.root.children))
 	require.Equal(t, 0, len(prov.root.subs))
@@ -407,7 +407,7 @@ func TestSNodeRemove1(t *testing.T) {
 
 	sub1 := &subscriber.Type{}
 
-	prov.subscriptionInsert(topic, message.QoS1, sub1, 0)
+	prov.subscriptionInsert(topic, packet.QoS1, sub1, 0)
 
 	err := prov.subscriptionRemove(topic, sub1)
 	require.NoError(t, err)
@@ -422,7 +422,7 @@ func TestSNodeRemove2(t *testing.T) {
 
 	sub1 := &subscriber.Type{}
 
-	prov.subscriptionInsert(topic, message.QoS1, sub1, 0)
+	prov.subscriptionInsert(topic, packet.QoS1, sub1, 0)
 
 	err := prov.subscriptionRemove("sport/tennis/player1", sub1)
 	require.EqualError(t, topicsTypes.ErrNotFound, err.Error())
@@ -435,8 +435,8 @@ func TestSNodeRemove3(t *testing.T) {
 	sub1 := &subscriber.Type{}
 	sub2 := &subscriber.Type{}
 
-	prov.subscriptionInsert(topic, message.QoS1, sub1, 0)
-	prov.subscriptionInsert(topic, message.QoS1, sub2, 0)
+	prov.subscriptionInsert(topic, packet.QoS1, sub1, 0)
+	prov.subscriptionInsert(topic, packet.QoS1, sub2, 0)
 
 	err := prov.subscriptionRemove("sport/tennis/player1/#", nil)
 	require.NoError(t, err)
@@ -452,13 +452,13 @@ func TestRetain1(t *testing.T) {
 		prov.retain(m)
 	}
 
-	_, rMsg, _ := prov.Subscribe("#", message.QoS1, sub, 0)
+	_, rMsg, _ := prov.Subscribe("#", packet.QoS1, sub, 0)
 	require.Equal(t, 0, len(rMsg))
 
-	_, rMsg, _ = prov.Subscribe("$SYS", message.QoS1, sub, 0)
+	_, rMsg, _ = prov.Subscribe("$SYS", packet.QoS1, sub, 0)
 	require.Equal(t, 0, len(rMsg))
 
-	_, rMsg, _ = prov.Subscribe("$SYS/#", message.QoS1, sub, 0)
+	_, rMsg, _ = prov.Subscribe("$SYS/#", packet.QoS1, sub, 0)
 	require.Equal(t, len(retainedSystree), len(rMsg))
 }
 
@@ -470,16 +470,16 @@ func TestRetain2(t *testing.T) {
 		prov.retain(m)
 	}
 
-	msg := newPublishMessageLarge("sport/tennis/player1/ricardo", message.QoS1)
+	msg := newPublishMessageLarge("sport/tennis/player1/ricardo", packet.QoS1)
 	prov.retain(msg)
 
-	prov.Subscribe("#", message.QoS1, sub, 0) // nolint: errcheck
+	prov.Subscribe("#", packet.QoS1, sub, 0) // nolint: errcheck
 
-	var rMsg []*message.PublishMessage
+	var rMsg []*packet.Publish
 	prov.retainSearch("#", &rMsg)
 	require.Equal(t, 1, len(rMsg))
 
-	_, rMsg, _ = prov.Subscribe("$SYS/#", message.QoS1, sub, 0)
+	_, rMsg, _ = prov.Subscribe("$SYS/#", packet.QoS1, sub, 0)
 	require.Equal(t, len(retainedSystree), len(rMsg))
 }
 
@@ -519,8 +519,8 @@ func TestRNodeInsertRemove(t *testing.T) {
 	require.Equal(t, 0, len(n5.children))
 	require.NotNil(t, n5.retained)
 
-	var rMsg *message.PublishMessage
-	rMsg, ok = n5.retained.(*message.PublishMessage)
+	var rMsg *packet.Publish
+	rMsg, ok = n5.retained.(*packet.Publish)
 	require.True(t, ok)
 	require.Equal(t, msg.QoS(), rMsg.QoS())
 	require.Equal(t, msg.Topic(), rMsg.Topic())
@@ -528,7 +528,7 @@ func TestRNodeInsertRemove(t *testing.T) {
 
 	// --- Insert msg2
 
-	msg2 := newPublishMessageLarge("sport/tennis/player1/andre", message.QoS1)
+	msg2 := newPublishMessageLarge("sport/tennis/player1/andre", packet.QoS1)
 
 	prov.retain(msg2)
 	require.Equal(t, 2, len(n4.children))
@@ -539,7 +539,7 @@ func TestRNodeInsertRemove(t *testing.T) {
 	require.Equal(t, 0, len(n6.children))
 	require.NotNil(t, n6.retained)
 
-	rMsg, ok = n6.retained.(*message.PublishMessage)
+	rMsg, ok = n6.retained.(*packet.Publish)
 	require.True(t, ok)
 	require.Equal(t, msg2.QoS(), rMsg.QoS())
 	require.Equal(t, msg2.Topic(), rMsg.Topic())
@@ -555,15 +555,15 @@ func TestRNodeInsertRemove(t *testing.T) {
 func TestRNodeMatch(t *testing.T) {
 	prov := allocProvider(t)
 
-	msg1 := newPublishMessageLarge("sport/tennis/ricardo/stats", message.QoS1)
+	msg1 := newPublishMessageLarge("sport/tennis/ricardo/stats", packet.QoS1)
 	prov.retain(msg1)
 
-	msg2 := newPublishMessageLarge("sport/tennis/andre/stats", message.QoS1)
+	msg2 := newPublishMessageLarge("sport/tennis/andre/stats", packet.QoS1)
 	prov.retain(msg2)
-	msg3 := newPublishMessageLarge("sport/tennis/andre/bio", message.QoS1)
+	msg3 := newPublishMessageLarge("sport/tennis/andre/bio", packet.QoS1)
 	prov.retain(msg3)
 
-	var msglist []*message.PublishMessage
+	var msglist []*packet.Publish
 
 	// ---
 
@@ -595,10 +595,10 @@ func TestRNodeMatch(t *testing.T) {
 	require.Equal(t, 3, len(msglist))
 }
 
-func newPublishMessageLarge(topic string, qos message.QosType) *message.PublishMessage {
-	m, _ := message.NewMessage(message.ProtocolV311, message.PUBLISH)
+func newPublishMessageLarge(topic string, qos packet.QosType) *packet.Publish {
+	m, _ := packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
 
-	msg := m.(*message.PublishMessage)
+	msg := m.(*packet.Publish)
 
 	msg.SetPayload(make([]byte, 1024))
 	msg.SetTopic(topic) // nolint: errcheck

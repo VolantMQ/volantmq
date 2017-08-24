@@ -1,7 +1,7 @@
 package topicsTypes
 
 import (
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 	persistTypes "github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/systree"
 )
@@ -15,7 +15,7 @@ type MemConfig struct {
 	Persist                       persistTypes.Retained
 	OnCleanUnsubscribe            func([]string)
 	Name                          string
-	MaxQosAllowed                 message.QosType
+	MaxQosAllowed                 packet.QosType
 	AllowOverlappingSubscriptions bool
 }
 
@@ -24,7 +24,7 @@ func NewMemConfig() *MemConfig {
 
 	return &MemConfig{
 		Name:                          "mem",
-		MaxQosAllowed:                 message.QoS2,
+		MaxQosAllowed:                 packet.QoS2,
 		OnCleanUnsubscribe:            func([]string) {},
 		AllowOverlappingSubscriptions: false,
 	}

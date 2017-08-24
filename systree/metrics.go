@@ -3,7 +3,7 @@ package systree
 import (
 	"sync/atomic"
 
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 	"github.com/troian/surgemq/types"
 )
 
@@ -77,59 +77,59 @@ func newPacketsMetric(topicPrefix string, retained *[]types.RetainObject) *packe
 }
 
 // Sent add sent packet to metrics
-func (t *packetsMetric) Sent(mt message.PacketType) {
+func (t *packetsMetric) Sent(mt packet.Type) {
 	atomic.AddUint64(&t.total.sent.val, 1)
 	switch mt {
-	case message.CONNECT:
+	case packet.CONNECT:
 		atomic.AddUint64(&t.connect.sent.val, 1)
-	case message.CONNACK:
+	case packet.CONNACK:
 		atomic.AddUint64(&t.connAck.sent.val, 1)
-	case message.PUBLISH:
+	case packet.PUBLISH:
 		atomic.AddUint64(&t.publish.sent.val, 1)
-	case message.SUBSCRIBE:
+	case packet.SUBSCRIBE:
 		atomic.AddUint64(&t.subscribe.sent.val, 1)
-	case message.SUBACK:
+	case packet.SUBACK:
 		atomic.AddUint64(&t.suback.sent.val, 1)
-	case message.UNSUBSCRIBE:
+	case packet.UNSUBSCRIBE:
 		atomic.AddUint64(&t.unsubscribe.sent.val, 1)
-	case message.UNSUBACK:
+	case packet.UNSUBACK:
 		atomic.AddUint64(&t.unSubAck.sent.val, 1)
-	case message.PINGREQ:
+	case packet.PINGREQ:
 		atomic.AddUint64(&t.pingReq.sent.val, 1)
-	case message.PINGRESP:
+	case packet.PINGRESP:
 		atomic.AddUint64(&t.pingResp.sent.val, 1)
-	case message.DISCONNECT:
+	case packet.DISCONNECT:
 		atomic.AddUint64(&t.disconnect.sent.val, 1)
-	case message.AUTH:
+	case packet.AUTH:
 		atomic.AddUint64(&t.auth.sent.val, 1)
 	}
 }
 
 // Received add received packet to metrics
-func (t *packetsMetric) Received(mt message.PacketType) {
+func (t *packetsMetric) Received(mt packet.Type) {
 	atomic.AddUint64(&t.total.recv.val, 1)
 	switch mt {
-	case message.CONNECT:
+	case packet.CONNECT:
 		atomic.AddUint64(&t.connect.recv.val, 1)
-	case message.CONNACK:
+	case packet.CONNACK:
 		atomic.AddUint64(&t.connAck.recv.val, 1)
-	case message.PUBLISH:
+	case packet.PUBLISH:
 		atomic.AddUint64(&t.publish.recv.val, 1)
-	case message.SUBSCRIBE:
+	case packet.SUBSCRIBE:
 		atomic.AddUint64(&t.subscribe.recv.val, 1)
-	case message.SUBACK:
+	case packet.SUBACK:
 		atomic.AddUint64(&t.suback.recv.val, 1)
-	case message.UNSUBSCRIBE:
+	case packet.UNSUBSCRIBE:
 		atomic.AddUint64(&t.unsubscribe.recv.val, 1)
-	case message.UNSUBACK:
+	case packet.UNSUBACK:
 		atomic.AddUint64(&t.unSubAck.recv.val, 1)
-	case message.PINGREQ:
+	case packet.PINGREQ:
 		atomic.AddUint64(&t.pingReq.recv.val, 1)
-	case message.PINGRESP:
+	case packet.PINGRESP:
 		atomic.AddUint64(&t.pingResp.recv.val, 1)
-	case message.DISCONNECT:
+	case packet.DISCONNECT:
 		atomic.AddUint64(&t.disconnect.recv.val, 1)
-	case message.AUTH:
+	case packet.AUTH:
 		atomic.AddUint64(&t.auth.recv.val, 1)
 	}
 }

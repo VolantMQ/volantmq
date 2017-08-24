@@ -7,14 +7,10 @@ SurgeMQ
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 ### Warning
-This implementation might not be compatible with original.
-Original has not been updated since 2014 thus I forked to improve
-
-It's currently in active development thus highly not recommended for production
-
+**It's currently in active development thus highly not recommended for production**
 **This project should be considered unstable until further notice.**
 
-SurgeMQ is a high performance MQTT broker that aims to be fully compliant with MQTT 3.1 and 3.1.1 specs.
+SurgeMQ is a high performance MQTT broker that aims to be fully compliant with MQTT 3.1 and 3.1.1 specs .
 
 ### Features, Limitations, and Future
 
@@ -23,29 +19,28 @@ SurgeMQ is a high performance MQTT broker that aims to be fully compliant with M
 * Full support of WebSockets transport
 * SSL for both plain tcp and WebSockets transports
 * Independent auth providers for each transport
-* Persistence provider by [BoltDB](https://github.com/boltdb/bolt)
+* Persistence providers
+* $SYS topics
+
+**Persistence providers**
+* [BoltDB](https://github.com/boltdb/bolt)
+* In memory
 
 **Future**
-
-* $SYS topics
+* V5.0 specification
 * Cluster
 * Bridge
-* Ack timeout/retry
-
 ### Performance
 
 TBD
 
 ### Compatibility
 
-In addition, SurgeMQ has been tested with the following client libraries and it _seems_ to work:
-
-* libmosquitto 1.3.5 (in C)
-  * Tested with the bundled test programs msgsps_pub and msgsps_sub
+SurgeMQ has been tested with the following client libraries
 * Paho MQTT Conformance/Interoperability Testing Suite (in Python)
-  * Tested with all 10 test cases. Publish results TBD
+  * Pass with all of the test cases
 * Paho C Client library (in C)
-  * Tested with all of the test cases. Publish results TBD
+  * Pass with all of the test cases
 
 ### License
 

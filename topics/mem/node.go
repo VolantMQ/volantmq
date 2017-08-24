@@ -3,7 +3,7 @@ package mem
 import (
 	"strings"
 
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics/types"
 	"github.com/troian/surgemq/types"
@@ -12,14 +12,14 @@ import (
 type subscribedEntry struct {
 	s          topicsTypes.Subscriber
 	id         uint32
-	grantedQoS message.QosType
+	grantedQoS packet.QosType
 }
 
 type subscribedEntries map[uintptr]*subscribedEntry
 
 type publishEntry struct {
 	s   topicsTypes.Subscriber
-	qos message.QosType
+	qos packet.QosType
 	ids []uint32
 }
 
@@ -82,7 +82,7 @@ func (mT *provider) leafSearchNode(levels []string) *node {
 	return root
 }
 
-func (mT *provider) subscriptionInsert(filter string, qos message.QosType, sub topicsTypes.Subscriber, id uint32) {
+func (mT *provider) subscriptionInsert(filter string, qos packet.QosType, sub topicsTypes.Subscriber, id uint32) {
 	levels := strings.Split(filter, "/")
 
 	root := mT.leafInsertNode(levels)
@@ -215,7 +215,7 @@ func (mT *provider) retainRemove(topic string) error {
 	return nil
 }
 
-func retainRecurseSearch(root *node, levels []string, retained *[]*message.PublishMessage) {
+func retainRecurseSearch(root *node, levels []string, retained *[]*packet.Publish) {
 	if len(levels) == 0 {
 		// leaf level of the topic
 		root.getRetained(retained)
@@ -241,7 +241,7 @@ func retainRecurseSearch(root *node, levels []string, retained *[]*message.Publi
 	}
 }
 
-func (mT *provider) retainSearch(filter string, retained *[]*message.PublishMessage) {
+func (mT *provider) retainSearch(filter string, retained *[]*packet.Publish) {
 	levels := strings.Split(filter, "/")
 	level := levels[0]
 
@@ -258,10 +258,10 @@ func (mT *provider) retainSearch(filter string, retained *[]*message.PublishMess
 	}
 }
 
-func (sn *node) getRetained(retained *[]*message.PublishMessage) {
+func (sn *node) getRetained(retained *[]*packet.Publish) {
 	if sn.retained != nil {
 		switch t := sn.retained.(type) {
-		case *message.PublishMessage:
+		case *packet.Publish:
 			*retained = append(*retained, t)
 		case systree.DynamicValue:
 			*retained = append(*retained, t.Retained())
@@ -269,7 +269,7 @@ func (sn *node) getRetained(retained *[]*message.PublishMessage) {
 	}
 }
 
-func (sn *node) allRetained(retained *[]*message.PublishMessage) {
+func (sn *node) allRetained(retained *[]*packet.Publish) {
 	sn.getRetained(retained)
 
 	for _, n := range sn.children {

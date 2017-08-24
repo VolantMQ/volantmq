@@ -1,7 +1,7 @@
 package systree
 
 import (
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 	"github.com/troian/surgemq/types"
 )
 
@@ -23,8 +23,8 @@ type Metric interface {
 
 // PacketsMetric packets metric
 type PacketsMetric interface {
-	Sent(t message.PacketType)
-	Received(t message.PacketType)
+	Sent(t packet.Type)
+	Received(t packet.Type)
 }
 
 // BytesMetric bytes metric
@@ -42,7 +42,7 @@ type Sessions interface {
 // Clients Statistic of sessions
 type Clients interface {
 	Connected(string, *ClientConnectStatus)
-	Disconnected(string, message.ReasonCode, bool)
+	Disconnected(string, packet.ReasonCode, bool)
 }
 
 // TopicsStat statistic of topics

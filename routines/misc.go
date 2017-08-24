@@ -17,12 +17,11 @@ package routines
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 
-	"errors"
-
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 )
 
 var (
@@ -31,7 +30,7 @@ var (
 )
 
 // WriteMessage write message into connection
-func WriteMessage(conn io.Closer, msg message.Provider) error {
+func WriteMessage(conn io.Closer, msg packet.Provider) error {
 	size, err := msg.Size()
 	if err != nil {
 		return err

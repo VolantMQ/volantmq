@@ -12,7 +12,7 @@ import (
 
 	"github.com/troian/surgemq/auth"
 	"github.com/troian/surgemq/connection"
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 	"github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/subscriber"
 	"github.com/troian/surgemq/systree"
@@ -30,7 +30,7 @@ const (
 
 type onSessionClose func(string, exitReason)
 type onSessionPersist func(string, *persistenceTypes.SessionMessages)
-type onDisconnect func(string, bool, message.ReasonCode)
+type onDisconnect func(string, bool, packet.ReasonCode)
 
 type sessionConfig struct {
 	id           string
@@ -50,12 +50,12 @@ type connectionConfig struct {
 	auth      auth.SessionPermissions
 	keepAlive uint16
 	sendQuota uint16
-	version   message.ProtocolVersion
+	version   packet.ProtocolVersion
 }
 
 type setupConfig struct {
 	subscriber subscriber.ConnectionProvider
-	will       *message.PublishMessage
+	will       *packet.Publish
 	expireIn   *time.Duration
 	willDelay  time.Duration
 }
@@ -77,7 +77,7 @@ type session struct {
 	connStop         *types.Once
 	timer            *time.Timer
 	conn             *connection.Type
-	will             *message.PublishMessage
+	will             *packet.Publish
 	expireIn         *time.Duration
 	willDelay        time.Duration
 	timerStartedAt   time.Time
@@ -160,7 +160,7 @@ func (s *session) start() {
 	s.conn.Start()
 }
 
-func (s *session) stop(reason message.ReasonCode) *persistenceTypes.SessionState {
+func (s *session) stop(reason packet.ReasonCode) *persistenceTypes.SessionState {
 	s.connStop.Do(func() {
 		if s.conn != nil {
 			s.conn.Stop(reason)
@@ -369,7 +369,7 @@ func (s *session) expiryWorker() {
 		case <-s.timerChan:
 			if s.timer != nil {
 				s.timer.Stop()
-				elapsed := time.Now().Sub(s.timerStartedAt)
+				elapsed := time.Since(s.timerStartedAt)
 				if s.willDelay > 0 && (s.willDelay-elapsed) > 0 {
 					s.willDelay = s.willDelay - elapsed
 				}

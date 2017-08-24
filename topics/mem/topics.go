@@ -18,7 +18,7 @@ import (
 	"sync"
 
 	"github.com/troian/surgemq/configuration"
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 	"github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics/types"
@@ -46,7 +46,7 @@ type provider struct {
 	wgPublisher        sync.WaitGroup
 	wgPublisherStarted sync.WaitGroup
 
-	inbound    chan *message.PublishMessage
+	inbound    chan *packet.Publish
 	inRetained chan types.RetainObject
 
 	allowOverlapping bool
@@ -63,7 +63,7 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 		stat:               config.Stat,
 		persist:            config.Persist,
 		onCleanUnsubscribe: config.OnCleanUnsubscribe,
-		inbound:            make(chan *message.PublishMessage, 1024*512),
+		inbound:            make(chan *packet.Publish, 1024*512),
 		inRetained:         make(chan types.RetainObject, 1024*512),
 	}
 	p.root = newNode(p.allowOverlapping, nil)
@@ -78,12 +78,12 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 		}
 
 		for _, d := range entries {
-			v := message.ProtocolVersion(d[0])
-			msg, _, err := message.Decode(v, d[1:])
+			v := packet.ProtocolVersion(d[0])
+			msg, _, err := packet.Decode(v, d[1:])
 			if err != nil {
 				p.log.prod.Error("Couldn't decode retained message", zap.Error(err))
 			} else {
-				if m, ok := msg.(*message.PublishMessage); ok {
+				if m, ok := msg.(*packet.Publish); ok {
 					p.log.dev.Debug("Loading retained message",
 						zap.String("topic", m.Topic()),
 						zap.Int8("QoS", int8(m.QoS())))
@@ -109,13 +109,13 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 	return p, nil
 }
 
-func (mT *provider) Subscribe(filter string, q message.QosType, s topicsTypes.Subscriber, id uint32) (message.QosType, []*message.PublishMessage, error) {
+func (mT *provider) Subscribe(filter string, q packet.QosType, s topicsTypes.Subscriber, id uint32) (packet.QosType, []*packet.Publish, error) {
 	if !q.IsValid() {
-		return message.QosFailure, nil, message.ErrInvalidQoS
+		return packet.QosFailure, nil, packet.ErrInvalidQoS
 	}
 
 	if s == nil {
-		return message.QosFailure, nil, topicsTypes.ErrInvalidSubscriber
+		return packet.QosFailure, nil, topicsTypes.ErrInvalidSubscriber
 	}
 
 	defer mT.smu.Unlock()
@@ -123,7 +123,7 @@ func (mT *provider) Subscribe(filter string, q message.QosType, s topicsTypes.Su
 
 	mT.subscriptionInsert(filter, q, s, id)
 
-	var r []*message.PublishMessage
+	var r []*packet.Publish
 
 	// [MQTT-3.3.1-5]
 	mT.retainSearch(filter, &r)
@@ -139,7 +139,7 @@ func (mT *provider) UnSubscribe(topic string, sub topicsTypes.Subscriber) error 
 }
 
 func (mT *provider) Publish(m interface{}) error {
-	msg, ok := m.(*message.PublishMessage)
+	msg, ok := m.(*packet.Publish)
 	if !ok {
 		return topicsTypes.ErrUnexpectedObjectType
 	}
@@ -154,9 +154,9 @@ func (mT *provider) Retain(obj types.RetainObject) error {
 	return nil
 }
 
-func (mT *provider) Retained(filter string) ([]*message.PublishMessage, error) {
+func (mT *provider) Retained(filter string) ([]*packet.Publish, error) {
 	// [MQTT-3.3.1-5]
-	var r []*message.PublishMessage
+	var r []*packet.Publish
 
 	defer mT.smu.Unlock()
 	mT.smu.Lock()
@@ -176,7 +176,7 @@ func (mT *provider) Close() error {
 
 	mT.wgPublisher.Wait()
 
-	var res []*message.PublishMessage
+	var res []*packet.Publish
 	// [MQTT-3.3.1-5]
 	//retainSearch(mT.root, []string{"#"}, &res)
 
@@ -185,7 +185,7 @@ func (mT *provider) Close() error {
 
 		for _, m := range res {
 			// Skip retained QoS0 messages
-			if m.QoS() != message.QoS0 {
+			if m.QoS() != packet.QoS0 {
 				if sz, err := m.Size(); err != nil {
 					mT.log.prod.Error("Couldn't get retained message size", zap.Error(err))
 				} else {
@@ -216,9 +216,9 @@ func (mT *provider) retain(obj types.RetainObject) {
 	mT.smu.Lock()
 
 	switch t := obj.(type) {
-	case *message.PublishMessage:
+	case *packet.Publish:
 		// [MQTT-3.3.1-10]            [MQTT-3.3.1-7]
-		if len(t.Payload()) == 0 || t.QoS() == message.QoS0 {
+		if len(t.Payload()) == 0 || t.QoS() == packet.QoS0 {
 			mT.retainRemove(obj.Topic()) // nolint: errcheck
 			if len(t.Payload()) == 0 {
 				insert = false

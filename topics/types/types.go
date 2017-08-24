@@ -3,11 +3,9 @@ package topicsTypes
 import (
 	"errors"
 
-	//"regexp"
-
 	"regexp"
 
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 	"github.com/troian/surgemq/types"
 )
 
@@ -71,7 +69,7 @@ var (
 type Subscriber interface {
 	Acquire()
 	Release()
-	Publish(*message.PublishMessage, message.QosType, []uint32) error
+	Publish(*packet.Publish, packet.QosType, []uint32) error
 	Hash() uintptr
 }
 
@@ -80,21 +78,21 @@ type Subscribers []Subscriber
 
 // Provider interface
 type Provider interface {
-	Subscribe(string, message.QosType, Subscriber, uint32) (message.QosType, []*message.PublishMessage, error)
+	Subscribe(string, packet.QosType, Subscriber, uint32) (packet.QosType, []*packet.Publish, error)
 	UnSubscribe(string, Subscriber) error
 	Publish(interface{}) error
 	Retain(types.RetainObject) error
-	Retained(string) ([]*message.PublishMessage, error)
+	Retained(string) ([]*packet.Publish, error)
 	Close() error
 }
 
 // SubscriberInterface used by subscriber to handle messages
 type SubscriberInterface interface {
 	Publish(interface{}) error
-	Subscribe(string, message.QosType, Subscriber, uint32) (message.QosType, []*message.PublishMessage, error)
+	Subscribe(string, packet.QosType, Subscriber, uint32) (packet.QosType, []*packet.Publish, error)
 	UnSubscribe(string, Subscriber) error
 	Retain(types.RetainObject) error
-	Retained(string) ([]*message.PublishMessage, error)
+	Retained(string) ([]*packet.Publish, error)
 }
 
 var (

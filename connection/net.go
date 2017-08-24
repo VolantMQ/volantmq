@@ -11,7 +11,7 @@ import (
 
 	"github.com/troian/surgemq/buffer"
 	"github.com/troian/surgemq/configuration"
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/types"
 	"go.uber.org/zap"
@@ -20,16 +20,16 @@ import (
 // onProcess callbacks to parent session
 type onProcess struct {
 	// Publish call when PUBLISH message received
-	publish func(msg *message.PublishMessage) error
+	publish func(msg *packet.Publish) error
 
 	// Ack call when PUBACK/PUBREC/PUBREL/PUBCOMP received
-	ack func(msg message.Provider) error
+	ack func(msg packet.Provider) error
 
 	// Subscribe call when SUBSCRIBE message received
-	subscribe func(msg *message.SubscribeMessage) error
+	subscribe func(msg *packet.Subscribe) error
 
 	// UnSubscribe call when UNSUBSCRIBE message received
-	unSubscribe func(msg *message.UnSubscribeMessage) (*message.UnSubAckMessage, error)
+	unSubscribe func(msg *packet.UnSubscribe) (*packet.UnSubAck, error)
 
 	// Disconnect call when connection falls into error or received DISCONNECT message
 	disconnect func(will bool)
@@ -53,7 +53,7 @@ type netConfig struct {
 	keepAlive uint16
 
 	// ProtoVersion MQTT protocol version
-	protoVersion message.ProtocolVersion
+	protoVersion packet.ProtocolVersion
 }
 
 // netConn implementation of the connection
@@ -157,7 +157,7 @@ func (s *netConn) start() {
 }
 
 // Stop connection. Effective is only first invoke
-func (s *netConn) stop(reason *message.ReasonCode) {
+func (s *netConn) stop(reason *packet.ReasonCode) {
 	s.onStop.Do(func() {
 		// wait if stop invoked before start finished
 		s.wg.conn.started.Wait()
@@ -167,9 +167,9 @@ func (s *netConn) stop(reason *message.ReasonCode) {
 			close(s.done)
 		}
 
-		if s.config.protoVersion == message.ProtocolV50 && reason != nil {
-			m, _ := message.NewMessage(message.ProtocolV50, message.DISCONNECT)
-			msg, _ := m.(*message.DisconnectMessage)
+		if s.config.protoVersion == packet.ProtocolV50 && reason != nil {
+			m, _ := packet.NewMessage(packet.ProtocolV50, packet.DISCONNECT)
+			msg, _ := m.(*packet.Disconnect)
 			msg.SetReasonCode(*reason)
 
 			// TODO: send it over
@@ -241,7 +241,7 @@ func (s *netConn) processIncoming() {
 			return
 		}
 
-		var msg message.Provider
+		var msg packet.Provider
 
 		// 2. Now read message including fixed header
 		msg, _, err = s.readMessage(total)
@@ -258,34 +258,34 @@ func (s *netConn) processIncoming() {
 		s.config.packetsMetric.Received(msg.Type())
 
 		// 3. Put message for further processing
-		var resp message.Provider
+		var resp packet.Provider
 		switch m := msg.(type) {
-		case *message.PublishMessage:
+		case *packet.Publish:
 			err = s.config.on.publish(m)
-		case *message.AckMessage:
+		case *packet.Ack:
 			err = s.config.on.ack(msg)
-		case *message.SubscribeMessage:
+		case *packet.Subscribe:
 			err = s.config.on.subscribe(m)
-		case *message.UnSubscribeMessage:
+		case *packet.UnSubscribe:
 			resp, _ = s.config.on.unSubscribe(m)
 			_, err = s.WriteMessage(resp, false)
-		case *message.PingReqMessage:
+		case *packet.PingReq:
 			// For PINGREQ message, we should send back PINGRESP
-			mR, _ := message.NewMessage(s.config.protoVersion, message.PINGRESP)
-			resp, _ := mR.(*message.PingRespMessage)
+			mR, _ := packet.NewMessage(s.config.protoVersion, packet.PINGRESP)
+			resp, _ := mR.(*packet.PingResp)
 			_, err = s.WriteMessage(resp, false)
-		case *message.DisconnectMessage:
+		case *packet.Disconnect:
 			// For DISCONNECT message, we should quit without sending Will
 			s.will = false
 
-			if s.config.protoVersion == message.ProtocolV50 {
+			if s.config.protoVersion == packet.ProtocolV50 {
 				// FIXME: CodeRefusedBadUsernameOrPassword has same id as CodeDisconnectWithWill
-				if m.ReasonCode() == message.CodeRefusedBadUsernameOrPassword {
+				if m.ReasonCode() == packet.CodeRefusedBadUsernameOrPassword {
 					s.will = true
 				}
 
 				expireIn := time.Duration(0)
-				if val, e := m.PropertyGet(message.PropertySessionExpiryInterval); e == nil {
+				if val, e := m.PropertyGet(packet.PropertySessionExpiryInterval); e == nil {
 					expireIn = time.Duration(val.(uint32))
 				}
 
@@ -294,9 +294,9 @@ func (s *netConn) processIncoming() {
 				// Expiry Interval is received by the Server, it does not treat it as a valid DISCONNECT packet. The Server
 				// uses DISCONNECT with Reason Code 0x82 (Protocol Error) as described in section 4.13.
 				if s.expireIn != nil && *s.expireIn == 0 && expireIn != 0 {
-					m, _ := message.NewMessage(message.ProtocolV50, message.DISCONNECT)
-					msg, _ := m.(*message.DisconnectMessage)
-					msg.SetReasonCode(message.CodeProtocolError)
+					m, _ := packet.NewMessage(packet.ProtocolV50, packet.DISCONNECT)
+					msg, _ := m.(*packet.Disconnect)
+					msg.SetReasonCode(packet.CodeProtocolError)
 					s.WriteMessage(msg, true) // nolint: errcheck
 				}
 			}
@@ -358,7 +358,7 @@ func (s *netConn) sender() {
 
 // peekMessageSize reads, but not commits, enough bytes to determine the size of
 // the next message and returns the type and size.
-func (s *netConn) peekMessageSize() (message.PacketType, int, error) {
+func (s *netConn) peekMessageSize() (packet.Type, int, error) {
 	var b []byte
 	var err error
 	cnt := 2
@@ -401,14 +401,14 @@ func (s *netConn) peekMessageSize() (message.PacketType, int, error) {
 	// Total message length is remlen + 1 (msg type) + m (remlen bytes)
 	total := int(remLen) + 1 + m
 
-	mType := message.PacketType(b[0] >> 4)
+	mType := packet.Type(b[0] >> 4)
 
 	return mType, total, err
 }
 
 // readMessage reads and copies a message from the buffer. The buffer bytes are
 // committed as a result of the read.
-func (s *netConn) readMessage(total int) (message.Provider, int, error) {
+func (s *netConn) readMessage(total int) (packet.Provider, int, error) {
 	defer func() {
 		if int64(len(s.in.ExternalBuf)) > s.in.Size() {
 			s.in.ExternalBuf = make([]byte, s.in.Size())
@@ -417,7 +417,7 @@ func (s *netConn) readMessage(total int) (message.Provider, int, error) {
 
 	var err error
 	var n int
-	var msg message.Provider
+	var msg packet.Provider
 
 	if s.in == nil {
 		err = buffer.ErrNotReady
@@ -441,7 +441,7 @@ func (s *netConn) readMessage(total int) (message.Provider, int, error) {
 	}
 
 	var dTotal int
-	if msg, dTotal, err = message.Decode(s.config.protoVersion, s.in.ExternalBuf[:total]); err == nil && total != dTotal {
+	if msg, dTotal, err = packet.Decode(s.config.protoVersion, s.in.ExternalBuf[:total]); err == nil && total != dTotal {
 		s.log.prod.Error("Incoming and outgoing length does not match",
 			zap.Int("in", total),
 			zap.Int("out", dTotal))
@@ -452,7 +452,7 @@ func (s *netConn) readMessage(total int) (message.Provider, int, error) {
 }
 
 // WriteMessage writes a message to the outgoing buffer
-func (s *netConn) WriteMessage(msg message.Provider, lastMessage bool) (int, error) {
+func (s *netConn) WriteMessage(msg packet.Provider, lastMessage bool) (int, error) {
 	if s.isDone() {
 		return 0, buffer.ErrNotReady
 	}
@@ -471,7 +471,7 @@ func (s *netConn) WriteMessage(msg message.Provider, lastMessage bool) (int, err
 	var total int
 	var err error
 
-	if total, err = message.WriteToBuffer(msg, s.out); err == nil {
+	if total, err = packet.WriteToBuffer(msg, s.out); err == nil {
 		s.config.packetsMetric.Sent(msg.Type())
 	}
 

@@ -3,7 +3,7 @@ package persistenceTypes
 import (
 	"time"
 
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 )
 
 // Errors persistence errors
@@ -59,7 +59,7 @@ type SessionState struct {
 	Timestamp string
 	ExpireIn  *time.Duration
 	Will      *SessionWill
-	Version   message.ProtocolVersion
+	Version   packet.ProtocolVersion
 }
 
 // SystemState system configuration

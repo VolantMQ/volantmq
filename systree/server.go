@@ -3,7 +3,7 @@ package systree
 import (
 	"encoding/json"
 
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 	"github.com/troian/surgemq/types"
 )
 
@@ -12,7 +12,7 @@ type server struct {
 	upTime       *dynamicValueUpTime
 	currTime     *dynamicValueCurrentTime
 	capabilities struct {
-		SupportedVersions             []message.ProtocolVersion
+		SupportedVersions             []packet.ProtocolVersion
 		MaxQoS                        string
 		MaxConnections                uint64
 		MaximumPacketSize             uint32
@@ -32,9 +32,9 @@ func newServer(topicPrefix string, dynRetains, staticRetains *[]types.RetainObje
 		version:  "1.0.0",
 	}
 
-	m, _ := message.NewMessage(message.ProtocolV311, message.PUBLISH)
-	msg, _ := m.(*message.PublishMessage)
-	msg.SetQoS(message.QoS0)               // nolint: errcheck
+	m, _ := packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
+	msg, _ := m.(*packet.Publish)
+	msg.SetQoS(packet.QoS0)                // nolint: errcheck
 	msg.SetTopic(topicPrefix + "/version") // nolint: errcheck
 	msg.SetPayload([]byte(b.version))
 
@@ -42,9 +42,9 @@ func newServer(topicPrefix string, dynRetains, staticRetains *[]types.RetainObje
 	*dynRetains = append(*dynRetains, b.currTime)
 	*staticRetains = append(*staticRetains, msg)
 
-	m, _ = message.NewMessage(message.ProtocolV311, message.PUBLISH)
-	msg, _ = m.(*message.PublishMessage)
-	msg.SetQoS(message.QoS0)                    // nolint: errcheck
+	m, _ = packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
+	msg, _ = m.(*packet.Publish)
+	msg.SetQoS(packet.QoS0)                     // nolint: errcheck
 	msg.SetTopic(topicPrefix + "/capabilities") // nolint: errcheck
 
 	if data, err := json.Marshal(&b.capabilities); err == nil {

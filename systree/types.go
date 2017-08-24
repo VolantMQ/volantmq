@@ -3,25 +3,24 @@ package systree
 import (
 	"strconv"
 	"sync/atomic"
-
 	"time"
 
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 )
 
 // DynamicValue interface describes states of the dynamic value
 type DynamicValue interface {
 	Topic() string
 	// Retained used by topics provider to get retained message when there is new subscription to given topic
-	Retained() *message.PublishMessage
+	Retained() *packet.Publish
 	// Publish used by systree update routine to publish new value when on periodic basis
-	Publish() *message.PublishMessage
+	Publish() *packet.Publish
 }
 
 type dynamicValue struct {
 	topic    string
-	retained *message.PublishMessage
-	publish  *message.PublishMessage
+	retained *packet.Publish
+	publish  *packet.Publish
 	getValue func() []byte
 }
 
@@ -86,12 +85,12 @@ func (m *dynamicValue) Topic() string {
 	return m.topic
 }
 
-func (m *dynamicValue) Retained() *message.PublishMessage {
+func (m *dynamicValue) Retained() *packet.Publish {
 	if m.retained == nil {
-		np, _ := message.NewMessage(message.ProtocolV311, message.PUBLISH)
-		m.retained, _ = np.(*message.PublishMessage)
-		m.retained.SetTopic(m.topic)    // nolint: errcheck
-		m.retained.SetQoS(message.QoS0) // nolint: errcheck
+		np, _ := packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
+		m.retained, _ = np.(*packet.Publish)
+		m.retained.SetTopic(m.topic)   // nolint: errcheck
+		m.retained.SetQoS(packet.QoS0) // nolint: errcheck
 		m.retained.SetRetain(true)
 	}
 
@@ -100,12 +99,12 @@ func (m *dynamicValue) Retained() *message.PublishMessage {
 	return m.retained
 }
 
-func (m *dynamicValue) Publish() *message.PublishMessage {
+func (m *dynamicValue) Publish() *packet.Publish {
 	if m.publish == nil {
-		np, _ := message.NewMessage(message.ProtocolV311, message.PUBLISH)
-		m.publish, _ = np.(*message.PublishMessage)
-		m.publish.SetTopic(m.topic)    // nolint: errcheck
-		m.publish.SetQoS(message.QoS0) // nolint: errcheck
+		np, _ := packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
+		m.publish, _ = np.(*packet.Publish)
+		m.publish.SetTopic(m.topic)   // nolint: errcheck
+		m.publish.SetQoS(packet.QoS0) // nolint: errcheck
 		m.publish.SetRetain(true)
 	}
 

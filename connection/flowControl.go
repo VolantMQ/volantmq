@@ -5,28 +5,28 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 )
 
 type packetsFlowControl struct {
 	counter       uint64
 	quit          chan struct{}
 	cond          *sync.Cond
-	inUse         map[message.PacketID]bool
+	inUse         map[packet.IDType]bool
 	sendQuota     int32
 	preserveOrder bool
 }
 
 func newFlowControl(quit chan struct{}, preserveOrder bool) *packetsFlowControl {
 	return &packetsFlowControl{
-		inUse:         make(map[message.PacketID]bool),
+		inUse:         make(map[packet.IDType]bool),
 		cond:          sync.NewCond(new(sync.Mutex)),
 		quit:          quit,
 		preserveOrder: preserveOrder,
 	}
 }
 
-func (s *packetsFlowControl) acquire() (message.PacketID, error) {
+func (s *packetsFlowControl) acquire() (packet.IDType, error) {
 	defer s.cond.L.Unlock()
 	s.cond.L.Lock()
 
@@ -40,11 +40,11 @@ func (s *packetsFlowControl) acquire() (message.PacketID, error) {
 		}
 	}
 
-	var id message.PacketID
+	var id packet.IDType
 
 	for count := 0; count <= 0xFFFF; count++ {
 		s.counter++
-		id = message.PacketID(s.counter)
+		id = packet.IDType(s.counter)
 		if _, ok := s.inUse[id]; !ok {
 			s.inUse[id] = true
 			break
@@ -54,7 +54,7 @@ func (s *packetsFlowControl) acquire() (message.PacketID, error) {
 	return id, nil
 }
 
-//func (s *packetsFlowControl) reAcquire(id message.PacketID) error {
+//func (s *packetsFlowControl) reAcquire(id message.IDType) error {
 //	defer s.lock.Unlock()
 //	s.lock.Lock()
 //
@@ -73,7 +73,7 @@ func (s *packetsFlowControl) acquire() (message.PacketID, error) {
 //	return nil
 //}
 
-func (s *packetsFlowControl) release(id message.PacketID) {
+func (s *packetsFlowControl) release(id packet.IDType) {
 	defer func() {
 		atomic.AddInt32(&s.sendQuota, -1)
 		s.cond.Signal()

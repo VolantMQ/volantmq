@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"sync/atomic"
 
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 	"github.com/troian/surgemq/types"
 )
 
@@ -47,10 +47,10 @@ func (t *sessions) Created(id string, status *SessionCreatedStatus) {
 
 	if t.topicsManager != nil {
 		// notify client connected
-		nm, _ := message.NewMessage(message.ProtocolV311, message.PUBLISH)
-		notifyMsg, _ := nm.(*message.PublishMessage)
+		nm, _ := packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
+		notifyMsg, _ := nm.(*packet.Publish)
 		notifyMsg.SetRetain(false)
-		notifyMsg.SetQoS(message.QoS0)   // nolint: errcheck
+		notifyMsg.SetQoS(packet.QoS0)    // nolint: errcheck
 		notifyMsg.SetTopic(t.topic + id) // nolint: errcheck
 
 		if out, err := json.Marshal(&status); err != nil {
@@ -69,18 +69,18 @@ func (t *sessions) Created(id string, status *SessionCreatedStatus) {
 func (t *sessions) Removed(id string, status *SessionDeletedStatus) {
 	atomic.AddUint64(&t.curr.val, ^uint64(0))
 	if t.topicsManager != nil {
-		nm, _ := message.NewMessage(message.ProtocolV311, message.PUBLISH)
-		notifyMsg, _ := nm.(*message.PublishMessage)
+		nm, _ := packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
+		notifyMsg, _ := nm.(*packet.Publish)
 		notifyMsg.SetRetain(false)
-		notifyMsg.SetQoS(message.QoS0)   // nolint: errcheck
+		notifyMsg.SetQoS(packet.QoS0)    // nolint: errcheck
 		notifyMsg.SetTopic(t.topic + id) // nolint: errcheck
 
 		t.topicsManager.Retain(notifyMsg) // nolint: errcheck
 
-		nm, _ = message.NewMessage(message.ProtocolV311, message.PUBLISH)
-		notifyMsg, _ = nm.(*message.PublishMessage)
+		nm, _ = packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
+		notifyMsg, _ = nm.(*packet.Publish)
 		notifyMsg.SetRetain(false)
-		notifyMsg.SetQoS(message.QoS0)                // nolint: errcheck
+		notifyMsg.SetQoS(packet.QoS0)                 // nolint: errcheck
 		notifyMsg.SetTopic(t.topic + id)              // nolint: errcheck
 		notifyMsg.SetTopic(t.topic + id + "/removed") // nolint: errcheck
 		if out, err := json.Marshal(&status); err != nil {

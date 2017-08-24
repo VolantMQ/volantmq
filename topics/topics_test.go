@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 	"github.com/troian/surgemq/subscriber"
 	"github.com/troian/surgemq/topics/types"
 )
@@ -54,8 +54,8 @@ func TestTopicsSubscribeInvalidQoS(t *testing.T) {
 		prov, err := New(p.config)
 		require.NoError(t, err)
 
-		_, _, err = prov.Subscribe("test", message.QosType(3), nil, 0)
-		require.Error(t, message.ErrInvalidQoS, err.Error())
+		_, _, err = prov.Subscribe("test", packet.QosType(3), nil, 0)
+		require.Error(t, packet.ErrInvalidQoS, err.Error())
 
 		err = prov.Close()
 		require.NoError(t, err)
@@ -67,8 +67,8 @@ func TestTopicsSubscribeInvalidMessage(t *testing.T) {
 		prov, err := New(p.config)
 		require.NoError(t, err)
 
-		_, _, err = prov.Subscribe("test", message.QosType(3), nil, 0)
-		require.Error(t, message.ErrInvalidQoS, err.Error())
+		_, _, err = prov.Subscribe("test", packet.QosType(3), nil, 0)
+		require.Error(t, packet.ErrInvalidQoS, err.Error())
 
 		err = prov.Close()
 		require.NoError(t, err)
@@ -81,10 +81,10 @@ func TestTopicsSubscription(t *testing.T) {
 		require.NoError(t, err)
 
 		sub1 := &subscriber.Type{}
-		qos, _, err := prov.Subscribe("sports/tennis/+/stats", message.QoS2, sub1, 0)
+		qos, _, err := prov.Subscribe("sports/tennis/+/stats", packet.QoS2, sub1, 0)
 
 		require.NoError(t, err)
-		require.Equal(t, message.QoS2, qos)
+		require.Equal(t, packet.QoS2, qos)
 
 		err = prov.UnSubscribe("sports/tennis", sub1)
 
@@ -125,7 +125,7 @@ func TestTopicsSubscription(t *testing.T) {
 //		err = prov.Retain(msg3)
 //		require.NoError(t, err)
 //
-//		var msglist []*message.PublishMessage
+//		var msglist []*message.Publish
 //
 //		// ---
 //
@@ -186,7 +186,7 @@ func TestTopicsSubscription(t *testing.T) {
 //
 //		var messageNotifier sync.WaitGroup
 //
-//		onPublish := func(id string, msg *message.PublishMessage) {
+//		onPublish := func(id string, msg *message.Publish) {
 //			messageNotifier.Done()
 //		}
 //
@@ -228,10 +228,10 @@ func TestTopicsSubscription(t *testing.T) {
 //	}
 //}
 
-//func newPublishMessageLarge(topic string, qos message.QosType) *message.PublishMessage {
+//func newPublishMessageLarge(topic string, qos message.QosType) *message.Publish {
 //	m, _ := message.NewMessage(message.ProtocolV311, message.PUBLISH)
 //
-//	msg := m.(*message.PublishMessage)
+//	msg := m.(*message.Publish)
 //
 //	msg.SetPayload(make([]byte, 1024))
 //	msg.SetTopic(topic) // nolint: errcheck

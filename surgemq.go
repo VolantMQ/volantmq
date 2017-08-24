@@ -13,9 +13,9 @@ import (
 	"github.com/troian/surgemq/auth"
 	"github.com/troian/surgemq/clients"
 	"github.com/troian/surgemq/configuration"
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 	"github.com/troian/surgemq/persistence"
-	persistTypes "github.com/troian/surgemq/persistence/types"
+	"github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics"
 	"github.com/troian/surgemq/topics/types"
@@ -36,7 +36,7 @@ var (
 // ServerConfig configuration of the MQTT server
 type ServerConfig struct {
 	// Configuration of persistence provider
-	Persistence persistTypes.ProviderConfig
+	Persistence persistenceTypes.ProviderConfig
 
 	// OnDuplicate notify if there is attempt connect client with id that already exists and active
 	// If not not set than defaults to mock function
@@ -66,7 +66,7 @@ type ServerConfig struct {
 
 	// AllowedVersions what protocol version server will handle
 	// If not set than defaults to 0x3 and 0x04
-	AllowedVersions map[message.ProtocolVersion]bool
+	AllowedVersions map[packet.ProtocolVersion]bool
 
 	// AllowOverlappingSubscriptions tells server how to handle overlapping subscriptions from within one client
 	// if true server will send only one publish with max subscribed QoS even there are n subscriptions
@@ -93,7 +93,7 @@ type ServerConfig struct {
 func NewServerConfig() *ServerConfig {
 	return &ServerConfig{
 		Authenticators:                "mockSuccess",
-		Persistence:                   persistTypes.MemConfig{},
+		Persistence:                   persistenceTypes.MemConfig{},
 		OnDuplicate:                   func(string, bool) {},
 		OfflineQoS0:                   false,
 		AllowDuplicates:               false,
@@ -104,9 +104,9 @@ func NewServerConfig() *ServerConfig {
 		KeepAlive:                     types.DefaultKeepAlive,
 		ConnectTimeout:                types.DefaultConnectTimeout,
 		TransportStatus:               func(id string, status string) {},
-		AllowedVersions: map[message.ProtocolVersion]bool{
-			message.ProtocolV31:  true,
-			message.ProtocolV311: true,
+		AllowedVersions: map[packet.ProtocolVersion]bool{
+			packet.ProtocolV31:  true,
+			packet.ProtocolV311: true,
 		},
 	}
 }
@@ -140,7 +140,7 @@ type server struct {
 	// topicsMgr is the topics manager for keeping track of subscriptions
 	topicsMgr topicsTypes.Provider
 
-	persist persistTypes.Provider
+	persist persistenceTypes.Provider
 
 	sysTree systree.Provider
 
@@ -199,8 +199,8 @@ func NewServer(config *ServerConfig) (Server, error) {
 		return nil, err
 	}
 
-	var systemPersistence persistTypes.System
-	var systemState *persistTypes.SystemState
+	var systemPersistence persistenceTypes.System
+	var systemState *persistenceTypes.SystemState
 
 	if systemPersistence, err = s.persist.System(); err != nil {
 		return nil, err
@@ -228,7 +228,7 @@ func NewServer(config *ServerConfig) (Server, error) {
 		return nil, err
 	}
 
-	var persisRetained persistTypes.Retained
+	var persisRetained persistenceTypes.Retained
 	var retains []types.RetainObject
 	var dynPublishes []systree.DynamicValue
 
@@ -391,8 +391,8 @@ func (s *server) systreeUpdater(publishes []systree.DynamicValue, period time.Du
 		case <-s.systree.timer.C:
 			for _, m := range publishes {
 				_m := m.Publish()
-				_msg, _ := message.NewMessage(message.ProtocolV311, message.PUBLISH)
-				msg, _ := _msg.(*message.PublishMessage)
+				_msg, _ := packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
+				msg, _ := _msg.(*packet.Publish)
 
 				msg.SetPayload(_m.Payload())
 				msg.SetTopic(_m.Topic()) // nolint: errcheck

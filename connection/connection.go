@@ -18,12 +18,11 @@ import (
 	"errors"
 	"net"
 	"sync"
-
 	"time"
 
 	"github.com/troian/surgemq/auth"
 	"github.com/troian/surgemq/configuration"
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 	"github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/subscriber"
 	"github.com/troian/surgemq/systree"
@@ -57,7 +56,7 @@ type WillConfig struct {
 	Topic   string
 	Message []byte
 	Retain  bool
-	QoS     message.QosType
+	QoS     packet.QosType
 }
 
 // Config is system wide configuration parameters for every session
@@ -77,7 +76,7 @@ type Config struct {
 	SendQuota     uint16
 	Clean         bool
 	PreserveOrder bool
-	Version       message.ProtocolVersion
+	Version       packet.ProtocolVersion
 }
 
 // Type session
@@ -101,7 +100,7 @@ type Type struct {
 
 	retained struct {
 		lock sync.Mutex
-		list []*message.PublishMessage
+		list []*packet.Publish
 	}
 
 	log struct {
@@ -112,11 +111,11 @@ type Type struct {
 	sendQuota   int32
 	offlineQoS0 bool
 	clean       bool
-	version     message.ProtocolVersion
+	version     packet.ProtocolVersion
 }
 
 type unacknowledgedPublish struct {
-	msg message.Provider
+	msg packet.Provider
 }
 
 // New allocate new sessions object
@@ -190,43 +189,43 @@ func (s *Type) Start() {
 // Stop session. Function assumed to be invoked once server about to either shutdown, disconnect
 // or session is being replaced
 // Effective only first invoke
-func (s *Type) Stop(reason message.ReasonCode) {
+func (s *Type) Stop(reason packet.ReasonCode) {
 	s.onStop.Do(func() {
 		s.conn.stop(&reason)
 	})
 }
 
 func (s *Type) loadPersistence(state *persistenceTypes.SessionMessages) (err error) {
-	defer s.publisher.cond.L.Unlock()
-	s.publisher.cond.L.Lock()
+	//defer s.publisher.cond.L.Unlock()
+	//s.publisher.cond.L.Lock()
 
 	for _, d := range state.OutMessages {
-		var msg message.Provider
-		if msg, _, err = message.Decode(s.version, d); err != nil {
+		var msg packet.Provider
+		if msg, _, err = packet.Decode(s.version, d); err != nil {
 			s.log.prod.Error("Couldn't decode persisted message", zap.Error(err))
 			err = ErrPersistence
 			return
 		}
 
 		switch m := msg.(type) {
-		case *message.PublishMessage:
-			if m.QoS() == message.QoS2 && m.Dup() {
+		case *packet.Publish:
+			if m.QoS() == packet.QoS2 && m.Dup() {
 				s.log.prod.Error("3: QoS2 DUP")
 			}
 		}
 
-		s.publisher.messages.PushFront(msg)
+		s.publisher.pushFront(msg)
 	}
 
 	for _, d := range state.UnAckMessages {
-		var msg message.Provider
-		if msg, _, err = message.Decode(s.version, d); err != nil {
+		var msg packet.Provider
+		if msg, _, err = packet.Decode(s.version, d); err != nil {
 			s.log.prod.Error("Couldn't decode persisted message", zap.Error(err))
 			err = ErrPersistence
 			return
 		}
 
-		s.publisher.messages.PushFront(&unacknowledgedPublish{msg: msg})
+		s.publisher.pushFront(&unacknowledgedPublish{msg: msg})
 	}
 
 	return
@@ -239,19 +238,13 @@ func (s *Type) loadPersistence(state *persistenceTypes.SessionMessages) (err err
 // For the server, when this method is called, it means there's a message that
 // should be published to the client on the other end of this connection. So we
 // will call publish() to send the message.
-func (s *Type) onSubscribedPublish(msg *message.PublishMessage) error {
-	_m, _ := message.NewMessage(s.version, message.PUBLISH)
-	m := _m.(*message.PublishMessage)
-
-	m.SetQoS(msg.QoS())     // nolint: errcheck
-	m.SetTopic(msg.Topic()) // nolint: errcheck
-	m.SetPayload(msg.Payload())
+func (s *Type) onSubscribedPublish(msg *packet.Publish) error {
+	_m, _ := packet.NewMessage(s.version, packet.PUBLISH)
+	m := _m.(*packet.Publish)
 
 	// [MQTT-3.3.1-9]
-	m.SetRetain(false)
-
 	// [MQTT-3.3.1-3]
-	m.SetDup(false)
+	m.Set(msg.Topic(), msg.Payload(), msg.QoS(), false, false) // nolint: errcheck
 
 	s.publisher.pushBack(m)
 
@@ -259,7 +252,7 @@ func (s *Type) onSubscribedPublish(msg *message.PublishMessage) error {
 }
 
 // forward PUBLISH message to topics manager which takes care about subscribers
-func (s *Type) publishToTopic(msg *message.PublishMessage) error {
+func (s *Type) publishToTopic(msg *packet.Publish) error {
 	// [MQTT-3.3.1.3]
 	if msg.Retain() {
 		if err := s.messenger.Retain(msg); err != nil {
@@ -267,9 +260,9 @@ func (s *Type) publishToTopic(msg *message.PublishMessage) error {
 		}
 
 		// [MQTT-3.3.1-7]
-		if msg.QoS() == message.QoS0 {
-			_m, _ := message.NewMessage(s.version, message.PUBLISH)
-			m := _m.(*message.PublishMessage)
+		if msg.QoS() == packet.QoS0 {
+			_m, _ := packet.NewMessage(s.version, packet.PUBLISH)
+			m := _m.(*packet.Publish)
 			m.SetQoS(msg.QoS())     // nolint: errcheck
 			m.SetTopic(msg.Topic()) // nolint: errcheck
 			s.retained.lock.Lock()
@@ -286,9 +279,9 @@ func (s *Type) publishToTopic(msg *message.PublishMessage) error {
 }
 
 // onReleaseIn ack process for incoming messages
-func (s *Type) onReleaseIn(msg message.Provider) {
+func (s *Type) onReleaseIn(msg packet.Provider) {
 	switch m := msg.(type) {
-	case *message.PublishMessage:
+	case *packet.Publish:
 		s.publishToTopic(m) // nolint: errcheck
 	}
 }
@@ -296,12 +289,12 @@ func (s *Type) onReleaseIn(msg message.Provider) {
 // onReleaseOut process messages that required ack cycle
 // onAckTimeout if publish message has not been acknowledged withing specified ackTimeout
 // server should mark it as a dup and send again
-func (s *Type) onReleaseOut(msg message.Provider) {
+func (s *Type) onReleaseOut(msg packet.Provider) {
 	switch msg.Type() {
-	case message.PUBACK:
+	case packet.PUBACK:
 		fallthrough
-	case message.PUBCOMP:
-		id, _ := msg.PacketID()
+	case packet.PUBCOMP:
+		id, _ := msg.ID()
 		s.flowControl.release(id)
 	}
 }
@@ -314,10 +307,10 @@ func (s *Type) publishWorker() {
 
 	value := s.publisher.waitForMessage()
 	for ; value != nil; value = s.publisher.waitForMessage() {
-		var msg message.Provider
+		var msg packet.Provider
 		switch m := value.(type) {
-		case *message.PublishMessage:
-			if m.QoS() != message.QoS0 {
+		case *packet.Publish:
+			if m.QoS() != packet.QoS0 {
 				if id, err := s.flowControl.acquire(); err == nil {
 					m.SetPacketID(id)
 					s.pubOut.store(m)

@@ -14,7 +14,7 @@ import (
 
 	"github.com/troian/surgemq/auth"
 	"github.com/troian/surgemq/configuration"
-	"github.com/troian/surgemq/message"
+	"github.com/troian/surgemq/packet"
 	"github.com/troian/surgemq/persistence/types"
 	"github.com/troian/surgemq/routines"
 	"github.com/troian/surgemq/subscriber"
@@ -74,8 +74,8 @@ type Manager struct {
 
 // StartConfig used to configure session after connection is created
 type StartConfig struct {
-	Req  *message.ConnectMessage
-	Resp *message.ConnAckMessage
+	Req  *packet.Connect
+	Resp *packet.ConnAck
 	Conn net.Conn
 	Auth auth.SessionPermissions
 }
@@ -127,7 +127,7 @@ func (m *Manager) Shutdown() error {
 
 	m.sessions.Range(func(k, v interface{}) bool {
 		ses := v.(*session)
-		state := ses.stop(message.CodeServerShuttingDown)
+		state := ses.stop(packet.CodeServerShuttingDown)
 		m.persistence.StateStore([]byte(k.(string)), state) // nolint: errcheck
 		return true
 	})
@@ -154,19 +154,19 @@ func (m *Manager) NewSession(config *StartConfig) {
 
 	defer func() {
 		if err != nil {
-			var reason message.ReasonCode
+			var reason packet.ReasonCode
 			switch config.Req.Version() {
-			case message.ProtocolV50:
-				reason = message.CodeUnspecifiedError
+			case packet.ProtocolV50:
+				reason = packet.CodeUnspecifiedError
 			default:
-				reason = message.CodeRefusedServerUnavailable
+				reason = packet.CodeRefusedServerUnavailable
 			}
 			config.Resp.SetReturnCode(reason) // nolint: errcheck
 		} else {
 			config.Resp.SetSessionPresent(sessionPresent)
 
 			if idGenerated {
-				config.Resp.PropertySet(message.PropertyAssignedClientIdentifier, id) // nolint: errcheck
+				config.Resp.PropertySet(packet.PropertyAssignedClientIdentifier, id) // nolint: errcheck
 			}
 		}
 
@@ -202,13 +202,13 @@ func (m *Manager) NewSession(config *StartConfig) {
 	// if so just give reject and exit
 	select {
 	case <-m.quit:
-		var reason message.ReasonCode
+		var reason packet.ReasonCode
 		switch config.Req.Version() {
-		case message.ProtocolV50:
-			reason = message.CodeServerShuttingDown
+		case packet.ProtocolV50:
+			reason = packet.CodeServerShuttingDown
 			// TODO: if cluster route client to another node
 		default:
-			reason = message.CodeRefusedServerUnavailable
+			reason = packet.CodeRefusedServerUnavailable
 		}
 		config.Resp.SetReturnCode(reason) // nolint: errcheck
 	default:
@@ -216,7 +216,7 @@ func (m *Manager) NewSession(config *StartConfig) {
 
 	// if response has return code differs from CodeSuccess return from this point
 	// and send connack in deferred statement
-	if config.Resp.ReturnCode() != message.CodeSuccess {
+	if config.Resp.ReturnCode() != packet.CodeSuccess {
 		return
 	}
 
@@ -226,28 +226,28 @@ func (m *Manager) NewSession(config *StartConfig) {
 		idGenerated = true
 	}
 
-	config.Req.PropertyForEach(func(id message.PropertyID, val interface{}) { // nolint: errcheck
+	config.Req.PropertyForEach(func(id packet.PropertyID, val interface{}) { // nolint: errcheck
 		switch id {
-		case message.PropertySessionExpiryInterval:
+		case packet.PropertySessionExpiryInterval:
 			v := time.Duration(val.(uint32))
 			sesProperties.ExpireIn = &v
-		case message.PropertyWillDelayInterval:
+		case packet.PropertyWillDelayInterval:
 			sesProperties.WillDelay = time.Duration(val.(uint32))
-		case message.PropertyReceiveMaximum:
+		case packet.PropertyReceiveMaximum:
 			sesProperties.ReceiveMaximum = val.(uint16)
-		case message.PropertyMaximumPacketSize:
+		case packet.PropertyMaximumPacketSize:
 			sesProperties.MaximumPacketSize = val.(uint32)
-		case message.PropertyTopicAliasMaximum:
+		case packet.PropertyTopicAliasMaximum:
 			sesProperties.TopicAliasMaximum = val.(uint16)
-		case message.PropertyRequestProblemInfo:
+		case packet.PropertyRequestProblemInfo:
 			sesProperties.RequestProblemInfo = val.(bool)
-		case message.PropertyRequestResponseInfo:
+		case packet.PropertyRequestResponseInfo:
 			sesProperties.RequestResponse = val.(bool)
-		case message.PropertyUserProperty:
+		case packet.PropertyUserProperty:
 			sesProperties.UserProperties = val
-		case message.PropertyAuthMethod:
+		case packet.PropertyAuthMethod:
 			sesProperties.AuthMethod = val.(string)
-		case message.PropertyAuthData:
+		case packet.PropertyAuthData:
 			sesProperties.AuthData = val.([]byte)
 		}
 	})
@@ -260,12 +260,12 @@ func (m *Manager) NewSession(config *StartConfig) {
 	if ses != nil && !ses.toOnline() {
 		if !m.allowReplace {
 			// duplicate prohibited. send identifier rejected
-			var reason message.ReasonCode
+			var reason packet.ReasonCode
 			switch config.Req.Version() {
-			case message.ProtocolV50:
-				reason = message.CodeInvalidClientID
+			case packet.ProtocolV50:
+				reason = packet.CodeInvalidClientID
 			default:
-				reason = message.CodeRefusedIdentifierRejected
+				reason = packet.CodeRefusedIdentifierRejected
 			}
 
 			config.Resp.SetReturnCode(reason) // nolint: errcheck
@@ -275,7 +275,7 @@ func (m *Manager) NewSession(config *StartConfig) {
 			return
 		}
 		// replace allowed stop current session
-		ses.stop(message.CodeSessionTakenOver)
+		ses.stop(packet.CodeSessionTakenOver)
 		ses.release()
 		m.onReplaceAttempt(id, true)
 		ses = nil
@@ -301,10 +301,10 @@ func (m *Manager) NewSession(config *StartConfig) {
 		m.systree.Sessions().Created(id, state)
 	}
 
-	var willMsg *message.PublishMessage
+	var willMsg *packet.Publish
 	if willTopic, willPayload, willQoS, willRetain, will := config.Req.Will(); will {
-		_m, _ := message.NewMessage(config.Req.Version(), message.PUBLISH)
-		willMsg = _m.(*message.PublishMessage)
+		_m, _ := packet.NewMessage(config.Req.Version(), packet.PUBLISH)
+		willMsg = _m.(*packet.Publish)
 		willMsg.SetQoS(willQoS)     // nolint: errcheck
 		willMsg.SetTopic(willTopic) // nolint: errcheck
 		willMsg.SetPayload(willPayload)
@@ -352,7 +352,7 @@ func (m *Manager) NewSession(config *StartConfig) {
 	}
 }
 
-func (m *Manager) getSubscriber(id string, clean bool, v message.ProtocolVersion) (subscriber.ConnectionProvider, *persistenceTypes.SessionMessages, bool) {
+func (m *Manager) getSubscriber(id string, clean bool, v packet.ProtocolVersion) (subscriber.ConnectionProvider, *persistenceTypes.SessionMessages, bool) {
 	var sub subscriber.ConnectionProvider
 	var state *persistenceTypes.SessionMessages
 	present := false
@@ -405,7 +405,7 @@ func (m *Manager) onSessionPersist(id string, state *persistenceTypes.SessionMes
 	m.persistence.MessagesStore([]byte(id), state) // nolint: errcheck
 }
 
-func (m *Manager) onClientDisconnect(id string, clean bool, reason message.ReasonCode) {
+func (m *Manager) onClientDisconnect(id string, clean bool, reason packet.ReasonCode) {
 	m.systree.Clients().Disconnected(id, reason, clean)
 }
 
@@ -467,7 +467,7 @@ func (m *Manager) loadSessions() error {
 				clean:        false,
 			})
 			if err == nil {
-				m.sessions.Store(id, ses)
+				m.sessions.Store(string(id), ses)
 				m.sessionsCount.Add(1)
 
 				setup := &setupConfig{
@@ -476,8 +476,8 @@ func (m *Manager) loadSessions() error {
 				}
 
 				if state.Will != nil {
-					msg, _, _ := message.Decode(state.Version, state.Will.Message)
-					willMsg, _ := msg.(*message.PublishMessage)
+					msg, _, _ := packet.Decode(state.Version, state.Will.Message)
+					willMsg, _ := msg.(*packet.Publish)
 					setup.will = willMsg
 					setup.willDelay = state.Will.Delay
 				}
@@ -497,7 +497,7 @@ func (m *Manager) loadSessions() error {
 func (m *Manager) loadSubscribers() error {
 	// load sessions owning subscriptions
 	type subscriberConfig struct {
-		version message.ProtocolVersion
+		version packet.ProtocolVersion
 		topics  subscriber.Subscriptions
 	}
 	subs := map[string]subscriberConfig{}
@@ -505,11 +505,11 @@ func (m *Manager) loadSubscribers() error {
 	err := m.persistence.SubscriptionsIterate(func(id []byte, data []byte) error {
 		subscriptions := subscriber.Subscriptions{}
 		offset := 0
-		version := message.ProtocolVersion(data[offset])
+		version := packet.ProtocolVersion(data[offset])
 		offset++
 		remaining := len(data) - 1
 		for offset != remaining {
-			t, total, e := message.ReadLPBytes(data[offset:])
+			t, total, e := packet.ReadLPBytes(data[offset:])
 			if e != nil {
 				return e
 			}
@@ -518,7 +518,7 @@ func (m *Manager) loadSubscribers() error {
 
 			params := &subscriber.SubscriptionParams{}
 
-			params.Requested = message.SubscriptionOptions(data[offset])
+			params.Requested = packet.SubscriptionOptions(data[offset])
 			offset++
 
 			params.ID = binary.BigEndian.Uint32(data[offset:])
@@ -592,7 +592,7 @@ func (m *Manager) storeSubscribers() error {
 		offset++
 
 		for s, params := range topics {
-			total, _ := message.WriteLPBytes(buf[offset:], []byte(s))
+			total, _ := packet.WriteLPBytes(buf[offset:], []byte(s))
 			offset += total
 			buf[offset] = byte(params.Requested)
 			offset++
@@ -610,7 +610,7 @@ func (m *Manager) storeSubscribers() error {
 	return nil
 }
 
-func (m *Manager) onPublish(id string, msg *message.PublishMessage) {
+func (m *Manager) onPublish(id string, msg *packet.Publish) {
 	msg.SetPacketID(0)
 	sz, err := msg.Size()
 	if err != nil {
