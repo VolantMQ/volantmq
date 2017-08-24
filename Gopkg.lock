@@ -104,6 +104,12 @@
   version = "v1.1.4"
 
 [[projects]]
+  branch = "master"
+  name = "github.com/troian/omap"
+  packages = ["."]
+  revision = "bf92c506ddb0f2cc90f2ed8aab7dad6dce349194"
+
+[[projects]]
   name = "go.uber.org/atomic"
   packages = ["."]
   revision = "4e336646b2ef9fc6e47be8e21594178f98e5ebcf"
@@ -148,6 +154,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "3dfc576bfde50215e5a5fb308014e7317403758b254876f682f9b59336806c2d"
+  inputs-digest = "ff53b5f9fcbd74c1a6d7008101ed8b2f5145a7ffc9c6fc7e77ee659993d4a1f7"
   solver-name = "gps-cdcl"
   solver-version = 1

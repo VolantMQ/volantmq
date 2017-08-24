@@ -1,1 +1,0 @@
-Many thanks to https://github.com/cevaris/ordered_map

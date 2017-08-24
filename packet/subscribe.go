@@ -17,7 +17,7 @@ package packet
 import (
 	"unicode/utf8"
 
-	"github.com/troian/surgemq/map"
+	"github.com/troian/omap"
 )
 
 // Subscribe The SUBSCRIBE Packet is sent from the Client to the Server to create one or more

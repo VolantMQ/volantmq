@@ -17,7 +17,7 @@ package packet
 import (
 	"unicode/utf8"
 
-	"github.com/troian/surgemq/map"
+	"github.com/troian/omap"
 )
 
 // UnSubscribe An UNSUBSCRIBE Packet is sent by the Client to the Server, to unsubscribe from topics.
