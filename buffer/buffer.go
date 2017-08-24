@@ -42,9 +42,9 @@ const (
 	// DefaultBufferSize buffer size created by default
 	DefaultBufferSize = 1024 * 256
 	// DefaultReadBlockSize default read block size
-	DefaultReadBlockSize = 8192
+	DefaultReadBlockSize = 1500
 	// DefaultWriteBlockSize default write block size
-	DefaultWriteBlockSize = 8192
+	DefaultWriteBlockSize = 1500
 )
 
 type sequence struct {

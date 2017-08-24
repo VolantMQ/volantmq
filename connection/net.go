@@ -269,10 +269,6 @@ func (s *netConn) processIncoming() {
 		case *message.UnSubscribeMessage:
 			resp, _ = s.config.on.unSubscribe(m)
 			_, err = s.WriteMessage(resp, false)
-		//case *message.UnSubAckMessage:
-		//	// For UNSUBACK message, we should send to ack queue
-		//	s.config.ackQueues.unSubAck.Ack(msg) // nolint: errcheck
-		//	s.processAcked(s.config.ackQueues.unSubAck)
 		case *message.PingReqMessage:
 			// For PINGREQ message, we should send back PINGRESP
 			mR, _ := message.NewMessage(s.config.protoVersion, message.PINGRESP)
@@ -465,17 +461,6 @@ func (s *netConn) WriteMessage(msg message.Provider, lastMessage bool) (int, err
 		close(s.done)
 	}
 
-	// FIXME: Try to find a better way than a mutex...if possible.
-	// This is to serialize writes to the underlying buffer. Multiple goroutines could
-	// potentially get here because of calling Publish() or Subscribe() or other
-	// functions that will send messages. For example, if a message is received in
-	// another connection, and the message needs to be published to this client, then
-	// the Publish() function is called, and at the same time, another client could
-	// do exactly the same thing.
-	//
-	// Not an ideal fix though. If possible we should remove mutex and be lockfree.
-	// Mainly because when there's a large number of goroutines that want to publish
-	// to this client, then they will all block. However, this will do for now.
 	defer s.wmu.Unlock()
 	s.wmu.Lock()
 
@@ -486,9 +471,7 @@ func (s *netConn) WriteMessage(msg message.Provider, lastMessage bool) (int, err
 	var total int
 	var err error
 
-	total, err = message.WriteToBuffer(msg, s.out)
-
-	if err == nil {
+	if total, err = message.WriteToBuffer(msg, s.out); err == nil {
 		s.config.packetsMetric.Sent(msg.Type())
 	}
 

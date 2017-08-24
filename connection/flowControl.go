@@ -12,15 +12,23 @@ type packetsFlowControl struct {
 	counter       uint64
 	quit          chan struct{}
 	cond          *sync.Cond
-	lock          sync.Mutex
 	inUse         map[message.PacketID]bool
 	sendQuota     int32
 	preserveOrder bool
 }
 
+func newFlowControl(quit chan struct{}, preserveOrder bool) *packetsFlowControl {
+	return &packetsFlowControl{
+		inUse:         make(map[message.PacketID]bool),
+		cond:          sync.NewCond(new(sync.Mutex)),
+		quit:          quit,
+		preserveOrder: preserveOrder,
+	}
+}
+
 func (s *packetsFlowControl) acquire() (message.PacketID, error) {
-	defer s.lock.Unlock()
-	s.lock.Lock()
+	defer s.cond.L.Unlock()
+	s.cond.L.Lock()
 
 	if (s.preserveOrder && !atomic.CompareAndSwapInt32(&s.sendQuota, 0, 1)) ||
 		(atomic.AddInt32(&s.sendQuota, -1) == 0) {
@@ -71,7 +79,7 @@ func (s *packetsFlowControl) release(id message.PacketID) {
 		s.cond.Signal()
 	}()
 
-	defer s.lock.Unlock()
-	s.lock.Lock()
+	defer s.cond.L.Unlock()
+	s.cond.L.Lock()
 	delete(s.inUse, id)
 }

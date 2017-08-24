@@ -15,7 +15,6 @@
 package connection
 
 import (
-	"container/list"
 	"errors"
 	"net"
 	"sync"
@@ -86,12 +85,12 @@ type Type struct {
 	conn             *netConn
 	pubIn            *ackQueue
 	pubOut           *ackQueue
+	publisher        *publisher
+	flowControl      *packetsFlowControl
 	onDisconnect     onDisconnect
 	subscriber       subscriber.ConnectionProvider
 	messenger        types.TopicMessenger
 	auth             auth.SessionPermissions
-	publisher        publisher
-	flowControl      packetsFlowControl
 	id               string
 	username         string
 	quit             chan struct{}
@@ -136,18 +135,11 @@ func New(c *Config) (s *Type, err error) {
 	}
 
 	s.started.Add(1)
+	s.publisher = newPublisher(s.quit)
+	s.flowControl = newFlowControl(s.quit, c.PreserveOrder)
 
 	s.log.prod = configuration.GetProdLogger().Named("connection." + s.id)
 	s.log.dev = configuration.GetDevLogger().Named("connection." + s.id)
-
-	s.publisher.messages = list.New()
-	s.publisher.cond = sync.NewCond(&s.publisher.lock)
-	s.publisher.quit = s.quit
-
-	s.flowControl.inUse = make(map[message.PacketID]bool)
-	s.flowControl.cond = sync.NewCond(&s.flowControl.lock)
-	s.flowControl.quit = s.quit
-	s.flowControl.preserveOrder = c.PreserveOrder
 
 	// publisher queue is ready, assign to subscriber new online callback
 	// and signal it to forward messages to online callback by creating channel
@@ -205,19 +197,8 @@ func (s *Type) Stop(reason message.ReasonCode) {
 }
 
 func (s *Type) loadPersistence(state *persistenceTypes.SessionMessages) (err error) {
-	defer s.publisher.lock.Unlock()
-	s.publisher.lock.Lock()
-
-	for _, d := range state.UnAckMessages {
-		var msg message.Provider
-		if msg, _, err = message.Decode(s.version, d); err != nil {
-			s.log.prod.Error("Couldn't decode persisted message", zap.Error(err))
-			err = ErrPersistence
-			return
-		}
-
-		s.publisher.messages.PushFront(&unacknowledgedPublish{msg: msg})
-	}
+	defer s.publisher.cond.L.Unlock()
+	s.publisher.cond.L.Lock()
 
 	for _, d := range state.OutMessages {
 		var msg message.Provider
@@ -234,7 +215,18 @@ func (s *Type) loadPersistence(state *persistenceTypes.SessionMessages) (err err
 			}
 		}
 
-		s.publisher.messages.PushBack(msg)
+		s.publisher.messages.PushFront(msg)
+	}
+
+	for _, d := range state.UnAckMessages {
+		var msg message.Provider
+		if msg, _, err = message.Decode(s.version, d); err != nil {
+			s.log.prod.Error("Couldn't decode persisted message", zap.Error(err))
+			err = ErrPersistence
+			return
+		}
+
+		s.publisher.messages.PushFront(&unacknowledgedPublish{msg: msg})
 	}
 
 	return
@@ -261,10 +253,7 @@ func (s *Type) onSubscribedPublish(msg *message.PublishMessage) error {
 	// [MQTT-3.3.1-3]
 	m.SetDup(false)
 
-	s.publisher.lock.Lock()
-	s.publisher.messages.PushBack(m)
-	s.publisher.lock.Unlock()
-	s.publisher.cond.Signal()
+	s.publisher.pushBack(m)
 
 	return nil
 }
@@ -321,41 +310,20 @@ func (s *Type) onReleaseOut(msg message.Provider) {
 func (s *Type) publishWorker() {
 	//defer s.Stop(message.CodeSuccess)
 	defer s.publisher.stopped.Done()
-
 	s.publisher.started.Done()
 
-	for {
-		if s.publisher.isDone() {
-			return
-		}
-
-		s.publisher.cond.L.Lock()
-		for s.publisher.messages.Len() == 0 {
-			s.publisher.cond.Wait()
-			if s.publisher.isDone() {
-				s.publisher.cond.L.Unlock()
-				return
-			}
-		}
-
+	value := s.publisher.waitForMessage()
+	for ; value != nil; value = s.publisher.waitForMessage() {
 		var msg message.Provider
-		elem := s.publisher.messages.Front()
-		//msg = elem.Value.(*message.PublishMessage)
-		s.publisher.messages.Remove(elem)
-		s.publisher.cond.L.Unlock()
-
-		switch m := elem.Value.(type) {
+		switch m := value.(type) {
 		case *message.PublishMessage:
 			if m.QoS() != message.QoS0 {
-				//var id message.PacketID
 				if id, err := s.flowControl.acquire(); err == nil {
 					m.SetPacketID(id)
 					s.pubOut.store(m)
 				} else {
 					// if acquire id returned error session is about to exit. Queue message back and get away
-					s.publisher.cond.L.Lock()
-					s.publisher.messages.PushBack(m)
-					s.publisher.cond.L.Unlock()
+					s.publisher.pushBack(m)
 					return
 				}
 			}

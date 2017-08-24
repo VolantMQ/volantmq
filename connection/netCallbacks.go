@@ -96,9 +96,7 @@ func (s *Type) onConnectionClose(will bool) {
 		s.publisher.stopped.Wait()
 
 		if !s.clean {
-			s.publisher.lock.Lock()
 			params.State = s.getState()
-			s.publisher.lock.Unlock()
 		}
 
 		// [MQTT-3.3.1-7]
@@ -253,7 +251,6 @@ func (s *Type) onSubscribe(msg *message.SubscribeMessage) error {
 	resp.SetPacketID(id)
 
 	var retCodes []message.ReasonCode
-
 	var retainedMessages []*message.PublishMessage
 
 	iter := msg.Topics().Iterator()
@@ -292,7 +289,6 @@ func (s *Type) onSubscribe(msg *message.SubscribeMessage) error {
 			reason = message.ReasonCode(rQoS)
 			retainedMessages = append(retainedMessages, retained...)
 		}
-		//}
 
 		retCodes = append(retCodes, reason)
 
@@ -334,10 +330,7 @@ func (s *Type) onSubscribe(msg *message.SubscribeMessage) error {
 		msg.SetPayload(rm.Payload())
 		msg.SetTopic(rm.Topic()) // nolint: errcheck
 
-		s.publisher.lock.Lock()
-		s.publisher.messages.PushBack(m)
-		s.publisher.lock.Unlock()
-		s.publisher.cond.Signal()
+		s.publisher.pushBack(m)
 	}
 
 	return nil
@@ -372,7 +365,6 @@ func (s *Type) onUnSubscribe(msg *message.UnSubscribeMessage) (*message.UnSubAck
 
 	id, _ := msg.PacketID()
 	resp.SetPacketID(id)
-
 	resp.AddReturnCodes(retCodes) // nolint: errcheck
 
 	return resp, nil
