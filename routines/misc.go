@@ -116,9 +116,3 @@ func WriteMessageBuffer(c io.Closer, b []byte) error {
 	_, err := conn.Write(b)
 	return err
 }
-
-// Copied from http://golang.org/src/pkg/net/timeout_test.go
-//func isTimeout(err error) bool {
-//	e, ok := err.(net.Error)
-//	return ok && e.Timeout()
-//}

@@ -105,6 +105,12 @@
 
 [[projects]]
   branch = "master"
+  name = "github.com/troian/goring"
+  packages = ["."]
+  revision = "f23b2d237abc4603ebeb2509c2cf1907debdf83f"
+
+[[projects]]
+  branch = "master"
   name = "github.com/troian/omap"
   packages = ["."]
   revision = "bf92c506ddb0f2cc90f2ed8aab7dad6dce349194"
@@ -154,6 +160,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "ff53b5f9fcbd74c1a6d7008101ed8b2f5145a7ffc9c6fc7e77ee659993d4a1f7"
+  inputs-digest = "79d21ebc8b01ced112de19100ca600001e9e62e84ceddc6efc2fe21118ac8a63"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -115,6 +115,8 @@ func (c *baseConfig) handleConnection(conn conn) {
 			}
 		}
 	} else {
+		// Disable read deadline. Will set it later if keep-alive interval is bigger than 0
+		conn.SetReadDeadline(time.Time{}) // nolint: errcheck
 		switch r := req.(type) {
 		case *packet.Connect:
 			m, _ := packet.NewMessage(req.Version(), packet.CONNACK)

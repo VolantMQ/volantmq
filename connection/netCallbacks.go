@@ -29,9 +29,6 @@ func (s *Type) getState() *persistenceTypes.SessionMessages {
 	outMessages := [][]byte{}
 	unAckMessages := [][]byte{}
 
-	//messages := s.publisher.messages.GetAll()
-
-	//for _, v := range messages {
 	var next *list.Element
 	for elem := s.publisher.messages.Front(); elem != nil; elem = next {
 		next = elem.Next()
@@ -258,7 +255,7 @@ func (s *Type) onSubscribe(msg *packet.Subscribe) error {
 		t := kv.Key.(string)
 		ops := kv.Value.(packet.SubscriptionOptions)
 
-		reason := packet.CodeSuccess
+		reason := packet.CodeSuccess // nolint: ineffassign
 		//authorized := true
 		// TODO: check permissions here
 

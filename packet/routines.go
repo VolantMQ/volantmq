@@ -3,11 +3,11 @@ package packet
 import (
 	"encoding/binary"
 
-	"github.com/troian/surgemq/buffer"
+	"github.com/troian/goring"
 )
 
 // WriteToBuffer encode and send message into ring buffer
-func WriteToBuffer(msg Provider, to *buffer.Type) (int, error) {
+func WriteToBuffer(msg Provider, to *goring.Buffer) (int, error) {
 	expectedSize, err := msg.Size()
 	if err != nil {
 		return 0, err
@@ -38,14 +38,10 @@ func ReadLPBytes(buf []byte) ([]byte, int, error) {
 	n = int(binary.BigEndian.Uint16(buf))
 	total += 2
 
-	if len(buf[total:]) < n {
-		return nil, total, ErrInsufficientDataSize
-	}
-
 	// Check for malformed length-prefixed field
 	// if remaining space is less than length-prefixed size the packet seems to be broken
 	if len(buf[total:]) < n {
-		return nil, total, ErrInvalidLength
+		return nil, total, ErrInsufficientDataSize
 	}
 
 	total += n

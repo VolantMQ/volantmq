@@ -9,7 +9,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/troian/surgemq/buffer"
+	"github.com/troian/goring"
 	"github.com/troian/surgemq/configuration"
 	"github.com/troian/surgemq/packet"
 	"github.com/troian/surgemq/systree"
@@ -41,7 +41,7 @@ type netConfig struct {
 	on onProcess
 
 	// Conn is network connection
-	conn io.Closer
+	conn net.Conn
 
 	// PacketsMetric interface to metric packets
 	packetsMetric systree.PacketsMetric
@@ -56,14 +56,33 @@ type netConfig struct {
 	protoVersion packet.ProtocolVersion
 }
 
+type keepAlive struct {
+	period time.Duration
+	conn   net.Conn
+	timer  *time.Timer
+}
+
+func (k *keepAlive) Read(b []byte) (int, error) {
+	if k.period > 0 {
+		if !k.timer.Stop() {
+			<-k.timer.C
+		}
+		k.timer.Reset(k.period)
+	}
+	return k.conn.Read(b)
+}
+
 // netConn implementation of the connection
 type netConn struct {
 	// Incoming data buffer. Bytes are read from the connection and put in here
-	in *buffer.Type
-
-	// Outgoing data buffer. Bytes written here are in turn written out to the connection
-	out    *buffer.Type
+	in     *goring.Buffer
 	config *netConfig
+
+	sendTicker    *time.Timer
+	currLock      sync.Mutex
+	currOutBuffer net.Buffers
+	outBuffers    chan net.Buffers
+	keepAlive     keepAlive
 
 	// Wait for the various goroutines to finish starting and stopping
 	wg struct {
@@ -85,19 +104,8 @@ type netConn struct {
 	// Quit signal for determining when this service should end. If channel is closed, then exit
 	expireIn *time.Duration
 	done     chan struct{}
-	wmu      sync.Mutex
 	onStop   types.Once
 	will     bool
-}
-
-type netReader interface {
-	io.Reader
-	SetReadDeadline(t time.Time) error
-}
-
-type timeoutReader struct {
-	d    time.Duration
-	conn netReader
 }
 
 // newNet connection
@@ -109,10 +117,14 @@ func newNet(config *netConfig) (f *netConn, err error) {
 	}()
 
 	f = &netConn{
-		config: config,
-		done:   make(chan struct{}),
-		will:   true,
+		config:     config,
+		done:       make(chan struct{}),
+		will:       true,
+		outBuffers: make(chan net.Buffers, 5),
+		sendTicker: time.NewTimer(5 * time.Millisecond),
 	}
+
+	f.sendTicker.Stop()
 
 	f.log.prod = configuration.GetProdLogger().Named("session.conn." + config.id)
 	f.log.dev = configuration.GetDevLogger().Named("session.conn." + config.id)
@@ -121,15 +133,16 @@ func newNet(config *netConfig) (f *netConn, err error) {
 	f.wg.conn.stopped.Add(1)
 
 	// Create the incoming ring buffer
-	f.in, err = buffer.New(buffer.DefaultBufferSize)
+	f.in, err = goring.New(goring.DefaultBufferSize)
 	if err != nil {
 		return nil, err
 	}
 
-	// Create the outgoing ring buffer
-	f.out, err = buffer.New(buffer.DefaultBufferSize)
-	if err != nil {
-		return nil, err
+	f.keepAlive.conn = f.config.conn
+
+	if f.config.keepAlive > 0 {
+		f.keepAlive.period = time.Second * time.Duration(f.config.keepAlive)
+		f.keepAlive.period = f.keepAlive.period + (f.keepAlive.period / 2)
 	}
 
 	return f, nil
@@ -139,7 +152,11 @@ func newNet(config *netConfig) (f *netConn, err error) {
 func (s *netConn) start() {
 	defer s.wg.conn.started.Done()
 
-	s.wg.routines.stopped.Add(3)
+	if s.keepAlive.period > 0 {
+		s.wg.routines.stopped.Add(4)
+	} else {
+		s.wg.routines.stopped.Add(3)
+	}
 
 	// these routines must start in specified order
 	// and next proceed next one only when previous finished
@@ -150,6 +167,12 @@ func (s *netConn) start() {
 	s.wg.routines.started.Add(1)
 	go s.processIncoming()
 	s.wg.routines.started.Wait()
+
+	if s.keepAlive.period > 0 {
+		s.wg.routines.started.Add(1)
+		go s.readTimeOutWorker()
+		s.wg.routines.started.Wait()
+	}
 
 	s.wg.routines.started.Add(1)
 	go s.receiver()
@@ -183,9 +206,7 @@ func (s *netConn) stop(reason *packet.ReasonCode) {
 			s.log.prod.Error("close input buffer error", zap.String("ClientID", s.config.id), zap.Error(err))
 		}
 
-		if err := s.out.Close(); err != nil {
-			s.log.prod.Error("close output buffer error", zap.String("ClientID", s.config.id), zap.Error(err))
-		}
+		s.sendTicker.Stop()
 
 		// Wait for all the connection goroutines are finished
 		s.wg.routines.stopped.Wait()
@@ -194,14 +215,6 @@ func (s *netConn) stop(reason *packet.ReasonCode) {
 
 		s.config.on.disconnect(s.will)
 	})
-}
-
-// Read
-func (r timeoutReader) Read(b []byte) (int, error) {
-	if err := r.conn.SetReadDeadline(time.Now().Add(r.d)); err != nil {
-		return 0, err
-	}
-	return r.conn.Read(b)
 }
 
 // isDone
@@ -314,45 +327,61 @@ func (s *netConn) processIncoming() {
 	}
 }
 
+func (s *netConn) readTimeOutWorker() {
+	defer s.onRoutineReturn()
+
+	s.keepAlive.timer = time.NewTimer(s.keepAlive.period)
+	s.wg.routines.started.Done()
+
+	select {
+	case <-s.keepAlive.timer.C:
+		s.log.prod.Error("Keep alive timed out")
+		return
+	case <-s.done:
+		s.keepAlive.timer.Stop()
+		return
+	}
+}
+
 // receiver reads data from the network, and writes the data into the incoming buffer
 func (s *netConn) receiver() {
 	defer s.onRoutineReturn()
 
 	s.wg.routines.started.Done()
 
-	switch conn := s.config.conn.(type) {
-	case net.Conn:
-		keepAlive := time.Second * time.Duration(s.config.keepAlive)
-		r := timeoutReader{
-			d:    keepAlive + (keepAlive / 2),
-			conn: conn,
-		}
-
-		for {
-			if _, err := s.in.ReadFrom(r); err != nil {
-				return
-			}
-		}
-	default:
-		s.log.prod.Error("Invalid connection type", zap.String("ClientID", s.config.id))
-	}
+	s.in.ReadFrom(&s.keepAlive) // nolint: errcheck
 }
 
 // sender writes data from the outgoing buffer to the network
 func (s *netConn) sender() {
 	defer s.onRoutineReturn()
-
 	s.wg.routines.started.Done()
 
-	switch conn := s.config.conn.(type) {
-	case net.Conn:
-		for {
-			if _, err := s.out.WriteTo(conn); err != nil {
+	for {
+		bufs := net.Buffers{}
+		select {
+		case <-s.sendTicker.C:
+			s.currLock.Lock()
+			s.outBuffers <- s.currOutBuffer
+			s.currOutBuffer = net.Buffers{}
+			s.currLock.Unlock()
+		case buf, ok := <-s.outBuffers:
+			s.sendTicker.Stop()
+			if !ok {
+				return
+			}
+			bufs = buf
+		case <-s.done:
+			s.sendTicker.Stop()
+			close(s.outBuffers)
+			return
+		}
+
+		if len(bufs) > 0 {
+			if _, err := bufs.WriteTo(s.config.conn); err != nil {
 				return
 			}
 		}
-	default:
-		s.log.prod.Error("Invalid connection type", zap.String("ClientID", s.config.id))
 	}
 }
 
@@ -364,7 +393,7 @@ func (s *netConn) peekMessageSize() (packet.Type, int, error) {
 	cnt := 2
 
 	if s.in == nil {
-		err = buffer.ErrNotReady
+		err = goring.ErrNotReady
 		return 0, 0, err
 	}
 
@@ -420,7 +449,7 @@ func (s *netConn) readMessage(total int) (packet.Provider, int, error) {
 	var msg packet.Provider
 
 	if s.in == nil {
-		err = buffer.ErrNotReady
+		err = goring.ErrNotReady
 		return nil, 0, err
 	}
 
@@ -445,7 +474,7 @@ func (s *netConn) readMessage(total int) (packet.Provider, int, error) {
 		s.log.prod.Error("Incoming and outgoing length does not match",
 			zap.Int("in", total),
 			zap.Int("out", dTotal))
-		return nil, 0, buffer.ErrNotReady
+		return nil, 0, goring.ErrNotReady
 	}
 
 	return msg, n, err
@@ -454,26 +483,37 @@ func (s *netConn) readMessage(total int) (packet.Provider, int, error) {
 // WriteMessage writes a message to the outgoing buffer
 func (s *netConn) WriteMessage(msg packet.Provider, lastMessage bool) (int, error) {
 	if s.isDone() {
-		return 0, buffer.ErrNotReady
+		return 0, goring.ErrNotReady
 	}
 
 	if lastMessage {
 		close(s.done)
 	}
 
-	defer s.wmu.Unlock()
-	s.wmu.Lock()
-
-	if s.out == nil {
-		return 0, buffer.ErrNotReady
-	}
-
 	var total int
-	var err error
 
-	if total, err = packet.WriteToBuffer(msg, s.out); err == nil {
-		s.config.packetsMetric.Sent(msg.Type())
+	expectedSize, err := msg.Size()
+	if err != nil {
+		return 0, err
 	}
+
+	buf := make([]byte, expectedSize)
+	total, err = msg.Encode(buf)
+	if err != nil {
+		return 0, err
+	}
+
+	s.currLock.Lock()
+	s.currOutBuffer = append(s.currOutBuffer, buf)
+	if len(s.currOutBuffer) == 1 {
+		s.sendTicker.Reset(1 * time.Millisecond)
+	}
+
+	if len(s.currOutBuffer) == 10 {
+		s.outBuffers <- s.currOutBuffer
+		s.currOutBuffer = net.Buffers{}
+	}
+	s.currLock.Unlock()
 
 	return total, err
 }

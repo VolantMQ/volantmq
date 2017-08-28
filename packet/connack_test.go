@@ -18,7 +18,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/troian/surgemq/buffer"
+	"github.com/troian/goring"
 )
 
 func TestConnAckMessageFields(t *testing.T) {
@@ -184,7 +184,7 @@ func TestConnAckEncodeEnsureSize(t *testing.T) {
 }
 
 func TestConnAckCodeWrite(t *testing.T) {
-	buf, err := buffer.New(16384)
+	buf, err := goring.New(16384)
 	require.NoError(t, err)
 
 	buf.ExternalBuf = make([]byte, 1)

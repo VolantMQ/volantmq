@@ -29,6 +29,7 @@ import (
 	"go.uber.org/zap"
 
 	_ "net/http/pprof"
+	"runtime"
 	_ "runtime/debug"
 )
 
@@ -44,7 +45,7 @@ func main() {
 	var err error
 
 	logger.Info("Starting application")
-
+	logger.Info("Allocated cores", zap.Int("GOMAXPROCS", runtime.GOMAXPROCS(0)))
 	viper.SetConfigName("config")
 	viper.AddConfigPath("conf")
 	viper.SetConfigType("json")
@@ -119,17 +120,19 @@ func main() {
 		logger.Error("Couldn't start listener", zap.Error(err))
 	}
 
-	configWs := transport.NewConfigWS(
-		&transport.Config{
-			Port:        8080,
-			AuthManager: authMng,
-		})
-
-	if err = srv.ListenAndServe(configWs); err != nil {
-		logger.Error("Couldn't start listener", zap.Error(err))
-	}
+	//configWs := transport.NewConfigWS(
+	//	&transport.Config{
+	//		Port:        8080,
+	//		AuthManager: authMng,
+	//	})
+	//
+	//if err = srv.ListenAndServe(configWs); err != nil {
+	//	logger.Error("Couldn't start listener", zap.Error(err))
+	//}
 
 	go func() {
+		runtime.SetBlockProfileRate(1)
+		runtime.SetMutexProfileFraction(1)
 		logger.Info(http.ListenAndServe("localhost:6061", nil).Error())
 	}()
 
