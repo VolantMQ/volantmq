@@ -18,7 +18,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/troian/goring"
 )
 
 func TestConnAckMessageFields(t *testing.T) {
@@ -184,13 +183,7 @@ func TestConnAckEncodeEnsureSize(t *testing.T) {
 }
 
 func TestConnAckCodeWrite(t *testing.T) {
-	buf, err := goring.New(16384)
-	require.NoError(t, err)
-
-	buf.ExternalBuf = make([]byte, 1)
-
-	var m Provider
-	m, err = NewMessage(ProtocolV311, CONNACK)
+	m, err := NewMessage(ProtocolV311, CONNACK)
 	require.NoError(t, err)
 
 	msg, ok := m.(*ConnAck)
@@ -199,6 +192,11 @@ func TestConnAckCodeWrite(t *testing.T) {
 	err = msg.SetReturnCode(CodeSuccess)
 	require.NoError(t, err)
 
-	_, err = WriteToBuffer(msg, buf)
+	var sz int
+	sz, err = msg.Size()
+	require.NoError(t, err)
+
+	buf := make([]byte, sz)
+	_, err = msg.Encode(buf)
 	require.NoError(t, err)
 }

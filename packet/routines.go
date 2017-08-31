@@ -2,28 +2,26 @@ package packet
 
 import (
 	"encoding/binary"
-
-	"github.com/troian/goring"
 )
 
 // WriteToBuffer encode and send message into ring buffer
-func WriteToBuffer(msg Provider, to *goring.Buffer) (int, error) {
-	expectedSize, err := msg.Size()
-	if err != nil {
-		return 0, err
-	}
-
-	if len(to.ExternalBuf) < expectedSize {
-		to.ExternalBuf = make([]byte, expectedSize)
-	}
-
-	total, err := msg.Encode(to.ExternalBuf)
-	if err != nil {
-		return 0, err
-	}
-
-	return to.Send([][]byte{to.ExternalBuf[:total]})
-}
+//func WriteToBuffer(msg Provider, to *goring.Buffer) (int, error) {
+//	expectedSize, err := msg.Size()
+//	if err != nil {
+//		return 0, err
+//	}
+//
+//	if len(to.ExternalBuf) < expectedSize {
+//		to.ExternalBuf = make([]byte, expectedSize)
+//	}
+//
+//	total, err := msg.Encode(to.ExternalBuf)
+//	if err != nil {
+//		return 0, err
+//	}
+//
+//	return to.Send([][]byte{to.ExternalBuf[:total]})
+//}
 
 // ReadLPBytes read length prefixed bytes
 func ReadLPBytes(buf []byte) ([]byte, int, error) {
