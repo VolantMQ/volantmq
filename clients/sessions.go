@@ -89,21 +89,22 @@ func NewManager(c *Config) (*Manager, error) {
 		allowReplace:     c.AllowReplace,
 		offlineQoS0:      c.OfflineQoS0,
 		quit:             make(chan struct{}),
-		//sessions:         make(map[string]*session),
-		//subscribers: make(map[string]subscriber.ConnectionProvider),
-		log: configuration.GetProdLogger().Named("sessions"),
+		log:              configuration.GetProdLogger().Named("sessions"),
 	}
 
 	m.persistence, _ = c.Persist.Sessions()
 
+	var err error
+
 	m.log.Info("Loading sessions. Might take a while")
+
 	// load sessions for fill systree
 	// those sessions having either will delay or expire are created with and timer started
-	if err := m.loadSessions(); err != nil {
+	if err = m.loadSessions(); err != nil {
 		return nil, err
 	}
 
-	if err := m.loadSubscribers(); err != nil {
+	if err = m.loadSubscribers(); err != nil {
 		return nil, err
 	}
 

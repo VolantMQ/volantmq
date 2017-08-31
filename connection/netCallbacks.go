@@ -30,23 +30,23 @@ func (s *Type) getState() *persistenceTypes.SessionMessages {
 	unAckMessages := [][]byte{}
 
 	var next *list.Element
-	for elem := s.publisher.messages.Front(); elem != nil; elem = next {
+	for elem := s.tx.messages.Front(); elem != nil; elem = next {
 		next = elem.Next()
-		switch m := s.publisher.messages.Remove(elem).(type) {
+		switch m := s.tx.messages.Remove(elem).(type) {
 		case *packet.Publish:
 			qos := m.QoS()
 			if qos != packet.QoS0 || (s.offlineQoS0 && qos == packet.QoS0) {
 				// make sure message has some IDType to prevent encode error
 				m.SetPacketID(0)
 				if buf, err := encodeMessage(m); err != nil {
-					s.log.prod.Error("Couldn't encode message for persistence", zap.Error(err))
+					s.log.Error("Couldn't encode message for persistence", zap.Error(err))
 				} else {
 					outMessages = append(outMessages, buf)
 				}
 			}
 		case *unacknowledgedPublish:
 			if buf, err := encodeMessage(m.msg); err != nil {
-				s.log.prod.Error("Couldn't encode message for persistence", zap.Error(err))
+				s.log.Error("Couldn't encode message for persistence", zap.Error(err))
 			} else {
 				unAckMessages = append(unAckMessages, buf)
 			}
@@ -62,7 +62,7 @@ func (s *Type) getState() *persistenceTypes.SessionMessages {
 		}
 
 		if buf, err := encodeMessage(m); err != nil {
-			s.log.prod.Error("Couldn't encode message for persistence", zap.Error(err))
+			s.log.Error("Couldn't encode message for persistence", zap.Error(err))
 		} else {
 			unAckMessages = append(unAckMessages, buf)
 		}
@@ -81,17 +81,18 @@ func (s *Type) onConnectionClose(will bool) {
 			ExpireAt: nil,
 		}
 
-		s.started.Wait()
+		//s.started.Wait()
+
+		if err := s.conn.Close(); err != nil {
+			s.log.Error("close connection", zap.String("ClientID", s.id), zap.Error(err))
+		}
+
+		close(s.quit)
 
 		s.subscriber.Offline(s.clean)
 
-		close(s.quit)
-		s.publisher.cond.L.Lock()
-		s.publisher.cond.Broadcast()
-		s.publisher.cond.L.Unlock()
-
-		// Wait writer to finish it's job
-		s.publisher.stopped.Wait()
+		s.tx.shutdown()
+		s.rx.shutdown()
 
 		if !s.clean {
 			params.State = s.getState()
@@ -115,12 +116,12 @@ func (s *Type) onConnectionClose(will bool) {
 // On QoS == 0, we should just take the next step, no ack required
 // On QoS == 1, send back PUBACK, then take the next step
 // On QoS == 2, we need to put it in the ack queue, send back PUBREC
-func (s *Type) onPublish(msg *packet.Publish) error {
+func (s *Type) onPublish(msg *packet.Publish) packet.Provider {
 	// check for topic access
-	var err error
 
 	reason := packet.CodeSuccess
 
+	var resp packet.Provider
 	// This case is for V5.0 actually as ack messages may return status.
 	// To deal with V3.1.1 two ways left:
 	//   - ignore the message but send acks
@@ -131,35 +132,34 @@ func (s *Type) onPublish(msg *packet.Publish) error {
 
 	switch msg.QoS() {
 	case packet.QoS2:
-		m, _ := packet.NewMessage(s.version, packet.PUBREC)
-		resp, _ := m.(*packet.Ack)
+		resp, _ = packet.NewMessage(s.version, packet.PUBREC)
+		r, _ := resp.(*packet.Ack)
 		id, _ := msg.ID()
 
-		resp.SetPacketID(id)
-		resp.SetReason(reason)
+		r.SetPacketID(id)
+		r.SetReason(reason)
 
-		_, err = s.conn.WriteMessage(resp, false)
 		// [MQTT-4.3.3-9]
 		// store incoming QoS 2 message before sending PUBREC as theoretically PUBREL
 		// might come before store in case message store done after write PUBREC
-		if err == nil && reason < packet.CodeUnspecifiedError {
+		if reason < packet.CodeUnspecifiedError {
 			s.pubIn.store(msg)
 		}
 	case packet.QoS1:
-		m, _ := packet.NewMessage(s.version, packet.PUBACK)
-		resp, _ := m.(*packet.Ack)
+		resp, _ = packet.NewMessage(s.version, packet.PUBACK)
+		r, _ := resp.(*packet.Ack)
 
 		id, _ := msg.ID()
 		reason := packet.CodeSuccess
 
-		resp.SetPacketID(id)
-		resp.SetReason(reason)
-		_, err = s.conn.WriteMessage(resp, false)
+		r.SetPacketID(id)
+		r.SetReason(reason)
+		//_, err = s.conn.WriteMessage(resp, false)
 
 		// [MQTT-4.3.2-4]
-		if err == nil && reason < packet.CodeUnspecifiedError {
-			if err = s.publishToTopic(msg); err != nil {
-				s.log.prod.Error("Couldn't publish message",
+		if reason < packet.CodeUnspecifiedError {
+			if err := s.publishToTopic(msg); err != nil {
+				s.log.Error("Couldn't publish message",
 					zap.String("ClientID", s.id),
 					zap.Uint8("QoS", uint8(msg.QoS())),
 					zap.Error(err))
@@ -167,16 +167,20 @@ func (s *Type) onPublish(msg *packet.Publish) error {
 		}
 	case packet.QoS0: // QoS 0
 		// [MQTT-4.3.1]
-		err = s.publishToTopic(msg)
+		if err := s.publishToTopic(msg); err != nil {
+			s.log.Error("Couldn't publish message",
+				zap.String("ClientID", s.id),
+				zap.Uint8("QoS", uint8(msg.QoS())),
+				zap.Error(err))
+		}
 	}
 
-	return err
+	return resp
 }
 
 // onAck handle ack acknowledgment received from remote
-func (s *Type) onAck(msg packet.Provider) error {
-	var err error
-
+func (s *Type) onAck(msg packet.Provider) packet.Provider {
+	var resp packet.Provider
 	switch mIn := msg.(type) {
 	case *packet.Ack:
 		switch msg.Type() {
@@ -197,36 +201,31 @@ func (s *Type) onAck(msg packet.Provider) error {
 			}
 
 			if !discard {
-				m, _ := packet.NewMessage(s.version, packet.PUBREL)
-				resp, _ := m.(*packet.Ack)
+				resp, _ = packet.NewMessage(s.version, packet.PUBREL)
+				r, _ := resp.(*packet.Ack)
 
 				id, _ := msg.ID()
-				resp.SetPacketID(id)
+				r.SetPacketID(id)
 
 				// 2. Put PUBREL into ack queue
 				// Do it before writing into network as theoretically response may come
 				// faster than put into queue
 				s.pubOut.store(resp)
-
-				// 2. Try send PUBREL reply
-				_, err = s.conn.WriteMessage(resp, false)
 			}
 		case packet.PUBREL:
 			// Remote has released PUBLISH
-			m, _ := packet.NewMessage(s.version, packet.PUBCOMP)
-			resp, _ := m.(*packet.Ack)
+			resp, _ = packet.NewMessage(s.version, packet.PUBCOMP)
+			r, _ := resp.(*packet.Ack)
 
 			id, _ := msg.ID()
-			resp.SetPacketID(id)
+			r.SetPacketID(id)
 
 			s.pubIn.release(msg)
-
-			_, err = s.conn.WriteMessage(resp, false)
 		case packet.PUBCOMP:
 			// PUBREL message has been acknowledged, release from queue
 			s.pubOut.release(msg)
 		default:
-			s.log.prod.Error("Unsupported ack message type",
+			s.log.Error("Unsupported ack message type",
 				zap.String("ClientID", s.id),
 				zap.String("type", msg.Type().Name()))
 		}
@@ -234,10 +233,10 @@ func (s *Type) onAck(msg packet.Provider) error {
 		//return err
 	}
 
-	return err
+	return resp
 }
 
-func (s *Type) onSubscribe(msg *packet.Subscribe) error {
+func (s *Type) onSubscribe(msg *packet.Subscribe) packet.Provider {
 	m, _ := packet.NewMessage(s.version, packet.SUBACK)
 	resp, _ := m.(*packet.SubAck)
 
@@ -249,9 +248,6 @@ func (s *Type) onSubscribe(msg *packet.Subscribe) error {
 
 	iter := msg.Topics().Iterator()
 	for kv, ok := iter(); ok; kv, ok = iter() {
-		//for _, t := range topics {
-		// Let topic manager know we want to listen to given topic
-		//qos := msg.TopicQos(t)
 		t := kv.Key.(string)
 		ops := kv.Value.(packet.SubscriptionOptions)
 
@@ -286,31 +282,14 @@ func (s *Type) onSubscribe(msg *packet.Subscribe) error {
 
 		retCodes = append(retCodes, reason)
 
-		s.log.dev.Debug("Subscribing",
+		s.log.Debug("Subscribing",
 			zap.String("ClientID", s.id),
 			zap.String("topic", t),
 			zap.Uint8("result_code", uint8(reason)))
 	}
 
 	if err := resp.AddReturnCodes(retCodes); err != nil {
-		return err
-	}
-
-	if _, err := s.conn.WriteMessage(resp, false); err != nil {
-		s.log.prod.Error("Couldn't send SUBACK. Proceed to unsubscribe",
-			zap.String("ClientID", s.id),
-			zap.Error(err))
-
-		iter = msg.Topics().Iterator()
-		for kv, ok := iter(); ok; kv, ok = iter() {
-			t := kv.Key.(string)
-
-			if err = s.subscriber.UnSubscribe(t); err != nil {
-				s.log.prod.Error("Couldn't unsubscribe from topic", zap.Error(err))
-			}
-		}
-
-		return err
+		return nil
 	}
 
 	// Now put retained messages into publish queue
@@ -321,13 +300,13 @@ func (s *Type) onSubscribe(msg *packet.Subscribe) error {
 		// [MQTT-3.3.1-8]
 		msg.Set(rm.Topic(), rm.Payload(), rm.QoS(), true, false) // nolint: errcheck
 
-		s.publisher.pushBack(m)
+		s.tx.sendPacket(msg)
 	}
 
-	return nil
+	return resp
 }
 
-func (s *Type) onUnSubscribe(msg *packet.UnSubscribe) (*packet.UnSubAck, error) {
+func (s *Type) onUnSubscribe(msg *packet.UnSubscribe) packet.Provider {
 	iter := msg.Topics().Iterator()
 
 	var retCodes []packet.ReasonCode
@@ -340,7 +319,7 @@ func (s *Type) onUnSubscribe(msg *packet.UnSubscribe) (*packet.UnSubAck, error) 
 
 		if authorized {
 			if err := s.subscriber.UnSubscribe(t); err != nil {
-				s.log.prod.Error("Couldn't unsubscribe from topic", zap.Error(err))
+				s.log.Error("Couldn't unsubscribe from topic", zap.Error(err))
 			} else {
 				reason = packet.CodeNoSubscriptionExisted
 			}
@@ -358,5 +337,5 @@ func (s *Type) onUnSubscribe(msg *packet.UnSubscribe) (*packet.UnSubAck, error) 
 	resp.SetPacketID(id)
 	resp.AddReturnCodes(retCodes) // nolint: errcheck
 
-	return resp, nil
+	return resp
 }

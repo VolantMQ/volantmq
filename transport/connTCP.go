@@ -1,7 +1,9 @@
 package transport
 
 import (
+	"errors"
 	"net"
+	"os"
 	"time"
 
 	"github.com/troian/surgemq/systree"
@@ -61,4 +63,12 @@ func (c *connTCP) SetReadDeadline(t time.Time) error {
 
 func (c *connTCP) SetWriteDeadline(t time.Time) error {
 	return c.conn.SetWriteDeadline(t)
+}
+
+func (c *connTCP) File() (*os.File, error) {
+	if conn, ok := c.conn.(*net.TCPConn); ok {
+		return conn.File()
+	}
+
+	return nil, errors.New("not implemented")
 }

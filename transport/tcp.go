@@ -12,18 +12,10 @@ import (
 
 // ConfigTCP configuration of tcp transport
 type ConfigTCP struct {
-	// Scheme
-	Scheme string
-
-	// Host
-	Host string
-
-	// CertFile
-	CertFile string
-
-	// KeyFile
-	KeyFile string
-
+	Scheme    string
+	Host      string
+	CertFile  string
+	KeyFile   string
 	transport *Config
 }
 
