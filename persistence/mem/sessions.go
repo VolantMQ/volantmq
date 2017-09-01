@@ -1,15 +1,16 @@
 package mem
 
 import (
+	"sync"
+
 	"github.com/troian/surgemq/persistence/types"
-	"golang.org/x/sync/syncmap"
 )
 
 type sessions struct {
 	status        *dbStatus
-	messages      syncmap.Map
-	state         syncmap.Map
-	subscriptions syncmap.Map
+	messages      sync.Map
+	state         sync.Map
+	subscriptions sync.Map
 }
 
 func (s *sessions) SubscriptionsIterate(load func([]byte, []byte) error) error {
