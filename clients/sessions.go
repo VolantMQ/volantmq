@@ -21,7 +21,6 @@ import (
 	"github.com/troian/surgemq/systree"
 	"github.com/troian/surgemq/topics/types"
 	"go.uber.org/zap"
-	"golang.org/x/sync/syncmap"
 )
 
 var (
@@ -66,8 +65,8 @@ type Manager struct {
 	log              *zap.Logger
 	quit             chan struct{}
 	sessionsCount    sync.WaitGroup
-	sessions         syncmap.Map
-	subscribers      syncmap.Map
+	sessions         sync.Map
+	subscribers      sync.Map
 	allowReplace     bool
 	offlineQoS0      bool
 }
