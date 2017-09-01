@@ -81,23 +81,21 @@ type Config struct {
 
 // Type session
 type Type struct {
-	conn         net.Conn
-	pubIn        *ackQueue
-	pubOut       *ackQueue
-	flowControl  *packetsFlowControl
-	tx           *transmitter
-	rx           *receiver
-	onDisconnect onDisconnect
-	subscriber   subscriber.ConnectionProvider
-	messenger    types.TopicMessenger
-	auth         auth.SessionPermissions
-	id           string
-	username     string
-	quit         chan struct{}
-	onStart      types.Once
-	//onStop           types.Once
+	conn             net.Conn
+	pubIn            *ackQueue
+	pubOut           *ackQueue
+	flowControl      *packetsFlowControl
+	tx               *transmitter
+	rx               *receiver
+	onDisconnect     onDisconnect
+	subscriber       subscriber.ConnectionProvider
+	messenger        types.TopicMessenger
+	auth             auth.SessionPermissions
+	id               string
+	username         string
+	quit             chan struct{}
+	onStart          types.Once
 	onConnDisconnect types.Once
-	//started          sync.WaitGroup
 
 	retained struct {
 		lock sync.Mutex
@@ -255,13 +253,6 @@ func (s *Type) loadPersistence(state *persistenceTypes.SessionMessages) (err err
 			s.log.Error("Couldn't decode persisted message", zap.Error(err))
 			err = ErrPersistence
 			return
-		}
-
-		switch m := msg.(type) {
-		case *packet.Publish:
-			if m.QoS() == packet.QoS2 && m.Dup() {
-				s.log.Error("3: QoS2 DUP")
-			}
 		}
 
 		s.tx.loadFront(msg)
