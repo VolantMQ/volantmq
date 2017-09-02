@@ -2,6 +2,7 @@ SurgeMQ
 =======
 
 [![Build Status](https://travis-ci.org/troian/surgemq.svg?branch=master)](https://travis-ci.org/troian/surgemq)
+[![BCH compliance](https://bettercodehub.com/edge/badge/troian/surgemq?branch=master)](https://bettercodehub.com/)
 [![Codacy Badge](https://api.codacy.com/project/badge/Grade/1a43f2f6e0534fd180d0a1b0b8c93614)](https://www.codacy.com/app/troian/surgemq?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=troian/surgemq&amp;utm_campaign=Badge_Grade)
 [![codecov.io](https://codecov.io/gh/troian/surgemq/coverage.svg?branch=master)](https://codecov.io/gh/troian/surgemq?branch=master)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
