@@ -3,7 +3,6 @@ package transport
 import (
 	"crypto/tls"
 	"net"
-	"strconv"
 	"time"
 
 	"github.com/troian/surgemq/configuration"
@@ -61,7 +60,7 @@ func NewTCP(config *ConfigTCP, internal *InternalConfig) (Provider, error) {
 	}
 
 	var ln net.Listener
-	if ln, err = net.Listen(config.Scheme, config.Host+":"+strconv.Itoa(config.transport.Port)); err != nil {
+	if ln, err = net.Listen(config.Scheme, config.Host+":"+config.transport.Port); err != nil {
 		return nil, err
 	}
 

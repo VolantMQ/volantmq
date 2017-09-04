@@ -153,7 +153,7 @@ type server struct {
 	onClose sync.Once
 
 	transports struct {
-		list map[int]transport.Provider
+		list map[string]transport.Provider
 		wg   sync.WaitGroup
 	}
 
@@ -184,7 +184,7 @@ func NewServer(config *ServerConfig) (Server, error) {
 	s.log.Dev = configuration.GetDevLogger().Named("server")
 
 	s.quit = make(chan struct{})
-	s.transports.list = make(map[int]transport.Provider)
+	s.transports.list = make(map[string]transport.Provider)
 
 	var err error
 	if s.authMgr, err = auth.NewManager(s.config.Authenticators); err != nil {

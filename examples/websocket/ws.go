@@ -106,7 +106,7 @@ func main() {
 
 	configWs := transport.NewConfigWS(
 		&transport.Config{
-			Port:        8080,
+			Port:        "8080",
 			AuthManager: authMng,
 		})
 
