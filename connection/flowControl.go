@@ -5,7 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/troian/surgemq/packet"
+	"github.com/VolantMQ/volantmq/packet"
 )
 
 type packetsFlowControl struct {

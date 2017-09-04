@@ -3,8 +3,8 @@ package systree
 import (
 	"encoding/json"
 
-	"github.com/troian/surgemq/packet"
-	"github.com/troian/surgemq/types"
+	"github.com/VolantMQ/volantmq/packet"
+	"github.com/VolantMQ/volantmq/types"
 )
 
 type server struct {

@@ -3,10 +3,10 @@ package topics
 import (
 	"testing"
 
+	"github.com/VolantMQ/volantmq/packet"
+	"github.com/VolantMQ/volantmq/subscriber"
+	"github.com/VolantMQ/volantmq/topics/types"
 	"github.com/stretchr/testify/require"
-	"github.com/troian/surgemq/packet"
-	"github.com/troian/surgemq/subscriber"
-	"github.com/troian/surgemq/topics/types"
 )
 
 type providerTest struct {

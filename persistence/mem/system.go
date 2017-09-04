@@ -1,6 +1,6 @@
 package mem
 
-import "github.com/troian/surgemq/persistence/types"
+import "github.com/VolantMQ/volantmq/persistence/types"
 
 type system struct {
 	status *dbStatus

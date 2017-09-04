@@ -12,14 +12,14 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/troian/surgemq/auth"
-	"github.com/troian/surgemq/configuration"
-	"github.com/troian/surgemq/packet"
-	"github.com/troian/surgemq/persistence/types"
-	"github.com/troian/surgemq/routines"
-	"github.com/troian/surgemq/subscriber"
-	"github.com/troian/surgemq/systree"
-	"github.com/troian/surgemq/topics/types"
+	"github.com/VolantMQ/volantmq/auth"
+	"github.com/VolantMQ/volantmq/configuration"
+	"github.com/VolantMQ/volantmq/packet"
+	"github.com/VolantMQ/volantmq/persistence/types"
+	"github.com/VolantMQ/volantmq/routines"
+	"github.com/VolantMQ/volantmq/subscriber"
+	"github.com/VolantMQ/volantmq/systree"
+	"github.com/VolantMQ/volantmq/topics/types"
 	"go.uber.org/zap"
 )
 

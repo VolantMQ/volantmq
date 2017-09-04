@@ -3,10 +3,10 @@ package mem
 import (
 	"strings"
 
-	"github.com/troian/surgemq/packet"
-	"github.com/troian/surgemq/systree"
-	"github.com/troian/surgemq/topics/types"
-	"github.com/troian/surgemq/types"
+	"github.com/VolantMQ/volantmq/packet"
+	"github.com/VolantMQ/volantmq/systree"
+	"github.com/VolantMQ/volantmq/topics/types"
+	"github.com/VolantMQ/volantmq/types"
 )
 
 type subscribedEntry struct {

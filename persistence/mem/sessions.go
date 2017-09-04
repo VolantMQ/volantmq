@@ -3,7 +3,7 @@ package mem
 import (
 	"sync"
 
-	"github.com/troian/surgemq/persistence/types"
+	"github.com/VolantMQ/volantmq/persistence/types"
 )
 
 type sessions struct {

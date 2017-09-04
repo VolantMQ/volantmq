@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The SurgeMQ Authors. All rights reserved.
+// Copyright (c) 2014 The VolantMQ Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,12 +48,12 @@ func TestUnSubscribeMessageFields(t *testing.T) {
 func TestUnSubscribeMessageDecode(t *testing.T) {
 	msgBytes := []byte{
 		byte(UNSUBSCRIBE<<4) | 2,
-		33,
+		34,
 		0, // packet ID MSB (0)
 		7, // packet ID LSB (7)
 		0, // topic name MSB (0)
-		7, // topic name LSB (7)
-		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		8, // topic name LSB (7)
+		'v', 'o', 'l', 'a', 'n', 't', 'm', 'q',
 		0, // topic name MSB (0)
 		8, // topic name LSB (8)
 		'/', 'a', '/', 'b', '/', '#', '/', 'c',
@@ -63,7 +63,7 @@ func TestUnSubscribeMessageDecode(t *testing.T) {
 	}
 
 	m, n, err := Decode(ProtocolV311, msgBytes)
-
+	require.NoError(t, err, "Error decoding message.")
 	msg, ok := m.(*UnSubscribe)
 
 	require.Equal(t, true, ok, "Invalid message type")
@@ -73,8 +73,8 @@ func TestUnSubscribeMessageDecode(t *testing.T) {
 	require.Equal(t, UNSUBSCRIBE, msg.Type(), "Error decoding message.")
 	require.Equal(t, 3, msg.Topics().Len(), "Error decoding topics.")
 
-	_, exists := msg.Topics().Get("surgemq")
-	require.True(t, exists, "Topic 'surgemq' should exist.")
+	_, exists := msg.Topics().Get("volantmq")
+	require.True(t, exists, "Topic 'volantmq' should exist.")
 
 	_, exists = msg.Topics().Get("/a/b/#/c")
 	require.True(t, exists, "Topic '/a/b/#/c' should exist.")
@@ -105,7 +105,7 @@ func TestUnSubscribeMessageEncode(t *testing.T) {
 		7, // packet ID LSB (7)
 		0, // topic name MSB (0)
 		7, // topic name LSB (7)
-		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		'v', 'o', 'l', 'a', 'n', 't', 'm', 'q',
 		0, // topic name MSB (0)
 		8, // topic name LSB (8)
 		'/', 'a', '/', 'b', '/', '#', '/', 'c',
@@ -121,7 +121,7 @@ func TestUnSubscribeMessageEncode(t *testing.T) {
 	require.True(t, ok, "Couldn't cast message type")
 
 	msg.SetPacketID(7)
-	msg.AddTopic("surgemq")    // nolint: errcheck
+	msg.AddTopic("volantmq")   // nolint: errcheck
 	msg.AddTopic("/a/b/#/c")   // nolint: errcheck
 	msg.AddTopic("/a/b/#/cdd") // nolint: errcheck
 
@@ -141,7 +141,7 @@ func TestUnSubscribeMessageEncode(t *testing.T) {
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
 
-	_, exists := msg1.Topics().Get("surgemq")
+	_, exists := msg1.Topics().Get("volantmq")
 	require.True(t, exists, "Error decoding message.")
 
 	_, exists = msg1.Topics().Get("/a/b/#/c")
@@ -160,12 +160,12 @@ func TestUnSubscribeMessageEncode(t *testing.T) {
 func TestUnSubscribeDecodeEncodeEquiv(t *testing.T) {
 	msgBytes := []byte{
 		byte(UNSUBSCRIBE<<4) | 2,
-		33,
+		34,
 		0, // packet ID MSB (0)
 		7, // packet ID LSB (7)
 		0, // topic name MSB (0)
-		7, // topic name LSB (7)
-		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		8, // topic name LSB (7)
+		'v', 'o', 'l', 'a', 'n', 't', 'm', 'q',
 		0, // topic name MSB (0)
 		8, // topic name LSB (8)
 		'/', 'a', '/', 'b', '/', '#', '/', 'c',
@@ -175,6 +175,7 @@ func TestUnSubscribeDecodeEncodeEquiv(t *testing.T) {
 	}
 
 	m, n, err := Decode(ProtocolV311, msgBytes)
+	require.NoError(t, err, "Error decoding message.")
 	msg, ok := m.(*UnSubscribe)
 	require.Equal(t, true, ok, "Invalid message type")
 	require.NoError(t, err, "Error decoding message")
@@ -186,7 +187,7 @@ func TestUnSubscribeDecodeEncodeEquiv(t *testing.T) {
 	require.NoError(t, err, "Error encoding message.")
 	require.Equal(t, len(msgBytes), n2, "Raw message length does not match")
 
-	_, exists := msg.Topics().Get("surgemq")
+	_, exists := msg.Topics().Get("volantmq")
 	require.True(t, exists, "Topic does not exist")
 
 	_, exists = msg.Topics().Get("/a/b/#/c")

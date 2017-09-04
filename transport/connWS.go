@@ -6,8 +6,8 @@ import (
 
 	"io"
 
+	"github.com/VolantMQ/volantmq/systree"
 	"github.com/gorilla/websocket"
-	"github.com/troian/surgemq/systree"
 )
 
 type connWs struct {

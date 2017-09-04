@@ -1,6 +1,6 @@
 package main
 
-import "github.com/troian/surgemq/auth"
+import "github.com/VolantMQ/volantmq/auth"
 
 type internalAuth struct {
 	creds map[string]string

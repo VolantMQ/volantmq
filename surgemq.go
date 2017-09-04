@@ -1,4 +1,4 @@
-package surgemq
+package volantmq
 
 import (
 	"errors"
@@ -9,18 +9,18 @@ import (
 
 	"time"
 
+	"github.com/VolantMQ/volantmq/auth"
+	"github.com/VolantMQ/volantmq/clients"
+	"github.com/VolantMQ/volantmq/configuration"
+	"github.com/VolantMQ/volantmq/packet"
+	"github.com/VolantMQ/volantmq/persistence"
+	"github.com/VolantMQ/volantmq/persistence/types"
+	"github.com/VolantMQ/volantmq/systree"
+	"github.com/VolantMQ/volantmq/topics"
+	"github.com/VolantMQ/volantmq/topics/types"
+	"github.com/VolantMQ/volantmq/transport"
+	"github.com/VolantMQ/volantmq/types"
 	"github.com/pborman/uuid"
-	"github.com/troian/surgemq/auth"
-	"github.com/troian/surgemq/clients"
-	"github.com/troian/surgemq/configuration"
-	"github.com/troian/surgemq/packet"
-	"github.com/troian/surgemq/persistence"
-	"github.com/troian/surgemq/persistence/types"
-	"github.com/troian/surgemq/systree"
-	"github.com/troian/surgemq/topics"
-	"github.com/troian/surgemq/topics/types"
-	"github.com/troian/surgemq/transport"
-	"github.com/troian/surgemq/types"
 )
 
 var (
@@ -211,7 +211,7 @@ func NewServer(config *ServerConfig) (Server, error) {
 	}
 
 	generateNodeID := func() string {
-		return uuid.New() + "@surgemq.io"
+		return uuid.New() + "@volantmq.io"
 	}
 
 	if systemState.NodeName == "" || s.config.RewriteNodeName {

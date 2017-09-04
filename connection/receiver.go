@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/troian/surgemq/packet"
+	"github.com/VolantMQ/volantmq/packet"
 )
 
 type receiverConfig struct {

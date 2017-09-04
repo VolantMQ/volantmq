@@ -38,6 +38,6 @@ _testmain.go
 *.sublime-workspace
 
 persistence/examples/bolt/test.db
-examples/surgemq/persist.db
+examples/tcp/persist.db
 coverage.txt
 vendor

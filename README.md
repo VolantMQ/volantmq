@@ -1,17 +1,17 @@
-SurgeMQ
+VolantMQ
 =======
 
-[![Build Status](https://travis-ci.org/troian/surgemq.svg?branch=master)](https://travis-ci.org/troian/surgemq)
-[![BCH compliance](https://bettercodehub.com/edge/badge/troian/surgemq?branch=master)](https://bettercodehub.com/)
-[![Codacy Badge](https://api.codacy.com/project/badge/Grade/1a43f2f6e0534fd180d0a1b0b8c93614)](https://www.codacy.com/app/troian/surgemq?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=troian/surgemq&amp;utm_campaign=Badge_Grade)
-[![codecov.io](https://codecov.io/gh/troian/surgemq/coverage.svg?branch=master)](https://codecov.io/gh/troian/surgemq?branch=master)
+[![Build Status](https://travis-ci.org/volantmq/volantmq.svg?branch=master)](https://travis-ci.org/volantmq/volantmq)
+[![BCH compliance](https://bettercodehub.com/edge/badge/volantmq/volantmq?branch=master)](https://bettercodehub.com/)
+[![Codacy Badge](https://api.codacy.com/project/badge/Grade/1a43f2f6e0534fd180d0a1b0b8c93614)](https://www.codacy.com/app/volantmq/volantmq?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=volantmq/volantmq&amp;utm_campaign=Badge_Grade)
+[![codecov.io](https://codecov.io/gh/volantmq/volantmq/coverage.svg?branch=master)](https://codecov.io/gh/volantmq/volantmq?branch=master)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 ### Warning
 **It's currently in active development thus highly not recommended for production**
 **This project should be considered unstable until further notice.**
 
-SurgeMQ is a high performance MQTT broker that aims to be fully compliant with MQTT 3.1 and 3.1.1 specs .
+VolantMQ is a high performance MQTT broker that aims to be fully compliant with MQTT 3.1 and 3.1.1 specs .
 
 ### Features, Limitations, and Future
 
@@ -37,7 +37,7 @@ TBD
 
 ### Compatibility
 
-SurgeMQ has been tested with the following client libraries
+Project has been tested with the following client libraries
 * Paho MQTT Conformance/Interoperability Testing Suite (in Python)
   * Pass with all of the test cases
 * Paho C Client library (in C)
@@ -63,6 +63,6 @@ limitations under the License.
 
 ### Examples
 
-Look into examples/surgemq
+Look into examples
 
-### [Contributing guidelines](https://github.com/troian/surgemq/blob/master/CONTRIBUTING.md)
+### [Contributing guidelines](https://github.com/volantmq/volantmq/blob/master/CONTRIBUTING.md)

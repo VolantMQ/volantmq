@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The SurgeMQ Authors. All rights reserved.
+// Copyright (c) 2014 The VolantMQ Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,12 +19,12 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/VolantMQ/volantmq"
+	"github.com/VolantMQ/volantmq/auth"
+	"github.com/VolantMQ/volantmq/configuration"
+	"github.com/VolantMQ/volantmq/persistence/types"
+	"github.com/VolantMQ/volantmq/transport"
 	"github.com/spf13/viper"
-	"github.com/troian/surgemq"
-	"github.com/troian/surgemq/auth"
-	"github.com/troian/surgemq/configuration"
-	"github.com/troian/surgemq/persistence/types"
-	"github.com/troian/surgemq/transport"
 	"go.uber.org/zap"
 
 	_ "net/http/pprof"
@@ -76,13 +76,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	var srv surgemq.Server
+	var srv volantmq.Server
 
 	listenerStatus := func(id string, status string) {
 		logger.Info("Listener status", zap.String("id", id), zap.String("status", status))
 	}
 
-	serverConfig := surgemq.NewServerConfig()
+	serverConfig := volantmq.NewServerConfig()
 
 	serverConfig.OfflineQoS0 = true
 	serverConfig.Persistence = &persistenceTypes.MemConfig{}
@@ -90,7 +90,7 @@ func main() {
 	serverConfig.AllowDuplicates = true
 	serverConfig.Authenticators = "internal"
 
-	srv, err = surgemq.NewServer(serverConfig)
+	srv, err = volantmq.NewServer(serverConfig)
 
 	if err != nil {
 		logger.Error("Couldn't create server", zap.Error(err))

@@ -5,11 +5,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/troian/surgemq/auth"
-	"github.com/troian/surgemq/clients"
-	"github.com/troian/surgemq/packet"
-	"github.com/troian/surgemq/routines"
-	"github.com/troian/surgemq/systree"
+	"github.com/VolantMQ/volantmq/auth"
+	"github.com/VolantMQ/volantmq/clients"
+	"github.com/VolantMQ/volantmq/packet"
+	"github.com/VolantMQ/volantmq/routines"
+	"github.com/VolantMQ/volantmq/systree"
 	"go.uber.org/zap"
 )
 

@@ -3,7 +3,7 @@ package connection
 import (
 	"sync"
 
-	"github.com/troian/surgemq/packet"
+	"github.com/VolantMQ/volantmq/packet"
 )
 
 type onRelease func(msg packet.Provider)

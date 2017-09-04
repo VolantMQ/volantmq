@@ -10,9 +10,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/VolantMQ/volantmq/auth"
+	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/gorilla/websocket"
-	"github.com/troian/surgemq/auth"
-	"github.com/troian/surgemq/configuration"
 	"go.uber.org/zap"
 )
 

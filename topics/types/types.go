@@ -5,8 +5,8 @@ import (
 
 	"regexp"
 
-	"github.com/troian/surgemq/packet"
-	"github.com/troian/surgemq/types"
+	"github.com/VolantMQ/volantmq/packet"
+	"github.com/VolantMQ/volantmq/types"
 )
 
 //var (

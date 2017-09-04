@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/troian/surgemq/packet"
+	"github.com/VolantMQ/volantmq/packet"
 )
 
 // DynamicValue interface describes states of the dynamic value
