@@ -15,7 +15,7 @@ jobs:
         - dep ensure
       os: linux
       script:
-        - go build -race -v -gcflags "-N -l" ./examples/surgemq
+        - go build -race -v -gcflags "-N -l" ./examples/...
         - gometalinter --fast --exclude=corefoundation.go --deadline=360s --enable-gc --sort=path --vendor --cyclo-over=40 --dupl-threshold=100 --disable=gotype ./...
         - ./go.test.sh
       after_success:
