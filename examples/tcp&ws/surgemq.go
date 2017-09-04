@@ -15,7 +15,6 @@
 package main
 
 import (
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -88,10 +87,7 @@ func main() {
 	serverConfig := surgemq.NewServerConfig()
 
 	serverConfig.OfflineQoS0 = true
-	//serverConfig.Persistence = &persistType.MemConfig{}
-	serverConfig.Persistence = &persistenceTypes.BoltDBConfig{
-		File: "./persist.db",
-	}
+	serverConfig.Persistence = &persistenceTypes.MemConfig{}
 	serverConfig.TransportStatus = listenerStatus
 	serverConfig.AllowDuplicates = true
 	serverConfig.Authenticators = "internal"
@@ -120,21 +116,15 @@ func main() {
 		logger.Error("Couldn't start listener", zap.Error(err))
 	}
 
-	//configWs := transport.NewConfigWS(
-	//	&transport.Config{
-	//		Port:        8080,
-	//		AuthManager: authMng,
-	//	})
-	//
-	//if err = srv.ListenAndServe(configWs); err != nil {
-	//	logger.Error("Couldn't start listener", zap.Error(err))
-	//}
+	configWs := transport.NewConfigWS(
+		&transport.Config{
+			Port:        8080,
+			AuthManager: authMng,
+		})
 
-	go func() {
-		runtime.SetBlockProfileRate(1)
-		runtime.SetMutexProfileFraction(1)
-		logger.Info(http.ListenAndServe("localhost:6061", nil).Error())
-	}()
+	if err = srv.ListenAndServe(configWs); err != nil {
+		logger.Error("Couldn't start listener", zap.Error(err))
+	}
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
@@ -144,6 +134,4 @@ func main() {
 	if err = srv.Close(); err != nil {
 		logger.Error("Couldn't shutdown server", zap.Error(err))
 	}
-
-	os.Remove("./persist.db") // nolint: errcheck
 }
