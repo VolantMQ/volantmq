@@ -21,6 +21,7 @@ import (
 	"github.com/VolantMQ/volantmq/transport"
 	"github.com/VolantMQ/volantmq/types"
 	"github.com/pborman/uuid"
+	"go.uber.org/zap"
 )
 
 var (
@@ -68,6 +69,9 @@ type ServerConfig struct {
 	// If not set than defaults to 0x3 and 0x04
 	AllowedVersions map[packet.ProtocolVersion]bool
 
+	// MaxPacketSize
+	MaxPacketSize uint32
+
 	// AllowOverlappingSubscriptions tells server how to handle overlapping subscriptions from within one client
 	// if true server will send only one publish with max subscribed QoS even there are n subscriptions
 	// if false server will send as many publishes as amount of subscriptions matching publish topic exists
@@ -85,7 +89,11 @@ type ServerConfig struct {
 	// If not set than default is false
 	AllowDuplicates bool
 
+	// WithSystree
 	WithSystree bool
+
+	// ForceKeepAlive
+	ForceKeepAlive bool
 }
 
 // NewServerConfig with default values. It's highly recommended to use that function to allocate config
@@ -100,13 +108,15 @@ func NewServerConfig() *ServerConfig {
 		AllowOverlappingSubscriptions: true,
 		RewriteNodeName:               false,
 		WithSystree:                   true,
-		SystreeUpdateInterval:         5,
+		SystreeUpdateInterval:         0,
 		KeepAlive:                     types.DefaultKeepAlive,
 		ConnectTimeout:                types.DefaultConnectTimeout,
+		MaxPacketSize:                 types.DefaultMaxPacketSize,
 		TransportStatus:               func(id string, status string) {},
 		AllowedVersions: map[packet.ProtocolVersion]bool{
 			packet.ProtocolV31:  true,
 			packet.ProtocolV311: true,
+			packet.ProtocolV50:  true,
 		},
 	}
 }
@@ -127,45 +137,24 @@ type Server interface {
 // server is a library implementation of the MQTT server that, as best it can, complies
 // with the MQTT 3.1/3.1.1 and 5.0 specs.
 type server struct {
-	config *ServerConfig
-	// authMgr is the authentication manager that we are going to use for authenticating
-	// incoming connections
-	authMgr *auth.Manager
-
-	// sessionsMgr is the sessions manager for keeping track of the sessions
+	config      *ServerConfig
+	authMgr     *auth.Manager
 	sessionsMgr *clients.Manager
-
-	log types.LogInterface
-
-	// topicsMgr is the topics manager for keeping track of subscriptions
-	topicsMgr topicsTypes.Provider
-
-	persist persistenceTypes.Provider
-
-	sysTree systree.Provider
-
-	// The quit channel for the server. If the server detects that this channel
-	// is closed, then it's a signal for it to shutdown as well.
-	quit chan struct{}
-
-	lock sync.Mutex
-
-	onClose sync.Once
-
-	transports struct {
+	log         *zap.Logger
+	topicsMgr   topicsTypes.Provider
+	persist     persistenceTypes.Provider
+	sysTree     systree.Provider
+	quit        chan struct{}
+	lock        sync.Mutex
+	onClose     sync.Once
+	transports  struct {
 		list map[int]transport.Provider
 		wg   sync.WaitGroup
 	}
-
 	systree struct {
-		done      chan bool
-		wgStarted sync.WaitGroup
-		wgStopped sync.WaitGroup
-		timer     *time.Ticker
+		publishes []systree.DynamicValue
+		timer     *time.Timer
 	}
-
-	// nodes cluster nodes
-	//nodes map[string]subscriber.Provider
 }
 
 // NewServer allocate server object
@@ -180,8 +169,7 @@ func NewServer(config *ServerConfig) (Server, error) {
 
 	s.config = config
 
-	s.log.Prod = configuration.GetProdLogger().Named("server")
-	s.log.Dev = configuration.GetDevLogger().Named("server")
+	s.log = configuration.GetLogger().Named("server")
 
 	s.quit = make(chan struct{})
 	s.transports.list = make(map[int]transport.Provider)
@@ -192,7 +180,7 @@ func NewServer(config *ServerConfig) (Server, error) {
 	}
 
 	if s.config.Persistence == nil {
-		return nil, errors.New("Persistence provider cannot be nil")
+		return nil, errors.New("persistence provider cannot be nil")
 	}
 
 	if s.persist, err = persistence.New(s.config.Persistence); err != nil {
@@ -230,9 +218,9 @@ func NewServer(config *ServerConfig) (Server, error) {
 
 	var persisRetained persistenceTypes.Retained
 	var retains []types.RetainObject
-	var dynPublishes []systree.DynamicValue
+	//var dynPublishes []systree.DynamicValue
 
-	if s.sysTree, retains, dynPublishes, err = systree.NewTree("$SYS/servers/" + s.config.NodeName); err != nil {
+	if s.sysTree, retains, s.systree.publishes, err = systree.NewTree("$SYS/servers/" + s.config.NodeName); err != nil {
 		return nil, err
 	}
 
@@ -258,22 +246,27 @@ func NewServer(config *ServerConfig) (Server, error) {
 		}
 
 		if s.config.SystreeUpdateInterval > 0 {
-			s.systree.wgStarted.Add(1)
-			s.systree.wgStopped.Add(1)
-			go s.systreeUpdater(dynPublishes, s.config.SystreeUpdateInterval*time.Second)
-			s.systree.wgStarted.Wait()
+			s.systree.timer = time.AfterFunc(s.config.SystreeUpdateInterval*time.Second, s.systreeUpdater)
 		}
 	}
 
 	mConfig := &clients.Config{
-		TopicsMgr:        s.topicsMgr,
-		ConnectTimeout:   s.config.ConnectTimeout,
-		Persist:          s.persist,
-		AllowReplace:     s.config.AllowDuplicates,
-		OnReplaceAttempt: s.config.OnDuplicate,
-		OfflineQoS0:      s.config.OfflineQoS0,
-		Systree:          s.sysTree,
-		NodeName:         s.config.NodeName,
+		TopicsMgr:                     s.topicsMgr,
+		ConnectTimeout:                s.config.ConnectTimeout,
+		Persist:                       s.persist,
+		Systree:                       s.sysTree,
+		AllowReplace:                  s.config.AllowDuplicates,
+		OnReplaceAttempt:              s.config.OnDuplicate,
+		NodeName:                      s.config.NodeName,
+		OfflineQoS0:                   s.config.OfflineQoS0,
+		AvailableRetain:               true,
+		AvailableSubscriptionID:       false,
+		AvailableSharedSubscription:   false,
+		AvailableWildcardSubscription: true,
+		TopicAliasMaximum:             0xFFFF,
+		ReceiveMax:                    types.DefaultReceiveMax,
+		MaxPacketSize:                 types.DefaultMaxPacketSize,
+		MaximumQoS:                    packet.QoS2,
 	}
 
 	if s.sessionsMgr, err = clients.NewManager(mConfig); err != nil {
@@ -301,7 +294,7 @@ func (s *server) ListenAndServe(config interface{}) error {
 	case *transport.ConfigWS:
 		l, err = transport.NewWS(c, &internalConfig)
 	default:
-		return errors.New("Invalid listener type")
+		return errors.New("invalid listener type")
 	}
 
 	if err != nil {
@@ -313,7 +306,7 @@ func (s *server) ListenAndServe(config interface{}) error {
 
 	if _, ok := s.transports.list[l.Port()]; ok {
 		l.Close() // nolint: errcheck
-		return errors.New("Already exists")
+		return errors.New("already exists")
 	}
 
 	s.transports.list[l.Port()] = l
@@ -342,19 +335,11 @@ func (s *server) Close() error {
 		defer s.lock.Unlock()
 		s.lock.Lock()
 
-		// shutdown systree updater
-		if s.systree.timer != nil {
-			s.systree.timer.Stop()
-			s.systree.done <- true
-			s.systree.wgStopped.Wait()
-			close(s.systree.done)
-		}
-
 		// We then close all net.Listener, which will force Accept() to return if it's
 		// blocked waiting for new connections.
 		for _, l := range s.transports.list {
 			if err := l.Close(); err != nil {
-				s.log.Prod.Error(err.Error())
+				s.log.Error(err.Error())
 			}
 		}
 
@@ -374,33 +359,28 @@ func (s *server) Close() error {
 		if s.topicsMgr != nil {
 			s.topicsMgr.Close() // nolint: errcheck, gas
 		}
+
+		// shutdown systree updater
+		if s.systree.timer != nil {
+			s.systree.timer.Stop()
+		}
+
 	})
 
 	return nil
 }
 
-func (s *server) systreeUpdater(publishes []systree.DynamicValue, period time.Duration) {
-	defer s.systree.wgStopped.Done()
+func (s *server) systreeUpdater() {
+	for _, m := range s.systree.publishes {
+		_m := m.Publish()
+		_msg, _ := packet.New(packet.ProtocolV311, packet.PUBLISH)
+		msg, _ := _msg.(*packet.Publish)
 
-	s.systree.done = make(chan bool)
-	s.systree.timer = time.NewTicker(period)
-	s.systree.wgStarted.Done()
-
-	for {
-		select {
-		case <-s.systree.timer.C:
-			for _, m := range publishes {
-				_m := m.Publish()
-				_msg, _ := packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
-				msg, _ := _msg.(*packet.Publish)
-
-				msg.SetPayload(_m.Payload())
-				msg.SetTopic(_m.Topic()) // nolint: errcheck
-				msg.SetQoS(_m.QoS())     // nolint: errcheck
-				s.topicsMgr.Publish(msg) // nolint: errcheck
-			}
-		case <-s.systree.done:
-			return
-		}
+		msg.SetPayload(_m.Payload())
+		msg.SetTopic(_m.Topic()) // nolint: errcheck
+		msg.SetQoS(_m.QoS())     // nolint: errcheck
+		s.topicsMgr.Publish(msg) // nolint: errcheck
 	}
+
+	s.systree.timer.Reset(s.config.SystreeUpdateInterval * time.Second)
 }

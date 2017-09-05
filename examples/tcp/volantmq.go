@@ -17,6 +17,7 @@ package main
 import (
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 
 	"github.com/VolantMQ/volantmq"
@@ -27,8 +28,8 @@ import (
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 
+	"net/http"
 	_ "net/http/pprof"
-	"runtime"
 	_ "runtime/debug"
 )
 
@@ -39,7 +40,7 @@ func main() {
 
 	configuration.Init(ops)
 
-	logger := configuration.GetProdLogger().Named("example")
+	logger := configuration.GetLogger().Named("example")
 
 	var err error
 
@@ -117,6 +118,8 @@ func main() {
 	if err = srv.ListenAndServe(config); err != nil {
 		logger.Error("Couldn't start listener", zap.Error(err))
 	}
+
+	go http.ListenAndServe(":6061", nil) // nolint: errcheck
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)

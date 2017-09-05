@@ -39,65 +39,68 @@ func (msg *Disconnect) SetReasonCode(c ReasonCode) {
 }
 
 // decode message
-func (msg *Disconnect) decodeMessage(src []byte) (int, error) {
-	total := 0
+func (msg *Disconnect) decodeMessage(from []byte) (int, error) {
+	offset := 0
 
 	if msg.version == ProtocolV50 {
+		// [MQTT-3.14.2.1]
 		if msg.remLen < 1 {
-			return total, CodeMalformedPacket
+			msg.reasonCode = CodeSuccess
+			return offset, nil
 		}
 
-		msg.reasonCode = ReasonCode(src[total])
+		msg.reasonCode = ReasonCode(from[offset])
 		if !msg.reasonCode.IsValidForType(msg.mType) {
-			return total, CodeProtocolError
+			return offset, CodeProtocolError
 		}
 
-		total++
+		offset++
 
 		// V5.0 [MQTT-3.14.2.2.1]
-		if len(src[total:]) < 1 && msg.remLen < 2 {
-			return total, CodeMalformedPacket
+		if len(from[offset:]) < 1 && msg.remLen < 2 {
+			return offset, CodeMalformedPacket
 		}
 
 		if msg.remLen < 2 {
-			total++
+			offset++
 		} else {
 			var err error
 			var n int
 
-			if msg.properties, n, err = decodeProperties(msg.mType, src[total:]); err != nil {
-				return total + n, err
+			if msg.properties, n, err = decodeProperties(msg.mType, from[offset:]); err != nil {
+				return offset + n, err
 			}
 
-			total += n
+			offset += n
 		}
 	} else {
 		if msg.remLen > 0 {
-			return total, CodeRefusedServerUnavailable
+			return offset, CodeRefusedServerUnavailable
 		}
 	}
 
-	return total, nil
+	return offset, nil
 }
 
-func (msg *Disconnect) encodeMessage(dst []byte) (int, error) {
-	total := 0
+func (msg *Disconnect) encodeMessage(to []byte) (int, error) {
+	offset := 0
 
+	var err error
 	if msg.version == ProtocolV50 {
-		dst[total] = byte(msg.reasonCode)
-		total++
+		pLen := msg.properties.FullLen()
+		if pLen > 1 || msg.reasonCode != CodeSuccess {
+			to[offset] = byte(msg.reasonCode)
+			offset++
 
-		var err error
-		var n int
-
-		if n, err = encodeProperties(msg.properties, dst[total:]); err != nil {
-			return total + n, err
+			if pLen > 1 {
+				var n int
+				n, err = encodeProperties(msg.properties, to[offset:])
+				offset += n
+			}
 		}
-
-		total += n
 	}
 
-	return total, nil
+	return offset, err
 }
 
 // Len of message
@@ -105,8 +108,15 @@ func (msg *Disconnect) size() int {
 	total := 0
 
 	if msg.version == ProtocolV50 {
-		pLen, _ := encodeProperties(msg.properties, []byte{})
-		total += 1 + pLen
+		pLen := msg.properties.FullLen()
+		// If properties exist (which indicated when pLen > 1) include in body size reason code and properties
+		// otherwise include only reason code if it differs from CodeSuccess
+		if pLen > 1 || msg.reasonCode != CodeSuccess {
+			total++
+			if pLen > 1 {
+				total += int(pLen)
+			}
+		}
 	}
 
 	return total

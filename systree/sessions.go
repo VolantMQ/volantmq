@@ -47,7 +47,7 @@ func (t *sessions) Created(id string, status *SessionCreatedStatus) {
 
 	if t.topicsManager != nil {
 		// notify client connected
-		nm, _ := packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
+		nm, _ := packet.New(packet.ProtocolV311, packet.PUBLISH)
 		notifyMsg, _ := nm.(*packet.Publish)
 		notifyMsg.SetRetain(false)
 		notifyMsg.SetQoS(packet.QoS0)    // nolint: errcheck
@@ -69,7 +69,7 @@ func (t *sessions) Created(id string, status *SessionCreatedStatus) {
 func (t *sessions) Removed(id string, status *SessionDeletedStatus) {
 	atomic.AddUint64(&t.curr.val, ^uint64(0))
 	if t.topicsManager != nil {
-		nm, _ := packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
+		nm, _ := packet.New(packet.ProtocolV311, packet.PUBLISH)
 		notifyMsg, _ := nm.(*packet.Publish)
 		notifyMsg.SetRetain(false)
 		notifyMsg.SetQoS(packet.QoS0)    // nolint: errcheck
@@ -77,7 +77,7 @@ func (t *sessions) Removed(id string, status *SessionDeletedStatus) {
 
 		t.topicsManager.Retain(notifyMsg) // nolint: errcheck
 
-		nm, _ = packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
+		nm, _ = packet.New(packet.ProtocolV311, packet.PUBLISH)
 		notifyMsg, _ = nm.(*packet.Publish)
 		notifyMsg.SetRetain(false)
 		notifyMsg.SetQoS(packet.QoS0)                 // nolint: errcheck

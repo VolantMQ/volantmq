@@ -16,7 +16,8 @@ VolantMQ is a high performance MQTT broker that aims to be fully compliant with 
 ### Features, Limitations, and Future
 
 **Features**
-* [MQTT v3.1 - V3.1.1 compliant](http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html)
+* [MQTT v3.1 - V3.1.1](http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html)
+* [MQTT V5.0](http://docs.oasis-open.org/mqtt/mqtt/v5.0/mqtt-v5.0.html), in progress refer to [TODO](#TODO)
 * Full support of WebSockets transport
 * SSL for both plain tcp and WebSockets transports
 * Independent auth providers for each transport
@@ -27,13 +28,14 @@ VolantMQ is a high performance MQTT broker that aims to be fully compliant with 
 * [BoltDB](https://github.com/boltdb/bolt)
 * In memory
 
-**Future**
-* V5.0 specification
+**TODO**
+* V5.0:
+    * Publication expiry
+    * Packets testing
 * Cluster
 * Bridge
-### Performance
-
-TBD
+* Benchmarking
+* Plugins
 
 ### Compatibility
 

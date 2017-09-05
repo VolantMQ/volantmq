@@ -8,88 +8,129 @@ import (
 	"sync/atomic"
 	"time"
 
+	"reflect"
+
+	"math/rand"
+
 	"github.com/VolantMQ/volantmq/packet"
+	"github.com/VolantMQ/volantmq/types"
 	"go.uber.org/zap"
 )
 
 type transmitterConfig struct {
-	id           string
-	quit         chan struct{}
-	flowControl  *packetsFlowControl
-	pubIn        *ackQueue
-	pubOut       *ackQueue
-	log          *zap.Logger
-	conn         net.Conn
-	onDisconnect func(bool)
+	id            string
+	quit          chan struct{}
+	flowControl   *packetsFlowControl
+	pubIn         *ackQueue
+	pubOut        *ackQueue
+	log           *zap.Logger
+	conn          net.Conn
+	onDisconnect  func(bool, error)
+	maxPacketSize uint32
+	topicAliasMax uint16
 }
 
 type transmitter struct {
 	transmitterConfig
-	lock      sync.Mutex
-	messages  *list.List
-	available chan int
-	running   uint32
-	timer     *time.Timer
-	wg        sync.WaitGroup
+	available         chan int
+	timer             *time.Timer
+	gMessages         *list.List
+	qMessages         *list.List
+	wg                sync.WaitGroup
+	onStop            types.OnceWait
+	gLock             sync.Mutex
+	qLock             sync.Mutex
+	topicAlias        map[string]uint16
+	running           uint32
+	topicAliasCurrMax uint16
+	qExceeded         bool
 }
 
 func newTransmitter(config *transmitterConfig) *transmitter {
 	p := &transmitter{
 		transmitterConfig: *config,
-		messages:          list.New(),
 		available:         make(chan int, 1),
 		timer:             time.NewTimer(1 * time.Second),
+		topicAlias:        make(map[string]uint16),
+		gMessages:         list.New(),
+		qMessages:         list.New(),
 	}
-
 	p.timer.Stop()
 
 	return p
 }
 
 func (p *transmitter) shutdown() {
-	p.timer.Stop()
-	p.wg.Wait()
-	select {
-	case <-p.available:
-	default:
-		close(p.available)
-	}
+	p.onStop.Do(func() {
+		atomic.StoreUint32(&p.running, 0)
+		p.timer.Stop()
+		p.wg.Wait()
+
+		select {
+		case <-p.available:
+		default:
+			close(p.available)
+		}
+	})
 }
 
-func (p *transmitter) loadFront(value interface{}) {
-	p.lock.Lock()
-	p.messages.PushFront(value)
-	p.lock.Unlock()
-	p.signalAvailable()
-}
-
-//func (p *transmitter) loadBack(value interface{}) {
-//	p.lock.Lock()
-//	p.messages.PushBack(value)
-//	p.lock.Unlock()
-//	p.signalAvailable()
-//}
-
-func (p *transmitter) sendPacket(pkt packet.Provider) {
-	p.lock.Lock()
-	p.messages.PushFront(pkt)
-	p.lock.Unlock()
+func (p *transmitter) gPush(pkt packet.Provider) {
+	p.gLock.Lock()
+	p.gMessages.PushBack(pkt)
+	p.gLock.Unlock()
 	p.signalAvailable()
 	p.run()
 }
 
-func (p *transmitter) queuePacket(pkt packet.Provider) {
-	p.lock.Lock()
-	p.messages.PushBack(pkt)
-	p.lock.Unlock()
+func (p *transmitter) gLoad(pkt packet.Provider) {
+	p.gMessages.PushBack(pkt)
+	p.signalAvailable()
+}
+
+func (p *transmitter) gLoadList(l *list.List) {
+	p.gMessages.PushBackList(l)
+	p.signalAvailable()
+}
+
+func (p *transmitter) qPush(pkt interface{}) {
+	p.qLock.Lock()
+	p.qMessages.PushBack(pkt)
+	p.qLock.Unlock()
 	p.signalAvailable()
 	p.run()
+}
+
+func (p *transmitter) qLoad(pkt interface{}) {
+	p.qMessages.PushBack(pkt)
+	p.signalAvailable()
+}
+
+func (p *transmitter) qLoadList(l *list.List) {
+	p.qMessages.PushBackList(l)
+	p.signalAvailable()
 }
 
 func (p *transmitter) signalAvailable() {
 	select {
-	case p.available <- 1:
+	case <-p.quit:
+		return
 	default:
+		select {
+		case p.available <- 1:
+		default:
+		}
+	}
+}
+
+func (p *transmitter) signalQuota() {
+	p.qLock.Lock()
+	p.qExceeded = false
+	l := p.qMessages.Len()
+	p.qLock.Unlock()
+
+	if l > 0 {
+		p.signalAvailable()
+		p.run()
 	}
 }
 
@@ -108,6 +149,96 @@ func (p *transmitter) flushBuffers(buf net.Buffers) error {
 	return e
 }
 
+func (p *transmitter) packetSize(value interface{}) (int, bool) {
+	var sz int
+	var err error
+	if obj, ok := value.(sizeAble); !ok {
+		p.log.Fatal("Object does not belong to allowed types",
+			zap.String("ClientID", p.id),
+			zap.String("Type", reflect.TypeOf(value).String()))
+	} else {
+		if sz, err = obj.Size(); err != nil {
+			p.log.Error("Couldn't calculate message size", zap.String("ClientID", p.id), zap.Error(err))
+			return 0, false
+		}
+	}
+
+	// ignore any packet with size bigger than negotiated
+	if sz > int(p.maxPacketSize) {
+		p.log.Warn("Ignore packet with size bigger than negotiated with client",
+			zap.String("ClientID", p.id),
+			zap.Uint32("negotiated", p.maxPacketSize),
+			zap.Int("actual", sz))
+		return 0, false
+	}
+
+	return sz, true
+}
+
+func (p *transmitter) gAvailable() bool {
+	defer p.gLock.Unlock()
+	p.gLock.Lock()
+
+	return p.gMessages.Len() > 0
+}
+
+func (p *transmitter) qAvailable() bool {
+	defer p.qLock.Unlock()
+	p.qLock.Lock()
+
+	return !p.qExceeded && p.qMessages.Len() > 0
+}
+
+func (p *transmitter) gPopPacket() packet.Provider {
+	defer p.gLock.Unlock()
+	p.gLock.Lock()
+
+	var elem *list.Element
+
+	if elem = p.gMessages.Front(); elem == nil {
+		return nil
+	}
+
+	value := p.gMessages.Remove(elem)
+
+	return value.(packet.Provider)
+}
+
+func (p *transmitter) qPopPacket() packet.Provider {
+	defer p.qLock.Unlock()
+	p.qLock.Lock()
+
+	if elem := p.qMessages.Front(); !p.qExceeded && elem != nil {
+		var pkt packet.Provider
+		value := elem.Value
+		switch m := value.(type) {
+		case *packet.Publish:
+			// try acquire packet id
+			id, err := p.flowControl.acquire()
+			if err == errExit {
+				atomic.StoreUint32(&p.running, 0)
+				return nil
+			}
+
+			if err == errQuotaExceeded {
+				p.qExceeded = true
+			}
+
+			m.SetPacketID(id)
+			pkt = m
+		case *unacknowledgedPublish:
+			pkt = m.msg
+
+		}
+		p.qMessages.Remove(elem)
+		p.pubOut.store(pkt)
+
+		return pkt
+	}
+
+	return nil
+}
+
 func (p *transmitter) routine() {
 	var err error
 
@@ -115,100 +246,102 @@ func (p *transmitter) routine() {
 		p.wg.Done()
 
 		if err != nil {
-			p.onDisconnect(true)
+			p.onDisconnect(true, nil)
 		}
 	}()
 
 	sendBuffers := net.Buffers{}
 	for atomic.LoadUint32(&p.running) == 1 {
 		select {
+		case <-p.quit:
+			err = errors.New("exit")
+			atomic.StoreUint32(&p.running, 0)
+			return
 		case <-p.timer.C:
 			if err = p.flushBuffers(sendBuffers); err != nil {
 				atomic.StoreUint32(&p.running, 0)
 				return
 			}
-
 			sendBuffers = net.Buffers{}
-			p.lock.Lock()
-			l := p.messages.Len()
-			p.lock.Unlock()
 
-			if l != 0 {
+			if p.qAvailable() || p.gAvailable() {
 				p.signalAvailable()
 			} else {
 				atomic.StoreUint32(&p.running, 0)
-				return
 			}
-
 		case <-p.available:
-			p.lock.Lock()
-
-			var elem *list.Element
-
-			if elem = p.messages.Front(); elem == nil {
-				p.lock.Unlock()
-				atomic.StoreUint32(&p.running, 0)
-				break
+			// check if there any control packets except PUBLISH QoS 1/2
+			// and process them
+			var packets []packet.Provider
+			if pkt := p.gPopPacket(); pkt != nil {
+				packets = append(packets, pkt)
 			}
 
-			value := p.messages.Remove(p.messages.Front())
-
-			if p.messages.Len() != 0 {
-				p.signalAvailable()
+			if pkt := p.qPopPacket(); pkt != nil {
+				packets = append(packets, pkt)
 			}
-			p.lock.Unlock()
 
-			var msg packet.Provider
-			switch m := value.(type) {
-			case *packet.Publish:
-				if m.QoS() != packet.QoS0 {
-					var id packet.IDType
-					if id, err = p.flowControl.acquire(); err == nil {
-						m.SetPacketID(id)
-						p.pubOut.store(m)
+			prevLen := len(sendBuffers)
+			for _, pkt := range packets {
+				switch pkt := pkt.(type) {
+				case *packet.Publish:
+					p.setTopicAlias(pkt)
+				}
+
+				if sz, ok := p.packetSize(pkt); ok {
+					buf := make([]byte, sz)
+					if _, err = pkt.Encode(buf); err != nil {
+						p.log.Error("Message encode", zap.Error(err))
 					} else {
-						// if acquire id returned error session is about to exit. Queue message back and get away
-						p.lock.Lock()
-						p.messages.PushBack(m)
-						p.lock.Unlock()
-						err = errors.New("exit")
-						atomic.StoreUint32(&p.running, 0)
-						return
+						sendBuffers = append(sendBuffers, buf)
 					}
 				}
-				msg = m
-			case *unacknowledgedPublish:
-				msg = m.msg
-				p.pubOut.store(msg)
-			default:
-				msg = m.(packet.Provider)
 			}
 
-			var sz int
-			if sz, err = msg.Size(); err != nil {
-				p.log.Error("Couldn't calculate message size", zap.String("ClientID", p.id), zap.Error(err))
-				return
+			available := true
+
+			if p.qAvailable() || p.gAvailable() {
+				p.signalAvailable()
+			} else {
+				available = false
 			}
 
-			buf := make([]byte, sz)
-			_, err = msg.Encode(buf)
-			sendBuffers = append(sendBuffers, buf)
-
-			l := len(sendBuffers)
-			if l == 1 {
+			if prevLen == 0 {
 				p.timer.Reset(1 * time.Millisecond)
-			} else if l == 5 {
+			} else if len(sendBuffers) >= 5 {
 				p.timer.Stop()
 				if err = p.flushBuffers(sendBuffers); err != nil {
 					atomic.StoreUint32(&p.running, 0)
 				}
 
 				sendBuffers = net.Buffers{}
+
+				if !available {
+					atomic.StoreUint32(&p.running, 0)
+				}
 			}
-		case <-p.quit:
-			err = errors.New("exit")
-			atomic.StoreUint32(&p.running, 0)
-			return
+		}
+	}
+}
+
+func (p *transmitter) setTopicAlias(pkt *packet.Publish) {
+	if p.topicAliasMax > 0 {
+		var ok bool
+		var alias uint16
+		if alias, ok = p.topicAlias[pkt.Topic()]; !ok {
+			if p.topicAliasCurrMax < p.topicAliasMax {
+				p.topicAliasCurrMax++
+				alias = p.topicAliasCurrMax
+				ok = true
+			} else {
+				alias = uint16(rand.Intn(int(p.topicAliasMax)) + 1)
+			}
+		} else {
+			ok = false
+		}
+
+		if err := pkt.PropertySet(packet.PropertyTopicAlias, alias); err == nil && !ok {
+			pkt.SetTopic("") // nolint: errcheck
 		}
 	}
 }

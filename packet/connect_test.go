@@ -21,7 +21,7 @@ import (
 )
 
 func newTestConnect(t *testing.T, p ProtocolVersion) *Connect {
-	m, err := NewMessage(p, CONNECT)
+	m, err := New(p, CONNECT)
 	require.NoError(t, err)
 	msg, ok := m.(*Connect)
 	require.True(t, ok, "Couldn't cast message type")
@@ -34,11 +34,11 @@ func TestConnectMessageFields(t *testing.T) {
 
 	require.Equal(t, ProtocolV31, msg.Version(), "Incorrect version number")
 
-	msg.SetCleanStart(true)
-	require.True(t, msg.CleanStart(), "Error setting clean session flag")
+	msg.SetClean(true)
+	require.True(t, msg.IsClean(), "Error setting clean session flag")
 
-	msg.SetCleanStart(false)
-	require.False(t, msg.CleanStart(), "Error setting clean session flag")
+	msg.SetClean(false)
+	require.False(t, msg.IsClean(), "Error setting clean session flag")
 
 	err := msg.SetWill("topic", []byte("message"), QoS1, true)
 	require.NoError(t, err)
@@ -447,7 +447,7 @@ func TestConnectMessageEncode(t *testing.T) {
 	err := msg.SetWill("will", []byte("send me home"), QoS1, false)
 	require.NoError(t, err)
 
-	msg.SetCleanStart(true)
+	msg.SetClean(true)
 	err = msg.SetClientID([]byte("volantmq"))
 	require.NoError(t, err)
 
@@ -467,7 +467,7 @@ func TestConnectMessageEncode(t *testing.T) {
 	// V5.0
 	msgBytes = []byte{
 		byte(CONNECT << 4),
-		63,
+		62,
 		0, // Length MSB (0)
 		4, // Length LSB (4)
 		'M', 'Q', 'T', 'T',
@@ -477,7 +477,7 @@ func TestConnectMessageEncode(t *testing.T) {
 		10,  // Keep Alive LSB (10)
 		0,
 		0, // Client ID MSB (0)
-		8, // Client ID LSB (7)
+		8, // Client ID LSB (8)
 		'v', 'o', 'l', 'a', 'n', 't', 'm', 'q',
 		0, // Will Topic MSB (0)
 		4, // Will Topic LSB (4)
@@ -486,7 +486,7 @@ func TestConnectMessageEncode(t *testing.T) {
 		12, // Will Message LSB (12)
 		's', 'e', 'n', 'd', ' ', 'm', 'e', ' ', 'h', 'o', 'm', 'e',
 		0, // Username ID MSB (0)
-		8, // Username ID LSB (7)
+		8, // Username ID LSB (8)
 		'v', 'o', 'l', 'a', 'n', 't', 'm', 'q',
 		0,  // Password ID MSB (0)
 		10, // Password ID LSB (10)
@@ -498,7 +498,7 @@ func TestConnectMessageEncode(t *testing.T) {
 	err = msg.SetWill("will", []byte("send me home"), QoS1, false)
 	require.NoError(t, err)
 
-	msg.SetCleanStart(true)
+	msg.SetClean(true)
 	err = msg.SetClientID([]byte("volantmq"))
 	require.NoError(t, err)
 
@@ -510,10 +510,10 @@ func TestConnectMessageEncode(t *testing.T) {
 	dst = make([]byte, 100)
 	n, err = msg.Encode(dst)
 
-	require.NoError(t, err, "Error decoding message.")
+	require.NoError(t, err, "Error decoding message")
 	require.Equal(t, ProtocolV50, msg.Version())
-	require.Equal(t, len(msgBytes), n, "Error decoding message.")
-	require.Equal(t, msgBytes, dst[:n], "Error decoding message.")
+	require.Equal(t, len(msgBytes), n, "Error decoding message")
+	require.Equal(t, msgBytes, dst[:n], "Error decoding message")
 }
 
 // test to ensure encoding and decoding are the same

@@ -60,71 +60,76 @@ func (msg *Ack) Reason() ReasonCode {
 	return msg.reasonCode
 }
 
-func (msg *Ack) decodeMessage(src []byte) (int, error) {
-	total := 0
-
-	total += msg.decodePacketID(src[total:])
+func (msg *Ack) decodeMessage(from []byte) (int, error) {
+	offset := msg.decodePacketID(from)
 
 	if msg.version == ProtocolV50 {
-		msg.reasonCode = ReasonCode(src[total])
-		if !msg.reasonCode.IsValidForType(msg.mType) {
-			return total, CodeMalformedPacket
+		// [MQTT-3.4.2.1]
+		if len(from[offset:]) == 0 {
+			msg.reasonCode = CodeSuccess
+			return offset, nil
 		}
-		total++
 
-		// v5 [MQTT-3.1.2.11] specifies properties in variable header
-		var err error
-		var n int
-		if msg.properties, n, err = decodeProperties(msg.mType, src[total:]); err != nil {
-			return total + n, err
+		msg.reasonCode = ReasonCode(from[offset])
+		if !msg.reasonCode.IsValidForType(msg.mType) {
+			return offset, CodeMalformedPacket
 		}
-		total += n
+		offset++
+
+		if len(from[offset:]) > 0 {
+			// v5 [MQTT-3.1.2.11] specifies properties in variable header
+			var err error
+			var n int
+			if msg.properties, n, err = decodeProperties(msg.mType, from[offset:]); err != nil {
+				return offset + n, err
+			}
+			offset += n
+		}
 	}
 
-	return total, nil
+	return offset, nil
 }
 
-func (msg *Ack) encodeMessage(dst []byte) (int, error) {
+func (msg *Ack) encodeMessage(to []byte) (int, error) {
 	// [MQTT-2.3.1]
 	if len(msg.packetID) == 0 {
 		return 0, ErrPackedIDZero
 	}
 
-	total := 0
+	offset := msg.encodePacketID(to)
 
-	total += msg.encodePacketID(dst[total:])
-
+	var err error
 	if msg.version == ProtocolV50 {
-		if !msg.reasonCode.IsValidForType(msg.mType) {
-			return total, ErrInvalidReturnCode
+		pLen := msg.properties.FullLen()
+		if pLen > 1 || msg.reasonCode != CodeSuccess {
+			to[offset] = byte(msg.reasonCode)
+			offset++
+
+			if pLen > 1 {
+				var n int
+				n, err = encodeProperties(msg.properties, to[offset:])
+				offset += n
+			}
 		}
-
-		dst[total] = byte(msg.reasonCode)
-		total++
-
-		// v5 [MQTT-3.1.2.11] specifies properties in variable header
-		var err error
-		var n int
-		if n, err = encodeProperties(msg.properties, dst[total:]); err != nil {
-			return total + n, err
-		}
-
-		total += n
 	}
 
-	return total, nil
+	return offset, err
 }
 
 func (msg *Ack) size() int {
+	// include size of PacketID
 	total := 2
 
 	if msg.version == ProtocolV50 {
-		// V5.0 [MQTT-3.4.2.1]
-		total++
-
-		// v5.0 [MQTT-3.1.2.11]
-		pLen, _ := encodeProperties(msg.properties, []byte{})
-		total += pLen
+		pLen := msg.properties.FullLen()
+		// If properties exist (which indicated when pLen > 1) include in body size reason code and properties
+		// otherwise include only reason code if it differs from CodeSuccess
+		if pLen > 1 || msg.reasonCode != CodeSuccess {
+			total++
+			if pLen > 1 {
+				total += int(pLen)
+			}
+		}
 	}
 
 	return total

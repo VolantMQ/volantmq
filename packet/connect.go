@@ -73,20 +73,20 @@ func newConnect() *Connect {
 //	return msg.version
 //}
 
-// CleanStart returns the bit that specifies the handling of the Session state.
+// IsClean returns the bit that specifies the handling of the Session state.
 // The Client and Server can store Session state to enable reliable messaging to
 // continue across a sequence of Network Connections. This bit is used to control
 // the lifetime of the Session state.
-func (msg *Connect) CleanStart() bool {
-	return (msg.connectFlags & maskConnFlagCleanSession) != 0
+func (msg *Connect) IsClean() bool {
+	return (msg.connectFlags & maskConnFlagClean) != 0
 }
 
-// SetCleanStart sets the bit that specifies the handling of the Session state.
-func (msg *Connect) SetCleanStart(v bool) {
+// SetClean sets the bit that specifies the handling of the Session state.
+func (msg *Connect) SetClean(v bool) {
 	if v {
-		msg.connectFlags |= maskConnFlagCleanSession // 0x02 // 00000010
+		msg.connectFlags |= maskConnFlagClean // 0x02 // 00000010
 	} else {
-		msg.connectFlags &= ^maskConnFlagCleanSession // 0xFD // 11111101
+		msg.connectFlags &= ^maskConnFlagClean // 0xFD // 11111101
 	}
 }
 
@@ -232,131 +232,131 @@ func (msg *Connect) passwordFlag() bool {
 	return (msg.connectFlags & maskConnFlagPassword) != 0
 }
 
-func (msg *Connect) encodeMessage(dst []byte) (int, error) {
+func (msg *Connect) encodeMessage(to []byte) (int, error) {
 	if _, ok := SupportedVersions[msg.version]; !ok {
 		return 0, ErrInvalidProtocolVersion
 	}
 
-	total := 0
+	offset := 0
 
 	// V3.1.1 [MQTT-3.1.2.1]
 	// V5.0   [MQTT-3.1.2.1]
-	n, err := WriteLPBytes(dst[total:], []byte(SupportedVersions[msg.version]))
-	total += n
+	n, err := WriteLPBytes(to[offset:], []byte(SupportedVersions[msg.version]))
+	offset += n
 	if err != nil {
-		return total, err
+		return offset, err
 	}
 
 	// V3.1.1 [MQTT-3.1.2.2]
 	// V5.0   [MQTT-3.1.2.2]
-	dst[total] = byte(msg.version)
-	total++
+	to[offset] = byte(msg.version)
+	offset++
 
 	// V3.1.1 [MQTT-3.1.2.3]
 	// V5.0   [MQTT-3.1.2.3]
-	dst[total] = msg.connectFlags
-	total++
+	to[offset] = msg.connectFlags
+	offset++
 
 	// V3.1.1 [MQTT-3.1.2.10]
 	// V5.0   [MQTT-3.1.2.10]
-	binary.BigEndian.PutUint16(dst[total:], msg.keepAlive)
-	total += 2
+	binary.BigEndian.PutUint16(to[offset:], msg.keepAlive)
+	offset += 2
 
 	// V5.0   [MQTT-3.1.2.11]
 	if msg.version == ProtocolV50 {
-		if n, err = encodeProperties(msg.properties, dst[total:]); err != nil {
-			return total + n, err
+		if n, err = encodeProperties(msg.properties, to[offset:]); err != nil {
+			return offset + n, err
 		}
 
-		total += n
+		offset += n
 	}
 
 	// V3.1.1 [MQTT-3.1.3.1]
 	// V5.0   [MQTT-3.1.3.1]
-	n, err = WriteLPBytes(dst[total:], msg.clientID)
-	total += n
+	n, err = WriteLPBytes(to[offset:], msg.clientID)
+	offset += n
 	if err != nil {
-		return total, err
+		return offset, err
 	}
 
 	if msg.willFlag() {
 		// V3.1.1 [MQTT-3.1.3.2]
 		// V5.0   [MQTT-3.1.3.2]
-		n, err = WriteLPBytes(dst[total:], []byte(msg.will.topic))
-		total += n
+		n, err = WriteLPBytes(to[offset:], []byte(msg.will.topic))
+		offset += n
 		if err != nil {
-			return total, err
+			return offset, err
 		}
 
 		// V3.1.1 [MQTT-3.1.3.3]
 		// V5.0   [MQTT-3.1.3.3]
-		n, err = WriteLPBytes(dst[total:], msg.will.message)
-		total += n
+		n, err = WriteLPBytes(to[offset:], msg.will.message)
+		offset += n
 		if err != nil {
-			return total, err
+			return offset, err
 		}
 	}
 
 	if msg.usernameFlag() {
 		// v3.1.1 [MQTT-3.1.3.4]
 		// v5.0   [MQTT-3.1.3.4]
-		n, err = WriteLPBytes(dst[total:], msg.username)
-		total += n
+		n, err = WriteLPBytes(to[offset:], msg.username)
+		offset += n
 		if err != nil {
-			return total, err
+			return offset, err
 		}
 	}
 
 	if msg.passwordFlag() {
 		// v3.1.1 [MQTT-3.1.3.5]
 		// v5.0   [MQTT-3.1.3.5]
-		n, err = WriteLPBytes(dst[total:], msg.password)
-		total += n
+		n, err = WriteLPBytes(to[offset:], msg.password)
+		offset += n
 		if err != nil {
-			return total, err
+			return offset, err
 		}
 	}
 
-	return total, nil
+	return offset, nil
 }
 
-func (msg *Connect) decodeMessage(src []byte) (int, error) {
+func (msg *Connect) decodeMessage(from []byte) (int, error) {
 	var err error
 	var n int
-	total := 0
+	offset := 0
 
 	var protoName []byte
 
 	// V3.1.1 [MQTT-3.1.2.1]
 	// V5.0   [MQTT-3.1.2.1]
-	if protoName, n, err = ReadLPBytes(src[total:]); err != nil {
-		return total, err
+	if protoName, n, err = ReadLPBytes(from[offset:]); err != nil {
+		return offset, err
 	}
-	total += n
+	offset += n
 
 	// V3.1.1 [MQTT-3.1.2-1]
 	// V5.0   [MQTT-3.1.2-1]
 	if !utf8.Valid(protoName) {
-		return total, ErrProtocolInvalidName
+		return offset, ErrProtocolInvalidName
 	}
 
 	// V3.1.1 [MQTT-3.1.2.2]
 	// V5.0   [MQTT-3.1.2.2]
-	msg.version = ProtocolVersion(src[total])
-	total++
+	msg.version = ProtocolVersion(from[offset])
+	offset++
 
 	// V3.1.1 [MQTT-3.1.2-2]
 	// V5.0   [MQTT-3.1.2-2]
 	if verStr, ok := SupportedVersions[msg.version]; !ok {
-		return total, ErrInvalidProtocolVersion
+		return offset, ErrInvalidProtocolVersion
 	} else if verStr != string(protoName) {
-		return total, ErrInvalidProtocolVersion
+		return offset, ErrInvalidProtocolVersion
 	}
 
 	// V3.1.1 [MQTT-3.1.2.3]
 	// V5.0   [MQTT-3.1.2.3]
-	msg.connectFlags = src[total]
-	total++
+	msg.connectFlags = from[offset]
+	offset++
 
 	// V3.1.1 [MQTT-3.1.2-3]
 	// V5.0   [MQTT-3.1.2-3]
@@ -368,7 +368,7 @@ func (msg *Connect) decodeMessage(src []byte) (int, error) {
 			rejectCode = CodeRefusedServerUnavailable
 		}
 
-		return total, rejectCode
+		return offset, rejectCode
 	}
 
 	// V3.1.1 [MQTT-3.1.2-14]
@@ -381,7 +381,7 @@ func (msg *Connect) decodeMessage(src []byte) (int, error) {
 			rejectCode = CodeRefusedServerUnavailable
 		}
 
-		return total, rejectCode
+		return offset, rejectCode
 	}
 
 	if !msg.willFlag() && (msg.willRetain() || (msg.willQos() != QoS0)) {
@@ -392,38 +392,39 @@ func (msg *Connect) decodeMessage(src []byte) (int, error) {
 			rejectCode = CodeRefusedServerUnavailable
 		}
 
-		return total, rejectCode
+		return offset, rejectCode
 	}
 
 	// V3.1.1 [MQTT-3.1.2-22].
 	if (!msg.usernameFlag() && msg.passwordFlag()) && msg.version < ProtocolV50 {
-		return total, CodeRefusedBadUsernameOrPassword
+		return offset, CodeRefusedBadUsernameOrPassword
 	}
 
 	// V3.1.1 [MQTT-3.1.2.10]
 	// V5.0   [MQTT-3.1.2.10]
-	msg.keepAlive = binary.BigEndian.Uint16(src[total:])
-	total += 2
+	msg.keepAlive = binary.BigEndian.Uint16(from[offset:])
+	offset += 2
 
 	// v5.0   [MQTT-3.1.2.11] specifies properties in variable header
 	if msg.version == ProtocolV50 {
-		if msg.properties, n, err = decodeProperties(msg.mType, src[total:]); err != nil {
-			return total + n, err
+		msg.properties, n, err = decodeProperties(msg.mType, from[offset:])
+		offset += n
+		if err != nil {
+			return offset, err
 		}
-		total += n
 	}
 
 	// V3.1.1 [MQTT-3.1.3.1]
-	msg.clientID, n, err = ReadLPBytes(src[total:])
-	total += n
+	msg.clientID, n, err = ReadLPBytes(from[offset:])
+	offset += n
 	if err != nil {
-		return total, err
+		return offset, err
 	}
 
 	// V3.1.1  [MQTT-3.1.3-7]
 	// If the Client supplies a zero-byte ClientId, the Client MUST also set CleanSession to 1
-	if (len(msg.clientID) == 0 && !msg.CleanStart()) && msg.version < ProtocolV50 {
-		return total, CodeRefusedIdentifierRejected
+	if len(msg.clientID) == 0 && !msg.IsClean() {
+		return offset, CodeRefusedIdentifierRejected
 	}
 
 	// The ClientId must contain only characters 0-9, a-z, and A-Z
@@ -437,7 +438,7 @@ func (msg *Connect) decodeMessage(src []byte) (int, error) {
 			rejectCode = CodeRefusedIdentifierRejected
 		}
 
-		return total, rejectCode
+		return offset, rejectCode
 	}
 
 	if msg.willFlag() {
@@ -445,19 +446,19 @@ func (msg *Connect) decodeMessage(src []byte) (int, error) {
 		// V5.0   [MQTT-3.1.3.2]
 		var buf []byte
 
-		if buf, n, err = ReadLPBytes(src[total:]); err != nil {
-			return total + n, err
+		if buf, n, err = ReadLPBytes(from[offset:]); err != nil {
+			return offset + n, err
 		}
-		total += n
+		offset += n
 
 		msg.will.topic = string(buf)
 
 		// V3.1.1 [3.1.3.3]
 		// V5.0   [3.1.3.3]
-		if buf, n, err = ReadLPBytes(src[total:]); err != nil {
-			return total + n, err
+		if buf, n, err = ReadLPBytes(from[offset:]); err != nil {
+			return offset + n, err
 		}
-		total += n
+		offset += n
 
 		msg.will.message = make([]byte, len(buf))
 		copy(msg.will.message, buf)
@@ -469,22 +470,22 @@ func (msg *Connect) decodeMessage(src []byte) (int, error) {
 	// v3.1.1 [MQTT-3.1.3.4]
 	// v5.0   [MQTT-3.1.3.4]
 	if msg.usernameFlag() {
-		if msg.username, n, err = ReadLPBytes(src[total:]); err != nil {
-			return total + n, err
+		if msg.username, n, err = ReadLPBytes(from[offset:]); err != nil {
+			return offset + n, err
 		}
-		total += n
+		offset += n
 	}
 
 	// v3.1.1 [MQTT-3.1.3.5]
 	// v5.0   [MQTT-3.1.3.5]
 	if msg.passwordFlag() {
-		if msg.password, n, err = ReadLPBytes(src[total:]); err != nil {
-			return total + n, err
+		if msg.password, n, err = ReadLPBytes(from[offset:]); err != nil {
+			return offset + n, err
 		}
-		total += n
+		offset += n
 	}
 
-	return total, nil
+	return offset, nil
 }
 
 func (msg *Connect) size() int {

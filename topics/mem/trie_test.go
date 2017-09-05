@@ -37,11 +37,14 @@ func TestMatch1(t *testing.T) {
 	prov := allocProvider(t)
 	sub := &subscriber.Type{}
 
-	prov.Subscribe("sport/tennis/player1/#", packet.QoS1, sub, 0) // nolint: errcheck
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS1),
+	}
+	prov.Subscribe("sport/tennis/player1/#", sub, p) // nolint: errcheck
 
 	subscribers := publishEntries{}
 
-	prov.subscriptionSearch("sport/tennis/player1/anzel", &subscribers)
+	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers))
 }
 
@@ -50,11 +53,14 @@ func TestMatch2(t *testing.T) {
 
 	sub := &subscriber.Type{}
 
-	prov.Subscribe("sport/tennis/player1/#", packet.QoS2, sub, 0) // nolint: errcheck
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS2),
+	}
+	prov.Subscribe("sport/tennis/player1/#", sub, p) // nolint: errcheck
 
 	subscribers := publishEntries{}
 
-	prov.subscriptionSearch("sport/tennis/player1/anzel", &subscribers)
+	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers))
 }
 
@@ -63,10 +69,14 @@ func TestSNodeMatch3(t *testing.T) {
 
 	sub := &subscriber.Type{}
 
-	prov.Subscribe("sport/tennis/#", packet.QoS2, sub, 0) // nolint: errcheck
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS2),
+	}
+
+	prov.Subscribe("sport/tennis/#", sub, p) // nolint: errcheck
 
 	subscribers := publishEntries{}
-	prov.subscriptionSearch("sport/tennis/player1/anzel", &subscribers)
+	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers))
 }
 
@@ -74,53 +84,56 @@ func TestMatch4(t *testing.T) {
 	prov := allocProvider(t)
 	sub := &subscriber.Type{}
 
-	prov.Subscribe("#", packet.QoS2, sub, 0) // nolint: errcheck
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS2),
+	}
+	prov.Subscribe("#", sub, p) // nolint: errcheck
 
 	subscribers := publishEntries{}
 
-	prov.subscriptionSearch("sport/tennis/player1/anzel", &subscribers)
+	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers), "should return subscribers")
 
 	subscribers = publishEntries{}
-	prov.subscriptionSearch("/sport/tennis/player1/anzel", &subscribers)
+	prov.subscriptionSearch("/sport/tennis/player1/anzel", 0, &subscribers)
 	require.Equal(t, 0, len(subscribers), "should not return subscribers")
 
 	err := prov.subscriptionRemove("#", sub)
 	require.NoError(t, err)
 
 	subscribers = publishEntries{}
-	prov.subscriptionSearch("#", &subscribers)
+	prov.subscriptionSearch("#", 0, &subscribers)
 	require.Equal(t, 0, len(subscribers), "should not return subscribers")
 
-	prov.subscriptionInsert("/#", packet.QoS2, sub, 0)
+	prov.subscriptionInsert("/#", sub, p)
 
 	subscribers = publishEntries{}
-	prov.subscriptionSearch("bla", &subscribers)
+	prov.subscriptionSearch("bla", 0, &subscribers)
 	require.Equal(t, 0, len(subscribers), "should not return subscribers")
 
 	subscribers = publishEntries{}
-	prov.subscriptionSearch("/bla", &subscribers)
+	prov.subscriptionSearch("/bla", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers), "should return subscribers")
 
 	err = prov.subscriptionRemove("/#", sub)
 	require.NoError(t, err)
 
-	prov.subscriptionInsert("bla/bla/#", packet.QoS2, sub, 0)
+	prov.subscriptionInsert("bla/bla/#", sub, p)
 
 	subscribers = publishEntries{}
-	prov.subscriptionSearch("bla", &subscribers)
+	prov.subscriptionSearch("bla", 0, &subscribers)
 	require.Equal(t, 0, len(subscribers), "should not return subscribers")
 
 	subscribers = publishEntries{}
-	prov.subscriptionSearch("bla/bla", &subscribers)
+	prov.subscriptionSearch("bla/bla", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers), "should return subscribers")
 
 	subscribers = publishEntries{}
-	prov.subscriptionSearch("bla/bla/bla", &subscribers)
+	prov.subscriptionSearch("bla/bla/bla", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers), "should return subscribers")
 
 	subscribers = publishEntries{}
-	prov.subscriptionSearch("bla/bla/bla/bla", &subscribers)
+	prov.subscriptionSearch("bla/bla/bla/bla", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers), "should return subscribers")
 }
 
@@ -129,11 +142,15 @@ func TestMatch5(t *testing.T) {
 	sub1 := &subscriber.Type{}
 	sub2 := &subscriber.Type{}
 
-	prov.subscriptionInsert("sport/tennis/+/+/#", packet.QoS1, sub1, 0)
-	prov.subscriptionInsert("sport/tennis/player1/anzel", packet.QoS1, sub2, 0)
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS1),
+	}
+
+	prov.subscriptionInsert("sport/tennis/+/+/#", sub1, p)
+	prov.subscriptionInsert("sport/tennis/player1/anzel", sub2, p)
 
 	subscribers := publishEntries{}
-	prov.subscriptionSearch("sport/tennis/player1/anzel", &subscribers)
+	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subscribers)
 
 	require.Equal(t, 2, len(subscribers))
 }
@@ -142,12 +159,15 @@ func TestMatch6(t *testing.T) {
 	prov := allocProvider(t)
 	sub1 := &subscriber.Type{}
 	sub2 := &subscriber.Type{}
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS1),
+	}
 
-	prov.subscriptionInsert("sport/tennis/+/+/+/+/#", packet.QoS1, sub1, 0)
-	prov.subscriptionInsert("sport/tennis/player1/anzel", packet.QoS1, sub2, 0)
+	prov.subscriptionInsert("sport/tennis/+/+/+/+/#", sub1, p)
+	prov.subscriptionInsert("sport/tennis/player1/anzel", sub2, p)
 
 	subscribers := publishEntries{}
-	prov.subscriptionSearch("sport/tennis/player1/anzel/bla/bla", &subscribers)
+	prov.subscriptionSearch("sport/tennis/player1/anzel/bla/bla", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers))
 }
 
@@ -156,13 +176,18 @@ func TestMatch7(t *testing.T) {
 
 	sub1 := &subscriber.Type{}
 	sub2 := &subscriber.Type{}
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS2),
+	}
 
-	prov.subscriptionInsert("sport/tennis/#", packet.QoS2, sub1, 0)
+	prov.subscriptionInsert("sport/tennis/#", sub1, p)
 
-	prov.subscriptionInsert("sport/tennis", packet.QoS1, sub2, 0)
+	p.Ops = packet.SubscriptionOptions(packet.QoS1)
+
+	prov.subscriptionInsert("sport/tennis", sub2, p)
 
 	subscribers := publishEntries{}
-	prov.subscriptionSearch("sport/tennis/player1/anzel", &subscribers)
+	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers))
 	require.Equal(t, sub1, subscribers[sub1.Hash()][0].s)
 }
@@ -170,13 +195,16 @@ func TestMatch7(t *testing.T) {
 func TestMatch8(t *testing.T) {
 	prov := allocProvider(t)
 
-	sub1 := &subscriber.Type{}
+	sub := &subscriber.Type{}
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS2),
+	}
 
-	prov.subscriptionInsert("+/+", packet.QoS2, sub1, 0)
+	prov.subscriptionInsert("+/+", sub, p)
 
 	subscribers := publishEntries{}
 
-	prov.subscriptionSearch("/finance", &subscribers)
+	prov.subscriptionSearch("/finance", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers))
 }
 
@@ -184,12 +212,15 @@ func TestMatch9(t *testing.T) {
 	prov := allocProvider(t)
 
 	sub1 := &subscriber.Type{}
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS2),
+	}
 
-	prov.subscriptionInsert("/+", packet.QoS2, sub1, 0)
+	prov.subscriptionInsert("/+", sub1, p)
 
 	subscribers := publishEntries{}
 
-	prov.subscriptionSearch("/finance", &subscribers)
+	prov.subscriptionSearch("/finance", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers))
 }
 
@@ -197,44 +228,50 @@ func TestMatch10(t *testing.T) {
 	prov := allocProvider(t)
 
 	sub1 := &subscriber.Type{}
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS2),
+	}
 
-	prov.subscriptionInsert("+", packet.QoS2, sub1, 0)
+	prov.subscriptionInsert("+", sub1, p)
 
 	subscribers := publishEntries{}
 
-	prov.subscriptionSearch("/finance", &subscribers)
+	prov.subscriptionSearch("/finance", 0, &subscribers)
 	require.Equal(t, 0, len(subscribers))
 }
 
 func TestInsertRemove(t *testing.T) {
 	prov := allocProvider(t)
 	sub := &subscriber.Type{}
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS2),
+	}
 
-	prov.subscriptionInsert("#", packet.QoS2, sub, 0)
+	prov.subscriptionInsert("#", sub, p)
 
 	subscribers := publishEntries{}
-	prov.subscriptionSearch("bla", &subscribers)
+	prov.subscriptionSearch("bla", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers))
 
 	subscribers = publishEntries{}
-	prov.subscriptionSearch("/bla", &subscribers)
+	prov.subscriptionSearch("/bla", 0, &subscribers)
 	require.Equal(t, 0, len(subscribers))
 
 	err := prov.subscriptionRemove("#", sub)
 	require.NoError(t, err)
 
 	subscribers = publishEntries{}
-	prov.subscriptionSearch("#", &subscribers)
+	prov.subscriptionSearch("#", 0, &subscribers)
 	require.Equal(t, 0, len(subscribers))
 
-	prov.subscriptionInsert("/#", packet.QoS2, sub, 0)
+	prov.subscriptionInsert("/#", sub, p)
 
 	subscribers = publishEntries{}
-	prov.subscriptionSearch("bla", &subscribers)
+	prov.subscriptionSearch("bla", 0, &subscribers)
 	require.Equal(t, 0, len(subscribers))
 
 	subscribers = publishEntries{}
-	prov.subscriptionSearch("/bla", &subscribers)
+	prov.subscriptionSearch("/bla", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers))
 
 	err = prov.subscriptionRemove("#", sub)
@@ -249,7 +286,11 @@ func TestInsert1(t *testing.T) {
 	topic := "sport/tennis/player1/#"
 
 	sub1 := &subscriber.Type{}
-	prov.subscriptionInsert(topic, packet.QoS1, sub1, 0)
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS1),
+	}
+
+	prov.subscriptionInsert(topic, sub1, p)
 	require.Equal(t, 1, len(prov.root.children))
 	require.Equal(t, 0, len(prov.root.subs))
 
@@ -288,8 +329,11 @@ func TestSNodeInsert2(t *testing.T) {
 	topic := "#"
 
 	sub1 := &subscriber.Type{}
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS1),
+	}
 
-	prov.subscriptionInsert(topic, packet.QoS1, sub1, 0)
+	prov.subscriptionInsert(topic, sub1, p)
 	require.Equal(t, 1, len(prov.root.children))
 	require.Equal(t, 0, len(prov.root.subs))
 
@@ -311,8 +355,11 @@ func TestSNodeInsert3(t *testing.T) {
 	topic := "+/tennis/#"
 
 	sub1 := &subscriber.Type{}
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS1),
+	}
 
-	prov.subscriptionInsert(topic, packet.QoS1, sub1, 0)
+	prov.subscriptionInsert(topic, sub1, p)
 	require.Equal(t, 1, len(prov.root.children))
 	require.Equal(t, 0, len(prov.root.subs))
 
@@ -346,8 +393,11 @@ func TestSNodeInsert4(t *testing.T) {
 	topic := "/finance"
 
 	sub1 := &subscriber.Type{}
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS1),
+	}
 
-	prov.subscriptionInsert(topic, packet.QoS1, sub1, 0)
+	prov.subscriptionInsert(topic, sub1, p)
 	require.Equal(t, 1, len(prov.root.children))
 	require.Equal(t, 0, len(prov.root.subs))
 
@@ -375,9 +425,12 @@ func TestSNodeInsertDup(t *testing.T) {
 	topic := "/finance"
 
 	sub1 := &subscriber.Type{}
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS1),
+	}
 
-	prov.subscriptionInsert(topic, packet.QoS1, sub1, 0)
-	prov.subscriptionInsert(topic, packet.QoS1, sub1, 0)
+	prov.subscriptionInsert(topic, sub1, p)
+	prov.subscriptionInsert(topic, sub1, p)
 
 	require.Equal(t, 1, len(prov.root.children))
 	require.Equal(t, 0, len(prov.root.subs))
@@ -406,8 +459,11 @@ func TestSNodeRemove1(t *testing.T) {
 	topic := "sport/tennis/player1/#"
 
 	sub1 := &subscriber.Type{}
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS1),
+	}
 
-	prov.subscriptionInsert(topic, packet.QoS1, sub1, 0)
+	prov.subscriptionInsert(topic, sub1, p)
 
 	err := prov.subscriptionRemove(topic, sub1)
 	require.NoError(t, err)
@@ -421,8 +477,11 @@ func TestSNodeRemove2(t *testing.T) {
 	topic := "sport/tennis/player1/#"
 
 	sub1 := &subscriber.Type{}
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS1),
+	}
 
-	prov.subscriptionInsert(topic, packet.QoS1, sub1, 0)
+	prov.subscriptionInsert(topic, sub1, p)
 
 	err := prov.subscriptionRemove("sport/tennis/player1", sub1)
 	require.EqualError(t, topicsTypes.ErrNotFound, err.Error())
@@ -435,8 +494,12 @@ func TestSNodeRemove3(t *testing.T) {
 	sub1 := &subscriber.Type{}
 	sub2 := &subscriber.Type{}
 
-	prov.subscriptionInsert(topic, packet.QoS1, sub1, 0)
-	prov.subscriptionInsert(topic, packet.QoS1, sub2, 0)
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS1),
+	}
+
+	prov.subscriptionInsert(topic, sub1, p)
+	prov.subscriptionInsert(topic, sub2, p)
 
 	err := prov.subscriptionRemove("sport/tennis/player1/#", nil)
 	require.NoError(t, err)
@@ -452,13 +515,17 @@ func TestRetain1(t *testing.T) {
 		prov.retain(m)
 	}
 
-	_, rMsg, _ := prov.Subscribe("#", packet.QoS1, sub, 0)
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS1),
+	}
+
+	_, rMsg, _ := prov.Subscribe("#", sub, p)
 	require.Equal(t, 0, len(rMsg))
 
-	_, rMsg, _ = prov.Subscribe("$SYS", packet.QoS1, sub, 0)
+	_, rMsg, _ = prov.Subscribe("$SYS", sub, p)
 	require.Equal(t, 0, len(rMsg))
 
-	_, rMsg, _ = prov.Subscribe("$SYS/#", packet.QoS1, sub, 0)
+	_, rMsg, _ = prov.Subscribe("$SYS/#", sub, p)
 	require.Equal(t, len(retainedSystree), len(rMsg))
 }
 
@@ -473,13 +540,17 @@ func TestRetain2(t *testing.T) {
 	msg := newPublishMessageLarge("sport/tennis/player1/ricardo", packet.QoS1)
 	prov.retain(msg)
 
-	prov.Subscribe("#", packet.QoS1, sub, 0) // nolint: errcheck
+	p := &topicsTypes.SubscriptionParams{
+		Ops: packet.SubscriptionOptions(packet.QoS1),
+	}
+
+	prov.Subscribe("#", sub, p) // nolint: errcheck
 
 	var rMsg []*packet.Publish
 	prov.retainSearch("#", &rMsg)
 	require.Equal(t, 1, len(rMsg))
 
-	_, rMsg, _ = prov.Subscribe("$SYS/#", packet.QoS1, sub, 0)
+	_, rMsg, _ = prov.Subscribe("$SYS/#", sub, p)
 	require.Equal(t, len(retainedSystree), len(rMsg))
 }
 
@@ -596,7 +667,7 @@ func TestRNodeMatch(t *testing.T) {
 }
 
 func newPublishMessageLarge(topic string, qos packet.QosType) *packet.Publish {
-	m, _ := packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
+	m, _ := packet.New(packet.ProtocolV311, packet.PUBLISH)
 
 	msg := m.(*packet.Publish)
 

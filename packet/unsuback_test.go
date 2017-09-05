@@ -21,7 +21,7 @@ import (
 )
 
 func TestUnSubAckMessageFields(t *testing.T) {
-	m, err := NewMessage(ProtocolV311, UNSUBACK)
+	m, err := New(ProtocolV311, UNSUBACK)
 	require.NoError(t, err)
 
 	msg, ok := m.(*UnSubAck)
@@ -74,7 +74,7 @@ func TestUnSubAckMessageEncode(t *testing.T) {
 		7, // packet ID LSB (7)
 	}
 
-	m, err := NewMessage(ProtocolV311, UNSUBACK)
+	m, err := New(ProtocolV311, UNSUBACK)
 	require.NoError(t, err)
 
 	msg, ok := m.(*UnSubAck)

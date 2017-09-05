@@ -21,7 +21,7 @@ import (
 )
 
 func TestConnAckMessageFields(t *testing.T) {
-	m, err := NewMessage(ProtocolV311, CONNACK)
+	m, err := New(ProtocolV311, CONNACK)
 	require.NoError(t, err)
 
 	msg, ok := m.(*ConnAck)
@@ -117,7 +117,7 @@ func TestConnAckMessageEncode(t *testing.T) {
 		0, // connection accepted
 	}
 
-	m, err := NewMessage(ProtocolV311, CONNACK)
+	m, err := New(ProtocolV311, CONNACK)
 	require.NoError(t, err)
 
 	msg, ok := m.(*ConnAck)
@@ -169,7 +169,7 @@ func TestConnAckDecodeEncodeEquiv(t *testing.T) {
 func TestConnAckEncodeEnsureSize(t *testing.T) {
 	dst := make([]byte, 3)
 
-	m, err := NewMessage(ProtocolV311, CONNACK)
+	m, err := New(ProtocolV311, CONNACK)
 	require.NoError(t, err)
 
 	msg, ok := m.(*ConnAck)
@@ -183,7 +183,7 @@ func TestConnAckEncodeEnsureSize(t *testing.T) {
 }
 
 func TestConnAckCodeWrite(t *testing.T) {
-	m, err := NewMessage(ProtocolV311, CONNACK)
+	m, err := New(ProtocolV311, CONNACK)
 	require.NoError(t, err)
 
 	msg, ok := m.(*ConnAck)

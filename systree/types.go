@@ -87,7 +87,7 @@ func (m *dynamicValue) Topic() string {
 
 func (m *dynamicValue) Retained() *packet.Publish {
 	if m.retained == nil {
-		np, _ := packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
+		np, _ := packet.New(packet.ProtocolV311, packet.PUBLISH)
 		m.retained, _ = np.(*packet.Publish)
 		m.retained.SetTopic(m.topic)   // nolint: errcheck
 		m.retained.SetQoS(packet.QoS0) // nolint: errcheck
@@ -101,7 +101,7 @@ func (m *dynamicValue) Retained() *packet.Publish {
 
 func (m *dynamicValue) Publish() *packet.Publish {
 	if m.publish == nil {
-		np, _ := packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
+		np, _ := packet.New(packet.ProtocolV311, packet.PUBLISH)
 		m.publish, _ = np.(*packet.Publish)
 		m.publish.SetTopic(m.topic)   // nolint: errcheck
 		m.publish.SetQoS(packet.QoS0) // nolint: errcheck

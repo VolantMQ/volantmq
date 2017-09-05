@@ -123,8 +123,7 @@ func (msg *SubAck) size() int {
 	total := 2 + len(msg.returnCodes)
 	// v5.0 [MQTT-3.1.2.11]
 	if msg.version == ProtocolV50 {
-		pLen, _ := encodeProperties(msg.properties, []byte{})
-		total += pLen
+		total += int(msg.properties.FullLen())
 	}
 
 	return total

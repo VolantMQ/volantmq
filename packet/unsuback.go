@@ -62,47 +62,39 @@ func (msg *UnSubAck) AddReturnCode(ret ReasonCode) error {
 }
 
 // decode message
-func (msg *UnSubAck) decodeMessage(src []byte) (int, error) {
-	total := msg.decodePacketID(src)
+func (msg *UnSubAck) decodeMessage(from []byte) (int, error) {
+	offset := msg.decodePacketID(from)
 
-	if msg.version == ProtocolV50 && (int(msg.remLen)-total) > 0 {
+	if msg.version == ProtocolV50 && (int(msg.remLen)-offset) > 0 {
 		var n int
 		var err error
-		if msg.properties, n, err = decodeProperties(msg.Type(), src[total:]); err != nil {
-			return total + n, err
+		if msg.properties, n, err = decodeProperties(msg.Type(), from[offset:]); err != nil {
+			return offset + n, err
 		}
 
-		total += n
+		offset += n
 	}
 
-	return total, nil
+	return offset, nil
 }
 
-func (msg *UnSubAck) encodeMessage(dst []byte) (int, error) {
+func (msg *UnSubAck) encodeMessage(to []byte) (int, error) {
 	// [MQTT-2.3.1]
 	if len(msg.packetID) == 0 {
 		return 0, ErrPackedIDZero
 	}
 
-	total := msg.encodePacketID(dst)
+	offset := msg.encodePacketID(to)
 
+	var err error
 	if msg.version == ProtocolV50 {
 		var n int
-		var err error
 
-		if n, err = encodeProperties(msg.properties, []byte{}); err != nil {
-			return total, err
-		}
-
-		if n > 1 {
-			if n, err = encodeProperties(msg.properties, dst[total:]); err != nil {
-				return total + n, err
-			}
-			total += n
-		}
+		n, err = encodeProperties(msg.properties, to[offset:])
+		offset += n
 	}
 
-	return total, nil
+	return offset, err
 }
 
 func (msg *UnSubAck) size() int {
@@ -110,12 +102,10 @@ func (msg *UnSubAck) size() int {
 	total := 2
 
 	if msg.version == ProtocolV50 {
-		pLen, _ := encodeProperties(msg.properties, []byte{})
-		total += pLen
-
-		if pLen > 1 {
-			total += pLen
-		}
+		total += int(msg.properties.FullLen())
+		//if pLen := msg.properties.FullLen(); pLen > 1 {
+		//	total += int(pLen)
+		//}
 	}
 
 	return total

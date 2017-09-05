@@ -21,7 +21,7 @@ import (
 )
 
 func TestPubRelMessageFields(t *testing.T) {
-	m, err := NewMessage(ProtocolV311, PUBREL)
+	m, err := New(ProtocolV311, PUBREL)
 	require.NoError(t, err)
 
 	msg, ok := m.(*Ack)
@@ -74,7 +74,7 @@ func TestPubRelMessageEncode(t *testing.T) {
 		7, // packet ID LSB (7)
 	}
 
-	m, err := NewMessage(ProtocolV311, PUBREL)
+	m, err := New(ProtocolV311, PUBREL)
 	require.NoError(t, err)
 
 	msg, ok := m.(*Ack)

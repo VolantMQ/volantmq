@@ -14,12 +14,15 @@ import (
 
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
+	"github.com/VolantMQ/volantmq/connection"
 	"github.com/VolantMQ/volantmq/packet"
 	"github.com/VolantMQ/volantmq/persistence/types"
 	"github.com/VolantMQ/volantmq/routines"
 	"github.com/VolantMQ/volantmq/subscriber"
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/topics/types"
+	"github.com/VolantMQ/volantmq/types"
+	"github.com/troian/easygo/netpoll"
 	"go.uber.org/zap"
 )
 
@@ -30,48 +33,39 @@ var (
 
 // Config manager configuration
 type Config struct {
-	// Topics manager for all the client subscriptions
-	TopicsMgr topicsTypes.Provider
-
-	Persist persistenceTypes.Provider
-
-	Systree systree.Provider
-
-	// OnReplaceAttempt If requested we notify if there is attempt to dup session
-	OnReplaceAttempt func(string, bool)
-
-	NodeName string
-
-	// The number of seconds to wait for the CONNACK message before disconnecting.
-	// If not set then default to 2 seconds.
-	ConnectTimeout int
-
-	// The number of seconds to keep the connection live if there's no data.
-	// If not set then defaults to 5 minutes.
-	KeepAlive int
-
-	// AllowReplace Either allow or deny replacing of existing session if there new client with same clientID
-	AllowReplace bool
-
-	OfflineQoS0 bool
+	TopicsMgr                     topicsTypes.Provider
+	Persist                       persistenceTypes.Provider
+	Systree                       systree.Provider
+	OnReplaceAttempt              func(string, bool)
+	NodeName                      string
+	ConnectTimeout                int
+	KeepAlive                     int
+	MaxPacketSize                 uint32
+	ReceiveMax                    uint16
+	TopicAliasMaximum             uint16
+	MaximumQoS                    packet.QosType
+	AvailableRetain               bool
+	AvailableWildcardSubscription bool
+	AvailableSubscriptionID       bool
+	AvailableSharedSubscription   bool
+	OfflineQoS0                   bool
+	AllowReplace                  bool
+	ForceKeepAlive                bool
 }
 
 // Manager clients manager
 type Manager struct {
-	systree          systree.Provider
-	persistence      persistenceTypes.Sessions
-	topics           topicsTypes.SubscriberInterface
-	onReplaceAttempt func(string, bool)
-	log              *zap.Logger
-	quit             chan struct{}
-	sessionsCount    sync.WaitGroup
-	sessions         sync.Map
-	subscribers      sync.Map
-	allowReplace     bool
-	offlineQoS0      bool
+	Config
+	persistence   persistenceTypes.Sessions
+	log           *zap.Logger
+	quit          chan struct{}
+	sessionsCount sync.WaitGroup
+	sessions      sync.Map
+	subscribers   sync.Map
+	poll          netpoll.EventPoll
 }
 
-// StartConfig used to configure session after connection is created
+// StartConfig used to reconfigure session after connection is created
 type StartConfig struct {
 	Req  *packet.Connect
 	Resp *packet.ConnAck
@@ -82,15 +76,12 @@ type StartConfig struct {
 // NewManager create new clients manager
 func NewManager(c *Config) (*Manager, error) {
 	m := &Manager{
-		systree:          c.Systree,
-		topics:           c.TopicsMgr,
-		onReplaceAttempt: c.OnReplaceAttempt,
-		allowReplace:     c.AllowReplace,
-		offlineQoS0:      c.OfflineQoS0,
-		quit:             make(chan struct{}),
-		log:              configuration.GetProdLogger().Named("sessions"),
+		Config: *c,
+		quit:   make(chan struct{}),
+		log:    configuration.GetLogger().Named("sessions"),
 	}
 
+	m.poll, _ = netpoll.New(nil)
 	m.persistence, _ = c.Persist.Sessions()
 
 	var err error
@@ -144,13 +135,10 @@ func (m *Manager) Shutdown() error {
 func (m *Manager) NewSession(config *StartConfig) {
 	var id string
 	var ses *session
-	var sub subscriber.ConnectionProvider
 	var err error
 	idGenerated := false
-	sessionPresent := false
-	username, _ := config.Req.Credentials()
 
-	sesProperties := newProperties()
+	var systreeConnStatus *systree.ClientConnectStatus
 
 	defer func() {
 		if err != nil {
@@ -162,12 +150,6 @@ func (m *Manager) NewSession(config *StartConfig) {
 				reason = packet.CodeRefusedServerUnavailable
 			}
 			config.Resp.SetReturnCode(reason) // nolint: errcheck
-		} else {
-			config.Resp.SetSessionPresent(sessionPresent)
-
-			if idGenerated {
-				config.Resp.PropertySet(packet.PropertyAssignedClientIdentifier, id) // nolint: errcheck
-			}
 		}
 
 		if err = routines.WriteMessage(config.Conn, config.Resp); err != nil {
@@ -175,44 +157,12 @@ func (m *Manager) NewSession(config *StartConfig) {
 		} else {
 			if ses != nil {
 				ses.start()
-				m.systree.Clients().Connected(
-					id,
-					&systree.ClientConnectStatus{
-						Address:           config.Conn.RemoteAddr().String(),
-						Username:          string(username),
-						Timestamp:         time.Now().Format(time.RFC3339),
-						ReceiveMaximum:    uint32(sesProperties.ReceiveMaximum),
-						MaximumPacketSize: sesProperties.MaximumPacketSize,
-						KeepAlive:         config.Req.KeepAlive(),
-						GeneratedID:       idGenerated,
-						CleanSession:      config.Req.CleanStart(),
-						SessionPresent:    sessionPresent,
-						Protocol:          config.Req.Version(),
-						ConnAckCode:       config.Resp.ReturnCode(),
-					})
+				m.Systree.Clients().Connected(id, systreeConnStatus)
 			}
-		}
-
-		if ses != nil {
-			ses.release()
 		}
 	}()
 
-	// check first if server is not about to shutdown
-	// if so just give reject and exit
-	select {
-	case <-m.quit:
-		var reason packet.ReasonCode
-		switch config.Req.Version() {
-		case packet.ProtocolV50:
-			reason = packet.CodeServerShuttingDown
-			// TODO: if cluster route client to another node
-		default:
-			reason = packet.CodeRefusedServerUnavailable
-		}
-		config.Resp.SetReturnCode(reason) // nolint: errcheck
-	default:
-	}
+	m.checkServerStatus(config.Req.Version(), config.Resp)
 
 	// if response has return code differs from CodeSuccess return from this point
 	// and send connack in deferred statement
@@ -226,135 +176,310 @@ func (m *Manager) NewSession(config *StartConfig) {
 		idGenerated = true
 	}
 
-	config.Req.PropertyForEach(func(id packet.PropertyID, val interface{}) { // nolint: errcheck
-		switch id {
-		case packet.PropertySessionExpiryInterval:
-			v := time.Duration(val.(uint32))
-			sesProperties.ExpireIn = &v
-		case packet.PropertyWillDelayInterval:
-			sesProperties.WillDelay = time.Duration(val.(uint32))
-		case packet.PropertyReceiveMaximum:
-			sesProperties.ReceiveMaximum = val.(uint16)
-		case packet.PropertyMaximumPacketSize:
-			sesProperties.MaximumPacketSize = val.(uint32)
-		case packet.PropertyTopicAliasMaximum:
-			sesProperties.TopicAliasMaximum = val.(uint16)
-		case packet.PropertyRequestProblemInfo:
-			sesProperties.RequestProblemInfo = val.(bool)
-		case packet.PropertyRequestResponseInfo:
-			sesProperties.RequestResponse = val.(bool)
-		case packet.PropertyUserProperty:
-			sesProperties.UserProperties = val
-		case packet.PropertyAuthMethod:
-			sesProperties.AuthMethod = val.(string)
-		case packet.PropertyAuthData:
-			sesProperties.AuthData = val.([]byte)
-		}
-	})
-
-	if ss, ok := m.sessions.Load(id); ok {
-		ses = ss.(*session)
-		ses.acquire()
-	}
-
-	if ses != nil && !ses.toOnline() {
-		if !m.allowReplace {
-			// duplicate prohibited. send identifier rejected
-			var reason packet.ReasonCode
-			switch config.Req.Version() {
-			case packet.ProtocolV50:
-				reason = packet.CodeInvalidClientID
-			default:
-				reason = packet.CodeRefusedIdentifierRejected
-			}
-
-			config.Resp.SetReturnCode(reason) // nolint: errcheck
-			err = ErrReplaceNotAllowed
-			m.onReplaceAttempt(id, false)
-			ses = nil
-			return
-		}
-		// replace allowed stop current session
-		ses.stop(packet.CodeSessionTakenOver)
-		ses.release()
-		m.onReplaceAttempt(id, true)
-		ses = nil
-	}
-
-	var persistedMessages *persistenceTypes.SessionMessages
-
-	sub, persistedMessages, sessionPresent = m.getSubscriber(id, config.Req.CleanStart(), config.Req.Version())
-
-	expireInterval := "absent"
-	if sesProperties.ExpireIn != nil {
-		expireInterval = strconv.FormatUint(uint64(*sesProperties.ExpireIn), 10)
-	}
-
-	if !sessionPresent {
-		state := &systree.SessionCreatedStatus{
-			ExpiryInterval: expireInterval,
-			WillDelay:      strconv.FormatUint(uint64(sesProperties.WillDelay), 10),
-			Timestamp:      time.Now().Format(time.RFC3339),
-			Clean:          config.Req.CleanStart(),
-		}
-
-		m.systree.Sessions().Created(id, state)
-	}
-
-	var willMsg *packet.Publish
-	if willTopic, willPayload, willQoS, willRetain, will := config.Req.Will(); will {
-		_m, _ := packet.NewMessage(config.Req.Version(), packet.PUBLISH)
-		willMsg = _m.(*packet.Publish)
-		willMsg.SetQoS(willQoS)     // nolint: errcheck
-		willMsg.SetTopic(willTopic) // nolint: errcheck
-		willMsg.SetPayload(willPayload)
-		willMsg.SetRetain(willRetain)
-	}
-
-	if ses == nil {
-		ses, err = newSession(&sessionConfig{
-			id:           id,
-			onPersist:    m.onSessionPersist,
-			onClose:      m.onSessionClose,
-			onDisconnect: m.onClientDisconnect,
-			messenger:    m.topics,
-			clean:        config.Req.CleanStart(),
-		})
-		if err == nil {
-			ses.acquire()
-			m.sessions.Store(id, ses)
-			m.sessionsCount.Add(1)
-		}
-	}
-
-	if ses != nil {
-		ses.configure(&setupConfig{
-			subscriber: sub,
-			will:       willMsg,
-			expireIn:   sesProperties.ExpireIn,
-			willDelay:  sesProperties.WillDelay,
-		}, false)
-
-		err = ses.allocConnection(&connectionConfig{
-			username:  string(username),
-			state:     persistedMessages,
-			auth:      config.Auth,
-			metric:    m.systree.Metric(),
-			conn:      config.Conn,
-			keepAlive: config.Req.KeepAlive(),
-			sendQuota: sesProperties.ReceiveMaximum,
-			version:   config.Req.Version(),
-		})
-
-		if err == nil && persistedMessages != nil {
-			m.persistence.MessagesWipe([]byte(id)) // nolint: errcheck
+	if ses, err = m.loadSession(id, config.Req.Version(), config.Resp); err == nil {
+		if systreeConnStatus, err = m.configureSession(config, ses, id, idGenerated); err != nil {
+			m.sessions.Delete(id)
+			m.sessionsCount.Done()
 		}
 	}
 }
 
-func (m *Manager) getSubscriber(id string, clean bool, v packet.ProtocolVersion) (subscriber.ConnectionProvider, *persistenceTypes.SessionMessages, bool) {
+func (m *Manager) loadSession(id string, v packet.ProtocolVersion, resp *packet.ConnAck) (*session, error) {
+	var err error
+
+	var ses *session
+	wrap := m.allocSession(id, time.Now())
+	if ss, ok := m.sessions.LoadOrStore(id, wrap); ok {
+		// release lock of newly allocated session as lock from old one will be used
+		wrap.release()
+		// there is some old session exists, check if it has active network connection then stop if so
+		// if it is offline (either waiting for expiration to fire or will event or) switch back to online
+		// and use this session henceforth
+		oldWrap := ss.(*sessionWrap)
+
+		// lock id to prevent other upcoming session make any changes until we done
+		oldWrap.acquire()
+
+		old := oldWrap.s
+
+		switch old.setOnline() {
+		case swStatusIsOnline:
+			// existing session has active network connection
+			// exempt it if allowed
+			m.OnReplaceAttempt(id, m.AllowReplace)
+			if !m.AllowReplace {
+				// we do not make any changes to current network connection
+				// response to new one with error and release both new & old sessions
+				err = packet.CodeRefusedIdentifierRejected
+				if v >= packet.ProtocolV50 {
+					err = packet.CodeInvalidClientID
+				}
+				oldWrap.release()
+			} else {
+				// session will be replaced with new connection
+				// stop current active connection
+				old.stop(packet.CodeSessionTakenOver)
+				ses = oldWrap.swap(wrap)
+				m.sessions.Store(id, oldWrap)
+				m.sessionsCount.Add(1)
+			}
+		case swStatusSwitched:
+			// session has been turned online successfully
+			ses = old
+		default:
+			ses = oldWrap.swap(wrap)
+			m.sessions.Store(id, oldWrap)
+			m.sessionsCount.Add(1)
+		}
+	} else {
+		ses = wrap.s
+		m.sessionsCount.Add(1)
+	}
+
+	return ses, err
+}
+
+func (m *Manager) checkServerStatus(v packet.ProtocolVersion, resp *packet.ConnAck) {
+	// check first if server is not about to shutdown
+	// if so just give reject and exit
+	select {
+	case <-m.quit:
+		var reason packet.ReasonCode
+		switch v {
+		case packet.ProtocolV50:
+			reason = packet.CodeServerShuttingDown
+			// TODO: if cluster route client to another node
+		default:
+			reason = packet.CodeRefusedServerUnavailable
+		}
+		resp.SetReturnCode(reason) // nolint: errcheck
+	default:
+	}
+}
+
+func (m *Manager) allocSession(id string, createdAt time.Time) *sessionWrap {
+	wrap := &sessionWrap{
+		s: newSession(&sessionPreConfig{
+			id:        id,
+			createdAt: createdAt,
+			messenger: m.TopicsMgr,
+			sessionEvents: sessionEvents{
+				persist:            m.onSessionPersist,
+				signalClose:        m.onSessionClose,
+				signalDisconnected: m.onDisconnect,
+				shutdownSubscriber: m.onSubscriberShutdown,
+			},
+		})}
+	wrap.acquire()
+	wrap.s.idLock = &wrap.lock
+
+	return wrap
+}
+
+func (m *Manager) getWill(pkt *packet.Connect) *packet.Publish {
+	var willPkt *packet.Publish
+	if willTopic, willPayload, willQoS, willRetain, will := pkt.Will(); will {
+		_m, _ := packet.New(pkt.Version(), packet.PUBLISH)
+		willPkt = _m.(*packet.Publish)
+		willPkt.Set(willTopic, willPayload, willQoS, willRetain, false) // nolint: errcheck
+	}
+
+	return willPkt
+}
+
+func (m *Manager) newConnectionPreConfig(config *StartConfig) *connection.PreConfig {
+	username, _ := config.Req.Credentials()
+
+	return &connection.PreConfig{
+		Username:        string(username),
+		Auth:            config.Auth,
+		Conn:            config.Conn,
+		KeepAlive:       config.Req.KeepAlive(),
+		Version:         config.Req.Version(),
+		Desc:            netpoll.Must(netpoll.HandleReadOnce(config.Conn)),
+		MaxTxPacketSize: types.DefaultMaxPacketSize,
+		SendQuota:       types.DefaultReceiveMax,
+		State:           m.persistence,
+		StartReceiving:  m.signalStartRead,
+		WaitForData:     m.signalWaitForRead,
+		StopReceiving:   m.signalReceiveStop,
+		Metric:          m.Systree.Metric(),
+		RetainAvailable: m.AvailableRetain,
+		OfflineQoS0:     m.OfflineQoS0,
+		MaxRxPacketSize: m.MaxPacketSize,
+		MaxRxTopicAlias: m.TopicAliasMaximum,
+		MaxTxTopicAlias: 0,
+	}
+}
+
+func (m *Manager) configureSession(config *StartConfig, ses *session, id string, idGenerated bool) (*systree.ClientConnectStatus, error) {
+	sub, sessionPresent := m.getSubscriber(id, config.Req.IsClean(), config.Req.Version())
+
+	sConfig := &sessionReConfig{
+		subscriber:       sub,
+		will:             m.getWill(config.Req),
+		killOnDisconnect: false,
+	}
+
+	cConfig := m.newConnectionPreConfig(config)
+
+	if config.Req.Version() >= packet.ProtocolV50 {
+		if err := readSessionProperties(config.Req, sConfig, cConfig); err != nil {
+			return nil, err
+		}
+
+		ids := ""
+		if idGenerated {
+			ids = id
+		}
+
+		m.writeSessionProperties(config.Resp, ids)
+		if err := config.Resp.PropertySet(packet.PropertyServerKeepAlive, m.KeepAlive); err != nil {
+			return nil, err
+		}
+	}
+
+	// MQTT v5 has different meaning of clean comparing to MQTT v3
+	//  - v3: if session is clean it lasts when Network connection os close
+	//  - v5: clean means clean start and server must wipe any previously created session with same id
+	//        but keep this one if Network Connection is closed
+	if (config.Req.Version() <= packet.ProtocolV311 && config.Req.IsClean()) ||
+		(sConfig.expireIn != nil && *sConfig.expireIn == 0) {
+		sConfig.killOnDisconnect = true
+	}
+
+	ses.reconfigure(sConfig, false)
+
+	present, err := ses.allocConnection(cConfig)
+	var status *systree.ClientConnectStatus
+
+	sessionPresent = sessionPresent || present
+
+	if err == nil {
+		if !config.Req.IsClean() {
+			m.persistence.Delete([]byte(id)) // nolint: errcheck
+		}
+
+		status = &systree.ClientConnectStatus{
+			Username:          cConfig.Username,
+			Timestamp:         time.Now().Format(time.RFC3339),
+			ReceiveMaximum:    uint32(cConfig.SendQuota),
+			MaximumPacketSize: cConfig.MaxTxPacketSize,
+			GeneratedID:       idGenerated,
+			SessionPresent:    sessionPresent,
+			Address:           config.Conn.RemoteAddr().String(),
+			KeepAlive:         config.Req.KeepAlive(),
+			Protocol:          config.Req.Version(),
+			ConnAckCode:       config.Resp.ReturnCode(),
+			CleanSession:      config.Req.IsClean(),
+			KillOnDisconnect:  sConfig.killOnDisconnect,
+		}
+	}
+
+	config.Resp.SetSessionPresent(sessionPresent)
+
+	return status, err
+}
+
+func boolToByte(v bool) byte {
+	if v {
+		return 1
+	}
+
+	return 0
+}
+
+func readSessionProperties(req *packet.Connect, sc *sessionReConfig, cc *connection.PreConfig) (err error) {
+	// [MQTT-3.1.2.11.2]
+	if prop := req.PropertyGet(packet.PropertySessionExpiryInterval); prop != nil {
+		if val, e := prop.AsInt(); e == nil {
+			v := time.Duration(val)
+			sc.expireIn = &v
+		}
+	}
+
+	// [MQTT-3.1.2.11.3]
+	if prop := req.PropertyGet(packet.PropertyWillDelayInterval); prop != nil {
+		if val, e := prop.AsInt(); e == nil {
+			sc.willDelay = time.Duration(val)
+		}
+	}
+
+	// [MQTT-3.1.2.11.4]
+	if prop := req.PropertyGet(packet.PropertyReceiveMaximum); prop != nil {
+		if val, e := prop.AsShort(); e == nil {
+			cc.SendQuota = int32(val)
+		}
+	}
+
+	// [MQTT-3.1.2.11.5]
+	if prop := req.PropertyGet(packet.PropertyMaximumPacketSize); prop != nil {
+		if val, e := prop.AsInt(); e == nil {
+			cc.MaxTxPacketSize = val
+		}
+	}
+
+	// [MQTT-3.1.2.11.6]
+	if prop := req.PropertyGet(packet.PropertyTopicAliasMaximum); prop != nil {
+		if val, e := prop.AsShort(); e == nil {
+			cc.MaxTxTopicAlias = val
+		}
+	}
+
+	// [MQTT-3.1.2.11.10]
+	if prop := req.PropertyGet(packet.PropertyAuthMethod); prop != nil {
+		if val, e := prop.AsString(); e == nil {
+			cc.AuthMethod = val
+		}
+	}
+
+	// [MQTT-3.1.2.11.11]
+	if prop := req.PropertyGet(packet.PropertyAuthData); prop != nil {
+		if len(cc.AuthMethod) == 0 {
+			err = packet.CodeProtocolError
+			return
+		}
+		if val, e := prop.AsBinary(); e == nil {
+			cc.AuthData = val
+		}
+	}
+
+	return
+}
+
+func (m *Manager) writeSessionProperties(resp *packet.ConnAck, id string) {
+	// [MQTT-3.2.2.3.2] if server receive max less than 65536 than let client to know about
+	if m.ReceiveMax < types.DefaultReceiveMax {
+		resp.PropertySet(packet.PropertyReceiveMaximum, m.ReceiveMax) // nolint: errcheck
+	}
+	// [MQTT-3.2.2.3.3] if supported server's QoS less than 2 notify client
+	if m.MaximumQoS < packet.QoS2 {
+		resp.PropertySet(packet.PropertyMaximumQoS, byte(m.MaximumQoS)) // nolint: errcheck
+	}
+	// [MQTT-3.2.2.3.4] tell client whether retained messages supported
+	resp.PropertySet(packet.PropertyRetainAvailable, boolToByte(m.AvailableRetain)) // nolint: errcheck
+	// [MQTT-3.2.2.3.5] if server max packet size less than 268435455 than let client to know about
+	if m.MaxPacketSize < types.DefaultMaxPacketSize {
+		resp.PropertySet(packet.PropertyMaximumPacketSize, m.MaxPacketSize) // nolint: errcheck
+	}
+	// [MQTT-3.2.2.3.6]
+	if len(id) > 0 {
+		resp.PropertySet(packet.PropertyAssignedClientIdentifier, id) // nolint: errcheck
+	}
+	// [MQTT-3.2.2.3.7]
+	if m.TopicAliasMaximum > 0 {
+		resp.PropertySet(packet.PropertyTopicAliasMaximum, m.TopicAliasMaximum) // nolint: errcheck
+	}
+	// [MQTT-3.2.2.3.10] tell client whether server supports wildcard subscriptions or not
+	resp.PropertySet(packet.PropertyWildcardSubscriptionAvailable, boolToByte(m.AvailableWildcardSubscription)) // nolint: errcheck
+	// [MQTT-3.2.2.3.11] tell client whether server supports subscription identifiers or not
+	resp.PropertySet(packet.PropertySubscriptionIdentifierAvailable, boolToByte(m.AvailableSubscriptionID)) // nolint: errcheck
+	// [MQTT-3.2.2.3.12] tell client whether server supports shared subscriptions or not
+	resp.PropertySet(packet.PropertySharedSubscriptionAvailable, boolToByte(m.AvailableSharedSubscription)) // nolint: errcheck
+}
+
+func (m *Manager) getSubscriber(id string, clean bool, v packet.ProtocolVersion) (subscriber.ConnectionProvider, bool) {
 	var sub subscriber.ConnectionProvider
-	var state *persistenceTypes.SessionMessages
 	present := false
 
 	if clean {
@@ -363,33 +488,29 @@ func (m *Manager) getSubscriber(id string, clean bool, v packet.ProtocolVersion)
 			sub.Offline(true)
 			m.subscribers.Delete(id)
 		}
-		m.persistence.Delete([]byte(id)) // nolint: errcheck
-	} else {
-		var err error
-		if state, err = m.persistence.MessagesLoad([]byte(id)); err != nil && err != persistenceTypes.ErrNotFound {
-			m.log.Error("Couldn't load session state", zap.String("ClientID", id), zap.Error(err))
-		} else if err == nil {
-			present = true
-			m.persistence.Delete([]byte(id)) // nolint: errcheck
+		if err := m.persistence.Delete([]byte(id)); err != nil && err != persistenceTypes.ErrNotFound {
+			m.log.Error("Couldn't wipe session", zap.String("ClientID", id), zap.Error(err))
 		}
 	}
 
 	if sb, ok := m.subscribers.Load(id); !ok {
 		sub = subscriber.New(&subscriber.Config{
 			ID:               id,
-			Topics:           m.topics,
+			Topics:           m.TopicsMgr,
 			OnOfflinePublish: m.onPublish,
-			OfflineQoS0:      m.offlineQoS0,
+			OfflineQoS0:      m.OfflineQoS0,
 			Version:          v,
 		})
 
 		m.subscribers.Store(id, sub)
+		m.log.Debug("Subscriber created", zap.String("ClientID", id))
 	} else {
+		m.log.Debug("Subscriber obtained", zap.String("ClientID", id))
 		sub = sb.(subscriber.ConnectionProvider)
 		present = true
 	}
 
-	return sub, state, present
+	return sub, present
 }
 
 func (m *Manager) genClientID() string {
@@ -405,20 +526,35 @@ func (m *Manager) onSessionPersist(id string, state *persistenceTypes.SessionMes
 	m.persistence.MessagesStore([]byte(id), state) // nolint: errcheck
 }
 
-func (m *Manager) onClientDisconnect(id string, clean bool, reason packet.ReasonCode) {
-	m.systree.Clients().Disconnected(id, reason, clean)
+func (m *Manager) signalStartRead(desc *netpoll.Desc, cb netpoll.CallbackFn) error {
+	return m.poll.Start(desc, cb)
+}
+
+func (m *Manager) signalWaitForRead(desc *netpoll.Desc) error {
+	return m.poll.Resume(desc)
+}
+
+func (m *Manager) signalReceiveStop(desc *netpoll.Desc) error {
+	return m.poll.Stop(desc)
+}
+
+func (m *Manager) onDisconnect(id string, reason packet.ReasonCode, retain bool) {
+	m.log.Debug("Disconnected", zap.String("ClientID", id))
+	m.Systree.Clients().Disconnected(id, reason, retain)
+}
+
+func (m *Manager) onSubscriberShutdown(sub subscriber.ConnectionProvider) {
+	m.log.Debug("Shutdown subscriber", zap.String("ClientID", sub.ID()))
+	sub.Offline(true)
+	m.subscribers.Delete(sub.ID())
 }
 
 func (m *Manager) onSessionClose(id string, reason exitReason) {
-	if reason != exitReasonKeepSubscriber {
-		m.subscribers.Delete(id)
-	}
-
-	if reason == exitReasonClean {
-		m.persistence.Delete([]byte(id)) // nolint: errcheck
-	}
-
 	if reason == exitReasonClean || reason == exitReasonExpired {
+		if err := m.persistence.Delete([]byte(id)); err != nil && err != persistenceTypes.ErrNotFound {
+			m.log.Error("Couldn't wipe session", zap.String("ClientID", id), zap.Error(err))
+		}
+
 		rs := "clean"
 		if reason == exitReasonExpired {
 			rs = "expired"
@@ -429,8 +565,10 @@ func (m *Manager) onSessionClose(id string, reason exitReason) {
 			Reason:    rs,
 		}
 
-		m.systree.Sessions().Removed(id, state)
+		m.Systree.Sessions().Removed(id, state)
 	}
+
+	m.log.Debug("Session close", zap.String("ClientID", id))
 
 	m.sessions.Delete(id)
 	m.sessionsCount.Done()
@@ -454,39 +592,26 @@ func (m *Manager) loadSessions() error {
 		}
 
 		if state.ExpireIn != nil || state.Will != nil {
-			var err error
-			var ses *session
 			createdAt, _ := time.Parse(time.RFC3339, state.Timestamp)
-			ses, err = newSession(&sessionConfig{
-				id:           string(id),
-				createdAt:    createdAt,
-				onPersist:    m.onSessionPersist,
-				onClose:      m.onSessionClose,
-				onDisconnect: m.onClientDisconnect,
-				messenger:    m.topics,
-				clean:        false,
-			})
-			if err == nil {
-				m.sessions.Store(string(id), ses)
-				m.sessionsCount.Add(1)
-
-				setup := &setupConfig{
-					subscriber: nil,
-					expireIn:   state.ExpireIn,
-				}
-
-				if state.Will != nil {
-					msg, _, _ := packet.Decode(state.Version, state.Will.Message)
-					willMsg, _ := msg.(*packet.Publish)
-					setup.will = willMsg
-					setup.willDelay = state.Will.Delay
-				}
-				ses.configure(setup, true)
-			} else {
-				return err
+			ses := m.allocSession(string(id), createdAt)
+			setup := &sessionReConfig{
+				subscriber:       nil,
+				expireIn:         state.ExpireIn,
+				killOnDisconnect: false,
 			}
+
+			if state.Will != nil {
+				msg, _, _ := packet.Decode(state.Version, state.Will.Message)
+				willMsg, _ := msg.(*packet.Publish)
+				setup.will = willMsg
+				setup.willDelay = state.Will.Delay
+			}
+			ses.s.reconfigure(setup, true)
+			m.sessions.Store(id, ses)
+			m.sessionsCount.Add(1)
+			ses.release()
 		}
-		m.systree.Sessions().Created(string(id), status)
+		m.Systree.Sessions().Created(string(id), status)
 
 		return nil
 	})
@@ -516,9 +641,9 @@ func (m *Manager) loadSubscribers() error {
 
 			offset += total
 
-			params := &subscriber.SubscriptionParams{}
+			params := &topicsTypes.SubscriptionParams{}
 
-			params.Requested = packet.SubscriptionOptions(data[offset])
+			params.Ops = packet.SubscriptionOptions(data[offset])
 			offset++
 
 			params.ID = binary.BigEndian.Uint32(data[offset:])
@@ -541,9 +666,9 @@ func (m *Manager) loadSubscribers() error {
 		sub := subscriber.New(
 			&subscriber.Config{
 				ID:               id,
-				Topics:           m.topics,
+				Topics:           m.TopicsMgr,
 				OnOfflinePublish: m.onPublish,
-				OfflineQoS0:      m.offlineQoS0,
+				OfflineQoS0:      m.OfflineQoS0,
 				Version:          t.version,
 			})
 
@@ -594,7 +719,7 @@ func (m *Manager) storeSubscribers() error {
 		for s, params := range topics {
 			total, _ := packet.WriteLPBytes(buf[offset:], []byte(s))
 			offset += total
-			buf[offset] = byte(params.Requested)
+			buf[offset] = byte(params.Ops)
 			offset++
 			binary.BigEndian.PutUint32(buf[offset:], params.ID)
 			offset += 4

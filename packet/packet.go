@@ -16,6 +16,18 @@ const (
 	maskConnAckSessionPresent byte = 0x01
 )
 
+// RetainHandling describe how retained messages are handled during subscribe
+type RetainHandling uint8
+
+const (
+	// RetainHandlingRetain publish retained messages on subscribe
+	RetainHandlingRetain RetainHandling = iota
+	// RetainHandlingIfNotExists publish retained messages on subscribe only when it's new subscription to given topic
+	RetainHandlingIfNotExists
+	// RetainHandlingDoNotRetain do not publish retained messages on subscribe
+	RetainHandlingDoNotRetain
+)
+
 // SubscriptionOptions as per [MQTT-3.8.3.1]
 type SubscriptionOptions byte
 
@@ -52,8 +64,8 @@ func (s SubscriptionOptions) RAP() bool {
 //    1 = Send retained messages at subscribe only if the subscription does not currently exist
 //    2 = Do not send retained messages at the time of the subscribe
 // V5.0 ONLY
-func (s SubscriptionOptions) RetainHandling() byte {
-	return (byte(s) & maskSubscriptionRetainHandling) >> offsetSubscriptionRetainHandling
+func (s SubscriptionOptions) RetainHandling() RetainHandling {
+	return RetainHandling((byte(s) & maskSubscriptionRetainHandling) >> offsetSubscriptionRetainHandling)
 }
 
 // Provider is an interface defined for all MQTT message types.
@@ -87,11 +99,11 @@ type Provider interface {
 	// Version get protocol version used by message
 	Version() ProtocolVersion
 
-	PropertyGet(PropertyID) (interface{}, error)
+	PropertyGet(PropertyID) PropertyToType
 
 	PropertySet(PropertyID, interface{}) error
 
-	PropertyForEach(func(PropertyID, interface{})) error
+	PropertyForEach(func(PropertyID, PropertyToType)) error
 
 	// decode reads the bytes in the byte slice from the argument. It returns the
 	// total number of bytes decoded, and whether there's any errors during the
@@ -120,10 +132,22 @@ type Provider interface {
 	setType(t Type)
 }
 
-// NewMessage creates a new message based on the message type. It is a shortcut to call
+// New creates a new message based on the message type. It is a shortcut to call
 // one of the New*Message functions. If an error is returned then the message type
 // is invalid.
-func NewMessage(v ProtocolVersion, t Type) (Provider, error) {
+func New(v ProtocolVersion, t Type) (Provider, error) {
+	m, err := newMessage(v, t)
+	if err == nil {
+		h := m.getHeader()
+		if v == ProtocolV50 && (t != PINGREQ && t != PINGRESP) {
+			h.properties = newProperty()
+		}
+	}
+
+	return m, err
+}
+
+func newMessage(v ProtocolVersion, t Type) (Provider, error) {
 	var m Provider
 
 	switch t {
@@ -206,8 +230,8 @@ func Decode(v ProtocolVersion, buf []byte) (msg Provider, total int, err error) 
 	// [MQTT-2.2]
 	mType := Type(buf[0] >> offsetPacketType)
 
-	// [MQTT-2.2.1] Type.NewMessage validates message type
-	if msg, err = NewMessage(v, mType); err != nil {
+	// [MQTT-2.2.1] Type.New validates message type
+	if msg, err = New(v, mType); err != nil {
 		return nil, 0, err
 	}
 
@@ -222,8 +246,7 @@ func Decode(v ProtocolVersion, buf []byte) (msg Provider, total int, err error) 
 // considered valid if it's longer than 0 bytes, and doesn't contain any wildcard characters
 // such as + and #.
 func ValidTopic(topic string) bool {
-	return len(topic) > 0 &&
-		utf8.Valid([]byte(topic)) &&
+	return utf8.Valid([]byte(topic)) &&
 		!strings.Contains(topic, "#") &&
 		!strings.Contains(topic, "+")
 }

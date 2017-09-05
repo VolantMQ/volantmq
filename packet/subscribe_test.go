@@ -24,7 +24,7 @@ import (
 )
 
 func TestSubscribeMessageFields(t *testing.T) {
-	m, err := NewMessage(ProtocolV311, SUBSCRIBE)
+	m, err := New(ProtocolV311, SUBSCRIBE)
 	require.NoError(t, err)
 
 	msg, ok := m.(*Subscribe)
@@ -123,7 +123,7 @@ func TestSubscribeMessageEncode(t *testing.T) {
 		2, // QoS
 	}
 
-	m, err := NewMessage(ProtocolV311, SUBSCRIBE)
+	m, err := New(ProtocolV311, SUBSCRIBE)
 	require.NoError(t, err)
 
 	msg, ok := m.(*Subscribe)

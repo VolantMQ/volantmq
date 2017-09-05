@@ -41,7 +41,7 @@ func TestPingReqMessageEncode(t *testing.T) {
 		0,
 	}
 
-	m, err := NewMessage(ProtocolV311, PINGREQ)
+	m, err := New(ProtocolV311, PINGREQ)
 	require.NoError(t, err)
 
 	msg, ok := m.(*PingReq)
@@ -74,7 +74,7 @@ func TestPingRespMessageEncode(t *testing.T) {
 		0,
 	}
 
-	m, err := NewMessage(ProtocolV311, PINGRESP)
+	m, err := New(ProtocolV311, PINGRESP)
 	require.NoError(t, err)
 
 	msg, ok := m.(*PingResp)
