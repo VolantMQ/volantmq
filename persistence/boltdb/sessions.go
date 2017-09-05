@@ -6,8 +6,8 @@ import (
 	"encoding/binary"
 	"time"
 
+	"github.com/VolantMQ/volantmq/persistence/types"
 	"github.com/boltdb/bolt"
-	"github.com/troian/surgemq/persistence/types"
 )
 
 type sessions struct {

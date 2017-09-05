@@ -3,12 +3,12 @@ package mem
 import (
 	"testing"
 
+	"github.com/VolantMQ/volantmq/packet"
+	"github.com/VolantMQ/volantmq/subscriber"
+	"github.com/VolantMQ/volantmq/systree"
+	"github.com/VolantMQ/volantmq/topics/types"
+	"github.com/VolantMQ/volantmq/types"
 	"github.com/stretchr/testify/require"
-	"github.com/troian/surgemq/packet"
-	"github.com/troian/surgemq/subscriber"
-	"github.com/troian/surgemq/systree"
-	"github.com/troian/surgemq/topics/types"
-	"github.com/troian/surgemq/types"
 )
 
 var sysTree systree.Provider

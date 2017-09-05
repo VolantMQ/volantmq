@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The SurgeMQ Authors. All rights reserved.
+// Copyright (c) 2014 The VolantMQ Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package surgemq is a high performance MQTT broker and client library that aims to be
+// Package volantmq is a high performance MQTT broker and client library that aims to be
 // fully compliant with MQTT 3.1 and 3.1.1 specs.
 //
 // The primary package that's of interest is package service. It provides the
@@ -44,28 +44,25 @@
 //     network traffic.
 //   - A mechanism to notify interested parties when an abnormal disconnection occurs.
 //
-// Current performance benchmark of SurgeMQ, running all publishers, subscribers
+// Current performance benchmark of VolantMQ, running all publishers, subscribers
 // and broker on a single 4-core (2.8Ghz i7) MacBook Pro, is able to achieve:
 //   - over 400,000 MPS in a 1:1 single publisher and single producer configuration
 //   - over 450,000 MPS in a 20:1 fan-in configuration
 //   - over 750,000 MPS in a 1:20 fan-out configuration
 //   - over 700,000 MPS in a full mesh configuration with 20 clients
 //
-// In addition, SurgeMQ has been tested with the following client libraries and
+// In addition, VolantMQ has been tested with the following client libraries and
 // it _seems_ to work:
 //   - libmosquitto 1.3.5 (C)
 //     - Tested with the bundled test programs msgsps_pub and msgsps_sub
 //   - Paho MQTT Conformance/Interoperability Testing Suite (Python)
-//     - Tested with all 10 test cases, 3 did not pass. They are
-//       1) offline_message_queueing_test which is not supported by SurgeMQ,
-//       2) redelivery_on_reconnect_test which is not yet implemented by SurgeMQ,
-//       3) run_subscribe_failure_test which is not a valid test.
+//     - Tested with all 10 test cases.
 //   - Paho Go Client Library (Go)
 //     - Tested with one of the tests in the library, in fact, that tests is now
-//       part of the tests for SurgeMQ
+//       part of the tests for VolantMQ
 //   - Paho C Client library (C)
 //     - Tested with most of the test cases and failed the same ones as the
 //       conformance test because the features are not yet implemented.
 //     - Actually I think there's a bug in the test suite as it calls the PUBLISH
 //       handler function for non-PUBLISH messages.
-package surgemq
+package volantmq

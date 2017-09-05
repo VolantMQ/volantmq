@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The SurgeMQ Authors. All rights reserved.
+// Copyright (c) 2014 The VolantMQ Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -121,7 +121,7 @@ func TestConnectMessageFields(t *testing.T) {
 func TestConnectMessageDecodeV3(t *testing.T) {
 	msgBytes := []byte{
 		byte(CONNECT << 4),
-		60,
+		62,
 		0, // Length MSB (0)
 		4, // Length LSB (4)
 		'M', 'Q', 'T', 'T',
@@ -130,8 +130,8 @@ func TestConnectMessageDecodeV3(t *testing.T) {
 		0,   // Keep Alive MSB (0)
 		10,  // Keep Alive LSB (10)
 		0,   // Client ID MSB (0)
-		7,   // Client ID LSB (7)
-		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		8,   // Client ID LSB (7)
+		'v', 'o', 'l', 'a', 'n', 't', 'm', 'q',
 		0, // Will Topic MSB (0)
 		4, // Will Topic LSB (4)
 		'w', 'i', 'l', 'l',
@@ -139,14 +139,15 @@ func TestConnectMessageDecodeV3(t *testing.T) {
 		12, // Will Message LSB (12)
 		's', 'e', 'n', 'd', ' ', 'm', 'e', ' ', 'h', 'o', 'm', 'e',
 		0, // Username ID MSB (0)
-		7, // Username ID LSB (7)
-		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		8, // Username ID LSB (7)
+		'v', 'o', 'l', 'a', 'n', 't', 'm', 'q',
 		0,  // Password ID MSB (0)
 		10, // Password ID LSB (10)
 		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e', 't',
 	}
 
 	m, n, err := Decode(ProtocolV311, msgBytes)
+	require.NoError(t, err, "Error decoding message")
 	msg, ok := m.(*Connect)
 	require.Equal(t, true, ok, "Invalid message type")
 
@@ -154,7 +155,7 @@ func TestConnectMessageDecodeV3(t *testing.T) {
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
 	require.Equal(t, 206, int(msg.connectFlags), "Incorrect flag value.")
 	require.Equal(t, 10, int(msg.KeepAlive()), "Incorrect KeepAlive value.")
-	require.Equal(t, "surgemq", string(msg.ClientID()), "Incorrect client ID value.")
+	require.Equal(t, "volantmq", string(msg.ClientID()), "Incorrect client ID value.")
 
 	willTopic, willMessage, willQos, willRetain, will := msg.Will()
 
@@ -165,7 +166,7 @@ func TestConnectMessageDecodeV3(t *testing.T) {
 	require.False(t, willRetain, "Incorrect will retain flag")
 
 	username, password := msg.Credentials()
-	require.Equal(t, "surgemq", string(username), "Incorrect username value.")
+	require.Equal(t, "volantmq", string(username), "Incorrect username value.")
 	require.Equal(t, "verysecret", string(password), "Incorrect password value.")
 
 	_, _, err = Decode(ProtocolV50, msgBytes)
@@ -416,7 +417,7 @@ func TestConnectMessageDecode5(t *testing.T) {
 func TestConnectMessageEncode(t *testing.T) {
 	msgBytes := []byte{
 		byte(CONNECT << 4),
-		60,
+		62,
 		0, // Length MSB (0)
 		4, // Length LSB (4)
 		'M', 'Q', 'T', 'T',
@@ -425,8 +426,8 @@ func TestConnectMessageEncode(t *testing.T) {
 		0,   // Keep Alive MSB (0)
 		10,  // Keep Alive LSB (10)
 		0,   // Client ID MSB (0)
-		7,   // Client ID LSB (7)
-		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		8,   // Client ID LSB (7)
+		'v', 'o', 'l', 'a', 'n', 't', 'm', 'q',
 		0, // Will Topic MSB (0)
 		4, // Will Topic LSB (4)
 		'w', 'i', 'l', 'l',
@@ -434,8 +435,8 @@ func TestConnectMessageEncode(t *testing.T) {
 		12, // Will Message LSB (12)
 		's', 'e', 'n', 'd', ' ', 'm', 'e', ' ', 'h', 'o', 'm', 'e',
 		0, // Username ID MSB (0)
-		7, // Username ID LSB (7)
-		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		8, // Username ID LSB (7)
+		'v', 'o', 'l', 'a', 'n', 't', 'm', 'q',
 		0,  // Password ID MSB (0)
 		10, // Password ID LSB (10)
 		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e', 't',
@@ -447,12 +448,12 @@ func TestConnectMessageEncode(t *testing.T) {
 	require.NoError(t, err)
 
 	msg.SetCleanStart(true)
-	err = msg.SetClientID([]byte("surgemq"))
+	err = msg.SetClientID([]byte("volantmq"))
 	require.NoError(t, err)
 
 	msg.SetKeepAlive(10)
 
-	err = msg.SetCredentials([]byte("surgemq"), []byte("verysecret"))
+	err = msg.SetCredentials([]byte("volantmq"), []byte("verysecret"))
 	require.NoError(t, err)
 
 	dst := make([]byte, 100)
@@ -466,7 +467,7 @@ func TestConnectMessageEncode(t *testing.T) {
 	// V5.0
 	msgBytes = []byte{
 		byte(CONNECT << 4),
-		61,
+		63,
 		0, // Length MSB (0)
 		4, // Length LSB (4)
 		'M', 'Q', 'T', 'T',
@@ -476,8 +477,8 @@ func TestConnectMessageEncode(t *testing.T) {
 		10,  // Keep Alive LSB (10)
 		0,
 		0, // Client ID MSB (0)
-		7, // Client ID LSB (7)
-		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		8, // Client ID LSB (7)
+		'v', 'o', 'l', 'a', 'n', 't', 'm', 'q',
 		0, // Will Topic MSB (0)
 		4, // Will Topic LSB (4)
 		'w', 'i', 'l', 'l',
@@ -485,8 +486,8 @@ func TestConnectMessageEncode(t *testing.T) {
 		12, // Will Message LSB (12)
 		's', 'e', 'n', 'd', ' ', 'm', 'e', ' ', 'h', 'o', 'm', 'e',
 		0, // Username ID MSB (0)
-		7, // Username ID LSB (7)
-		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		8, // Username ID LSB (7)
+		'v', 'o', 'l', 'a', 'n', 't', 'm', 'q',
 		0,  // Password ID MSB (0)
 		10, // Password ID LSB (10)
 		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e', 't',
@@ -498,12 +499,12 @@ func TestConnectMessageEncode(t *testing.T) {
 	require.NoError(t, err)
 
 	msg.SetCleanStart(true)
-	err = msg.SetClientID([]byte("surgemq"))
+	err = msg.SetClientID([]byte("volantmq"))
 	require.NoError(t, err)
 
 	msg.SetKeepAlive(10)
 
-	err = msg.SetCredentials([]byte("surgemq"), []byte("verysecret"))
+	err = msg.SetCredentials([]byte("volantmq"), []byte("verysecret"))
 	require.NoError(t, err)
 
 	dst = make([]byte, 100)

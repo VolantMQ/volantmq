@@ -1,7 +1,7 @@
 package mem
 
 import (
-	"github.com/troian/surgemq/persistence/types"
+	"github.com/VolantMQ/volantmq/persistence/types"
 )
 
 type retained struct {

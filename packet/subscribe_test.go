@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The SurgeMQ Authors. All rights reserved.
+// Copyright (c) 2014 The VolantMQ Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -49,12 +49,12 @@ func TestSubscribeMessageFields(t *testing.T) {
 func TestSubscribeMessageDecode(t *testing.T) {
 	msgBytes := []byte{
 		byte(SUBSCRIBE<<4) | 2,
-		36,
+		37,
 		0, // packet ID MSB (0)
 		7, // packet ID LSB (7)
 		0, // topic name MSB (0)
-		7, // topic name LSB (7)
-		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		8, // topic name LSB (7)
+		'v', 'o', 'l', 'a', 'n', 't', 'm', 'q',
 		0, // QoS
 		0, // topic name MSB (0)
 		8, // topic name LSB (8)
@@ -76,8 +76,8 @@ func TestSubscribeMessageDecode(t *testing.T) {
 	require.Equal(t, SUBSCRIBE, msg.Type(), "Error decoding message.")
 	require.Equal(t, 3, msg.Topics().Len(), "Error decoding topics.")
 
-	ops, ok := msg.topics.Get("surgemq")
-	require.True(t, ok, "Topic 'surgemq' should exist.")
+	ops, ok := msg.topics.Get("volantmq")
+	require.True(t, ok, "Topic 'volantmq' should exist.")
 	require.Equal(t, SubscriptionOptions(QoS0), ops, "Incorrect topic qos.")
 
 	ops, ok = msg.topics.Get("/a/b/#/c")
@@ -111,7 +111,7 @@ func TestSubscribeMessageEncode(t *testing.T) {
 		7, // packet ID LSB (7)
 		0, // topic name MSB (0)
 		7, // topic name LSB (7)
-		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		'v', 'o', 'l', 'a', 'n', 't', 'm', 'q',
 		0, // QoS
 		0, // topic name MSB (0)
 		8, // topic name LSB (8)
@@ -130,7 +130,7 @@ func TestSubscribeMessageEncode(t *testing.T) {
 	require.True(t, ok, "Couldn't cast message type")
 
 	msg.SetPacketID(7)
-	msg.AddTopic("surgemq", 0)    // nolint: errcheck
+	msg.AddTopic("volantmq", 0)   // nolint: errcheck
 	msg.AddTopic("/a/b/#/c", 1)   // nolint: errcheck
 	msg.AddTopic("/a/b/#/cdd", 2) // nolint: errcheck
 
@@ -148,7 +148,7 @@ func TestSubscribeMessageEncode(t *testing.T) {
 	require.NoError(t, err, "Error decoding message.")
 	require.Equal(t, len(msgBytes), n, "Error decoding message.")
 
-	ops, ok := msg1.Topics().Get("surgemq")
+	ops, ok := msg1.Topics().Get("volantmq")
 	require.True(t, ok, "Error decoding message.")
 	require.Equal(t, SubscriptionOptions(QoS0), ops, "Error decoding message.")
 
@@ -168,12 +168,12 @@ func TestSubscribeMessageEncode(t *testing.T) {
 func TestSubscribeDecodeEncodeEquiv(t *testing.T) {
 	msgBytes := []byte{
 		byte(SUBSCRIBE<<4) | 2,
-		36,
+		37,
 		0, // packet ID MSB (0)
 		7, // packet ID LSB (7)
 		0, // topic name MSB (0)
-		7, // topic name LSB (7)
-		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		8, // topic name LSB (7)
+		'v', 'o', 'l', 'a', 'n', 't', 'm', 'q',
 		0, // QoS
 		0, // topic name MSB (0)
 		8, // topic name LSB (8)
@@ -199,7 +199,7 @@ func TestSubscribeDecodeEncodeEquiv(t *testing.T) {
 	require.NoError(t, err, "Error encoding message")
 	require.Equal(t, len(msgBytes), n2, "Raw message length does not match")
 
-	ops, exists := msg.Topics().Get("surgemq")
+	ops, exists := msg.Topics().Get("volantmq")
 	require.True(t, exists, "Required topic does not exist")
 	require.Equal(t, SubscriptionOptions(QoS0), ops, "Invalid QoS for topic")
 
@@ -221,12 +221,12 @@ func TestSubscribeDecodeEncodeEquiv(t *testing.T) {
 func TestSubscribeDecodeOrder(t *testing.T) {
 	msgBytes := []byte{
 		byte(SUBSCRIBE<<4) | 2,
-		36,
+		37,
 		0, // packet ID MSB (0)
 		7, // packet ID LSB (7)
 		0, // topic name MSB (0)
-		7, // topic name LSB (7)
-		's', 'u', 'r', 'g', 'e', 'm', 'q',
+		8, // topic name LSB (7)
+		'v', 'o', 'l', 'a', 'n', 't', 'm', 'q',
 		0, // QoS
 		0, // topic name MSB (0)
 		8, // topic name LSB (8)
@@ -250,7 +250,7 @@ func TestSubscribeDecodeOrder(t *testing.T) {
 	for kv, ok := iter(); ok; kv, ok = iter() {
 		switch i {
 		case 0:
-			require.Equal(t, "surgemq", kv.Key.(string))
+			require.Equal(t, "volantmq", kv.Key.(string))
 			require.Equal(t, SubscriptionOptions(QoS0), kv.Value.(SubscriptionOptions))
 		case 1:
 			require.Equal(t, "/a/b/#/c", kv.Key.(string))

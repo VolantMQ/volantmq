@@ -1,6 +1,6 @@
 package systree
 
-import "github.com/troian/surgemq/types"
+import "github.com/VolantMQ/volantmq/types"
 
 type impl struct {
 	server        server

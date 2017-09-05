@@ -4,10 +4,10 @@ import (
 	"container/list"
 	"sync/atomic"
 
-	"github.com/troian/surgemq/auth"
-	"github.com/troian/surgemq/packet"
-	"github.com/troian/surgemq/persistence/types"
-	"github.com/troian/surgemq/subscriber"
+	"github.com/VolantMQ/volantmq/auth"
+	"github.com/VolantMQ/volantmq/packet"
+	"github.com/VolantMQ/volantmq/persistence/types"
+	"github.com/VolantMQ/volantmq/subscriber"
 	"go.uber.org/zap"
 )
 

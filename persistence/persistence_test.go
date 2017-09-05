@@ -5,8 +5,8 @@ import (
 
 	"testing"
 
+	"github.com/VolantMQ/volantmq/persistence/types"
 	"github.com/stretchr/testify/require"
-	"github.com/troian/surgemq/persistence/types"
 )
 
 type configWrap struct {

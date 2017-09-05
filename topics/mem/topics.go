@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The SurgeMQ Authors. All rights reserved.
+// Copyright (c) 2014 The VolantMQ Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,12 +17,12 @@ package mem
 import (
 	"sync"
 
-	"github.com/troian/surgemq/configuration"
-	"github.com/troian/surgemq/packet"
-	"github.com/troian/surgemq/persistence/types"
-	"github.com/troian/surgemq/systree"
-	"github.com/troian/surgemq/topics/types"
-	"github.com/troian/surgemq/types"
+	"github.com/VolantMQ/volantmq/configuration"
+	"github.com/VolantMQ/volantmq/packet"
+	"github.com/VolantMQ/volantmq/persistence/types"
+	"github.com/VolantMQ/volantmq/systree"
+	"github.com/VolantMQ/volantmq/topics/types"
+	"github.com/VolantMQ/volantmq/types"
 	"go.uber.org/zap"
 )
 

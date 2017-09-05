@@ -3,8 +3,8 @@ package boltdb
 import (
 	"sync"
 
+	"github.com/VolantMQ/volantmq/persistence/types"
 	"github.com/boltdb/bolt"
-	"github.com/troian/surgemq/persistence/types"
 )
 
 type retained struct {

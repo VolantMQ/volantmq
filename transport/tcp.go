@@ -5,7 +5,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/troian/surgemq/configuration"
+	"github.com/VolantMQ/volantmq/configuration"
 	"go.uber.org/zap"
 )
 

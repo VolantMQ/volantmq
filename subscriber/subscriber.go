@@ -5,8 +5,8 @@ import (
 
 	"sync"
 
-	"github.com/troian/surgemq/packet"
-	"github.com/troian/surgemq/topics/types"
+	"github.com/VolantMQ/volantmq/packet"
+	"github.com/VolantMQ/volantmq/topics/types"
 )
 
 // ConnectionProvider passed to present network connection

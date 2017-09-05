@@ -3,7 +3,7 @@ package persistenceTypes
 import (
 	"time"
 
-	"github.com/troian/surgemq/packet"
+	"github.com/VolantMQ/volantmq/packet"
 )
 
 // Errors persistence errors

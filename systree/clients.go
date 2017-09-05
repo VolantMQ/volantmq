@@ -6,8 +6,8 @@ import (
 
 	"encoding/json"
 
-	"github.com/troian/surgemq/packet"
-	"github.com/troian/surgemq/types"
+	"github.com/VolantMQ/volantmq/packet"
+	"github.com/VolantMQ/volantmq/types"
 )
 
 // ClientConnectStatus is argument to client connected state

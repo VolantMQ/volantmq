@@ -1,9 +1,9 @@
 package persistence
 
 import (
-	"github.com/troian/surgemq/persistence/boltdb"
-	"github.com/troian/surgemq/persistence/mem"
-	"github.com/troian/surgemq/persistence/types"
+	"github.com/VolantMQ/volantmq/persistence/boltdb"
+	"github.com/VolantMQ/volantmq/persistence/mem"
+	"github.com/VolantMQ/volantmq/persistence/types"
 )
 
 // New persistence provider

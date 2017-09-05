@@ -1,9 +1,9 @@
 package topicsTypes
 
 import (
-	"github.com/troian/surgemq/packet"
-	persistTypes "github.com/troian/surgemq/persistence/types"
-	"github.com/troian/surgemq/systree"
+	"github.com/VolantMQ/volantmq/packet"
+	persistTypes "github.com/VolantMQ/volantmq/persistence/types"
+	"github.com/VolantMQ/volantmq/systree"
 )
 
 // ProviderConfig interface implemented by every backend
