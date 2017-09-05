@@ -174,8 +174,8 @@ func (mT *provider) subscriptionSearch(topic string, p *publishEntries) {
 
 	if !strings.HasPrefix(level, "$") {
 		subscriptionRecurseSearch(root, levels, p)
-	} else {
-		subscriptionRecurseSearch(root.children[level], levels[1:], p)
+	} else if n, ok := root.children[level]; ok {
+		subscriptionRecurseSearch(n, levels[1:], p)
 	}
 }
 
