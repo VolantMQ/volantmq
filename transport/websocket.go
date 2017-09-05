@@ -3,8 +3,6 @@ package transport
 import (
 	"net/http"
 
-	"strconv"
-
 	"crypto/tls"
 
 	"context"
@@ -91,7 +89,7 @@ func NewWS(config *ConfigWS, internal *InternalConfig) (Provider, error) {
 	l.s.mux.HandleFunc(config.Path, l.serveWs)
 
 	l.s.http = &http.Server{
-		Addr:    ":" + strconv.Itoa(config.transport.Port),
+		Addr:    ":" + config.transport.Port,
 		Handler: &l.s,
 	}
 
