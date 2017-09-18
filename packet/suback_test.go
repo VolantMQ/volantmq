@@ -21,7 +21,7 @@ import (
 )
 
 func TestSubAckMessageFields(t *testing.T) {
-	m, err := NewMessage(ProtocolV311, SUBACK)
+	m, err := New(ProtocolV311, SUBACK)
 	require.NoError(t, err)
 
 	msg, ok := m.(*SubAck)
@@ -92,7 +92,7 @@ func TestSubAckMessageEncode(t *testing.T) {
 		0x80, // return code 4
 	}
 
-	m, err := NewMessage(ProtocolV311, SUBACK)
+	m, err := New(ProtocolV311, SUBACK)
 	require.NoError(t, err)
 
 	msg, ok := m.(*SubAck)

@@ -6,49 +6,35 @@ import (
 	"github.com/VolantMQ/volantmq/packet"
 )
 
-type onRelease func(msg packet.Provider)
+type onRelease func(o, n packet.Provider)
 
 type ackQueue struct {
-	lock      sync.Mutex
-	messages  map[packet.IDType]packet.Provider
+	messages  sync.Map
 	onRelease onRelease
 }
 
 func newAckQueue(cb onRelease) *ackQueue {
 	a := ackQueue{
-		messages:  make(map[packet.IDType]packet.Provider),
 		onRelease: cb,
 	}
 
 	return &a
 }
 
-func (a *ackQueue) store(msg packet.Provider) {
-	a.lock.Lock()
-	defer a.lock.Unlock()
-
-	id, _ := msg.ID()
-
-	a.messages[id] = msg
+func (a *ackQueue) store(pkt packet.Provider) {
+	id, _ := pkt.ID()
+	a.messages.Store(id, pkt)
 }
 
-func (a *ackQueue) release(msg packet.Provider) {
-	a.lock.Lock()
-	defer a.lock.Unlock()
+func (a *ackQueue) release(pkt packet.Provider) {
+	id, _ := pkt.ID()
 
-	id, _ := msg.ID()
-
-	if e, ok := a.messages[id]; ok {
-		if a.onRelease != nil {
-			a.onRelease(e)
+	if value, ok := a.messages.Load(id); ok {
+		if orig, ok := value.(packet.Provider); ok && a.onRelease != nil {
+			a.onRelease(orig, pkt)
 		}
-		a.messages[id] = nil
-		delete(a.messages, id)
+		a.messages.Delete(id)
 	}
-}
-
-func (a *ackQueue) get() map[packet.IDType]packet.Provider {
-	return a.messages
 }
 
 //func (a *ackQueue) wipe() {

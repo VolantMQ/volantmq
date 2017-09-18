@@ -20,6 +20,7 @@ type ClientConnectStatus struct {
 	KeepAlive         uint16
 	GeneratedID       bool
 	CleanSession      bool
+	KillOnDisconnect  bool
 	SessionPresent    bool
 	PreserveOrder     bool
 	MaximumQoS        packet.QosType
@@ -55,7 +56,7 @@ func (t *clients) Connected(id string, status *ClientConnectStatus) {
 	}
 
 	// notify client connected
-	nm, _ := packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
+	nm, _ := packet.New(packet.ProtocolV311, packet.PUBLISH)
 	notifyMsg, _ := nm.(*packet.Publish)
 	notifyMsg.SetRetain(false)
 	notifyMsg.SetQoS(packet.QoS0)                   // nolint: errcheck
@@ -74,7 +75,7 @@ func (t *clients) Connected(id string, status *ClientConnectStatus) {
 	}
 
 	// notify remove previous disconnect if any
-	nm, _ = packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
+	nm, _ = packet.New(packet.ProtocolV311, packet.PUBLISH)
 	notifyMsg, _ = nm.(*packet.Publish)
 	notifyMsg.SetRetain(false)
 	notifyMsg.SetQoS(packet.QoS0)                      // nolint: errcheck
@@ -89,7 +90,7 @@ func (t *clients) Connected(id string, status *ClientConnectStatus) {
 func (t *clients) Disconnected(id string, reason packet.ReasonCode, retain bool) {
 	atomic.AddUint64(&t.curr.val, ^uint64(0))
 
-	nm, _ := packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
+	nm, _ := packet.New(packet.ProtocolV311, packet.PUBLISH)
 	notifyMsg, _ := nm.(*packet.Publish)
 	notifyMsg.SetRetain(false)
 	notifyMsg.SetQoS(packet.QoS0)                      // nolint: errcheck
@@ -113,7 +114,7 @@ func (t *clients) Disconnected(id string, reason packet.ReasonCode, retain bool)
 	}
 
 	// remove connected retained message
-	nm, _ = packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
+	nm, _ = packet.New(packet.ProtocolV311, packet.PUBLISH)
 	notifyMsg, _ = nm.(*packet.Publish)
 	notifyMsg.SetRetain(false)
 	notifyMsg.SetQoS(packet.QoS0)                   // nolint: errcheck

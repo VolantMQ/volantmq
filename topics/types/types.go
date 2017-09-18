@@ -69,7 +69,7 @@ var (
 type Subscriber interface {
 	Acquire()
 	Release()
-	Publish(*packet.Publish, packet.QosType, []uint32) error
+	Publish(*packet.Publish, packet.QosType, packet.SubscriptionOptions, []uint32) error
 	Hash() uintptr
 }
 
@@ -78,7 +78,7 @@ type Subscribers []Subscriber
 
 // Provider interface
 type Provider interface {
-	Subscribe(string, packet.QosType, Subscriber, uint32) (packet.QosType, []*packet.Publish, error)
+	Subscribe(string, Subscriber, *SubscriptionParams) (packet.QosType, []*packet.Publish, error)
 	UnSubscribe(string, Subscriber) error
 	Publish(interface{}) error
 	Retain(types.RetainObject) error
@@ -89,21 +89,34 @@ type Provider interface {
 // SubscriberInterface used by subscriber to handle messages
 type SubscriberInterface interface {
 	Publish(interface{}) error
-	Subscribe(string, packet.QosType, Subscriber, uint32) (packet.QosType, []*packet.Publish, error)
+	Subscribe(string, Subscriber, *SubscriptionParams) (packet.QosType, []*packet.Publish, error)
 	UnSubscribe(string, Subscriber) error
 	Retain(types.RetainObject) error
 	Retained(string) ([]*packet.Publish, error)
 }
 
+// SubscriptionParams parameters of the subscription
+type SubscriptionParams struct {
+	// Subscription id
+	// V5.0 ONLY
+	ID uint32
+
+	// Ops requested subscription options
+	Ops packet.SubscriptionOptions
+
+	// Granted QoS granted by topics manager
+	Granted packet.QosType
+}
+
 var (
 	// ErrMultiLevel multi-level wildcard
-	ErrMultiLevel = errors.New("Multi-level wildcard found in topic and it's not at the last level")
+	ErrMultiLevel = errors.New("multi-level wildcard found in topic and it's not at the last level")
 	// ErrInvalidSubscriber invalid subscriber object
-	ErrInvalidSubscriber = errors.New("Subscriber cannot be nil")
+	ErrInvalidSubscriber = errors.New("subscriber cannot be nil")
 	// ErrInvalidWildcardPlus Wildcard character '+' must occupy entire topic level
-	ErrInvalidWildcardPlus = errors.New("Wildcard character '+' must occupy entire topic level")
+	ErrInvalidWildcardPlus = errors.New("wildcard character '+' must occupy entire topic level")
 	// ErrInvalidWildcardSharp Wildcard character '#' must occupy entire topic level
-	ErrInvalidWildcardSharp = errors.New("Wildcard character '#' must occupy entire topic level")
+	ErrInvalidWildcardSharp = errors.New("wildcard character '#' must occupy entire topic level")
 	// ErrInvalidWildcard Wildcard characters '#' and '+' must occupy entire topic level
-	ErrInvalidWildcard = errors.New("Wildcard characters '#' and '+' must occupy entire topic level")
+	ErrInvalidWildcard = errors.New("wildcard characters '#' and '+' must occupy entire topic level")
 )

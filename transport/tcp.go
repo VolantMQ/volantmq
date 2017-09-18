@@ -44,7 +44,7 @@ func NewTCP(config *ConfigTCP, internal *InternalConfig) (Provider, error) {
 	l.protocol = config.Scheme
 	l.InternalConfig = *internal
 	l.config = *config.transport
-	l.log = configuration.GetProdLogger().Named("server.transport.tcp")
+	l.log = configuration.GetLogger().Named("server.transport.tcp")
 
 	var err error
 

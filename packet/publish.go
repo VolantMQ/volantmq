@@ -19,14 +19,75 @@ package packet
 type Publish struct {
 	header
 
-	payload []byte
-	topic   string
+	payload   []byte
+	topic     string
+	publishID uintptr
 }
 
 var _ Provider = (*Publish)(nil)
 
 func newPublish() *Publish {
 	return &Publish{}
+}
+
+// Clone packet
+// qos, topic, payload, retain and properties
+func (msg *Publish) Clone(v ProtocolVersion) (*Publish, error) {
+	// message version should be same as session as encode/decode depends on it
+	_pkt, _ := New(msg.version, PUBLISH)
+	pkt, _ := _pkt.(*Publish)
+
+	// [MQTT-3.3.1-9]
+	// [MQTT-3.3.1-3]
+	pkt.Set(msg.topic, msg.Payload(), msg.QoS(), msg.Retain(), false) // nolint: errcheck
+
+	if msg.version == ProtocolV50 && v == ProtocolV50 {
+		// [MQTT-3.3.2-4] forward Payload Format
+		if prop, ok := msg.properties.properties[PropertyPayloadFormat]; ok {
+			if err := pkt.properties.Set(msg.mType, PropertyPayloadFormat, prop); err != nil {
+				return nil, err
+			}
+		}
+
+		// [MQTT-1892 3.3.2-15] forward Response Topic
+		if prop, ok := msg.properties.properties[PropertyResponseTopic]; ok {
+			if err := pkt.properties.Set(msg.mType, PropertyResponseTopic, prop); err != nil {
+				return nil, err
+			}
+		}
+
+		// [MQTT-1908 3.3.2-16] forward Correlation Data
+		if prop, ok := msg.properties.properties[PropertyCorrelationData]; ok {
+			if err := pkt.properties.Set(msg.mType, PropertyCorrelationData, prop); err != nil {
+				return nil, err
+			}
+		}
+
+		// [MQTT-3.3.2-17] forward User Property
+		if prop, ok := msg.properties.properties[PropertyUserProperty]; ok {
+			if err := pkt.properties.Set(msg.mType, PropertyUserProperty, prop); err != nil {
+				return nil, err
+			}
+		}
+
+		// [MQTT-3.3.2-20] forward Content Type
+		if prop, ok := msg.properties.properties[PropertyContentType]; ok {
+			if err := pkt.properties.Set(msg.mType, PropertyContentType, prop); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return pkt, nil
+}
+
+// PublishID get publish ID to check No Local
+func (msg *Publish) PublishID() uintptr {
+	return msg.publishID
+}
+
+// SetPublishID internally used publish id to allow No Local option
+func (msg *Publish) SetPublishID(id uintptr) {
+	msg.publishID = id
 }
 
 // Set topic/payload/qos/retained/bool
@@ -122,7 +183,7 @@ func (msg *Publish) Topic() string {
 // SetTopic sets the the topic name that identifies the information channel to which
 // payload data is published. An error is returned if ValidTopic() is falbase.
 func (msg *Publish) SetTopic(v string) error {
-	if !ValidTopic(v) {
+	if (msg.version < ProtocolV50 && len(v) == 0) || !ValidTopic(v) {
 		return ErrInvalidTopic
 	}
 
@@ -146,11 +207,11 @@ func (msg *Publish) SetPacketID(v IDType) {
 	msg.setPacketID(v)
 }
 
-func (msg *Publish) decodeMessage(src []byte) (int, error) {
+func (msg *Publish) decodeMessage(from []byte) (int, error) {
 	var err error
 	var n int
 	var buf []byte
-	total := 0
+	offset := 0
 
 	if !msg.QoS().IsValid() {
 		var rejectCode ReasonCode
@@ -160,7 +221,7 @@ func (msg *Publish) decodeMessage(src []byte) (int, error) {
 			rejectCode = CodeRefusedServerUnavailable
 		}
 
-		return total, rejectCode
+		return offset, rejectCode
 	}
 
 	// [MQTT-3.3.1-2]
@@ -172,17 +233,25 @@ func (msg *Publish) decodeMessage(src []byte) (int, error) {
 			rejectCode = CodeRefusedServerUnavailable
 		}
 
-		return total, rejectCode
+		return offset, rejectCode
 	}
 
-	buf, n, err = ReadLPBytes(src[total:])
-	total += n
+	// [MQTT-3.3.2.1]
+	buf, n, err = ReadLPBytes(from[offset:])
+	offset += n
 	if err != nil {
-		return total, err
+		return offset, err
 	}
 
-	if !ValidTopic(string(buf)) {
-		return total, ErrInvalidTopic
+	if len(buf) == 0 && msg.version < ProtocolV50 {
+		return offset, CodeRefusedServerUnavailable
+	} else if !ValidTopic(string(buf)) {
+		rejectCode := CodeRefusedServerUnavailable
+		if msg.version == ProtocolV50 {
+			rejectCode = CodeInvalidTopicName
+		}
+
+		return offset, rejectCode
 	}
 
 	msg.topic = string(buf)
@@ -190,18 +259,32 @@ func (msg *Publish) decodeMessage(src []byte) (int, error) {
 	// The packet identifier field is only present in the PUBLISH packets where the
 	// QoS level is 1 or 2
 	if msg.QoS() != QoS0 {
-		total += msg.decodePacketID(src[total:])
+		offset += msg.decodePacketID(from[offset:])
 	}
 
 	if msg.version == ProtocolV50 {
-		msg.properties, n, err = decodeProperties(msg.Type(), buf[total:])
-		total += n
+		msg.properties, n, err = decodeProperties(msg.Type(), from[offset:])
+		offset += n
 		if err != nil {
-			return total, err
+			return offset, err
+		}
+
+		// if packet does not have topic set there must be topic alias set in properties
+		if len(msg.topic) == 0 {
+			reject := CodeProtocolError
+			if prop := msg.PropertyGet(PropertyTopicAlias); prop != nil {
+				if val, ok := prop.AsShort(); ok == nil && val > 0 {
+					reject = CodeSuccess
+				}
+			}
+
+			if reject != CodeSuccess {
+				return offset, reject
+			}
 		}
 	}
 
-	pLen := int(msg.remLen) - total
+	pLen := int(msg.remLen) - offset
 
 	// check payload len is not malformed
 	if pLen < 0 {
@@ -212,11 +295,11 @@ func (msg *Publish) decodeMessage(src []byte) (int, error) {
 			rejectCode = CodeRefusedServerUnavailable
 		}
 
-		return total, rejectCode
+		return offset, rejectCode
 	}
 
 	// check payload is not malformed
-	if len(src[total:]) < pLen {
+	if len(from[offset:]) < pLen {
 		var rejectCode ReasonCode
 		if msg.version == ProtocolV50 {
 			rejectCode = CodeMalformedPacket
@@ -224,19 +307,19 @@ func (msg *Publish) decodeMessage(src []byte) (int, error) {
 			rejectCode = CodeRefusedServerUnavailable
 		}
 
-		return total, rejectCode
+		return offset, rejectCode
 	}
 
 	if pLen > 0 {
 		msg.payload = make([]byte, pLen)
-		copy(msg.payload, src[total:total+pLen])
-		total += pLen
+		copy(msg.payload, from[offset:offset+pLen])
+		offset += pLen
 	}
 
-	return total, nil
+	return offset, nil
 }
 
-func (msg *Publish) encodeMessage(dst []byte) (int, error) {
+func (msg *Publish) encodeMessage(to []byte) (int, error) {
 	if !ValidTopic(msg.topic) {
 		return 0, ErrInvalidTopic
 	}
@@ -256,42 +339,44 @@ func (msg *Publish) encodeMessage(dst []byte) (int, error) {
 
 	var err error
 	var n int
-	total := 0
+	offset := 0
 
-	if n, err = WriteLPBytes(dst[total:], []byte(msg.topic)); err != nil {
-		return total, err
+	// [MQTT-3.3.2.1]
+	if n, err = WriteLPBytes(to[offset:], []byte(msg.topic)); err != nil {
+		return offset, err
 	}
-	total += n
+	offset += n
 
+	// [MQTT-3.3.2.2]
 	if msg.QoS() != QoS0 {
-		total += msg.encodePacketID(dst[total:])
+		offset += msg.encodePacketID(to[offset:])
 	}
 
 	// V5.0   [MQTT-3.1.2.11]
 	if msg.version == ProtocolV50 {
-		if n, err = encodeProperties(msg.properties, dst[total:]); err != nil {
-			return total + n, err
+		if n, err = msg.properties.encode(to[offset:]); err != nil {
+			return offset + n, err
 		}
 
-		total += n
+		offset += n
 	}
 
-	total += copy(dst[total:], msg.payload)
+	offset += copy(to[offset:], msg.payload)
 
-	return total, nil
+	return offset, nil
 }
 
 func (msg *Publish) size() int {
 	total := 2 + len(msg.topic) + len(msg.payload)
 
 	if msg.QoS() != 0 {
+		// QoS1/2 packets must include packet id
 		total += 2
 	}
 
 	// v5.0 [MQTT-3.1.2.11]
 	if msg.version == ProtocolV50 {
-		pLen, _ := encodeProperties(msg.properties, []byte{})
-		total += pLen
+		total += int(msg.properties.FullLen())
 	}
 
 	return total

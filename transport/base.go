@@ -119,7 +119,7 @@ func (c *baseConfig) handleConnection(conn conn) {
 		conn.SetReadDeadline(time.Time{}) // nolint: errcheck
 		switch r := req.(type) {
 		case *packet.Connect:
-			m, _ := packet.NewMessage(req.Version(), packet.CONNACK)
+			m, _ := packet.New(req.Version(), packet.CONNACK)
 			resp, _ := m.(*packet.ConnAck)
 
 			var reason packet.ReasonCode
@@ -135,10 +135,6 @@ func (c *baseConfig) handleConnection(conn conn) {
 
 				if status := c.config.AuthManager.Password(string(user), string(pass)); status == auth.StatusAllow {
 					reason = packet.CodeSuccess
-					if r.KeepAlive() == 0 {
-						r.SetKeepAlive(uint16(c.KeepAlive))
-						resp.PropertySet(packet.PropertyServerKeepAlive, uint16(c.KeepAlive)) // nolint: errcheck
-					}
 				} else {
 					reason = packet.CodeRefusedBadUsernameOrPassword
 					if req.Version() == packet.ProtocolV50 {

@@ -32,7 +32,7 @@ func newServer(topicPrefix string, dynRetains, staticRetains *[]types.RetainObje
 		version:  "1.0.0",
 	}
 
-	m, _ := packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
+	m, _ := packet.New(packet.ProtocolV311, packet.PUBLISH)
 	msg, _ := m.(*packet.Publish)
 	msg.SetQoS(packet.QoS0)                // nolint: errcheck
 	msg.SetTopic(topicPrefix + "/version") // nolint: errcheck
@@ -42,7 +42,7 @@ func newServer(topicPrefix string, dynRetains, staticRetains *[]types.RetainObje
 	*dynRetains = append(*dynRetains, b.currTime)
 	*staticRetains = append(*staticRetains, msg)
 
-	m, _ = packet.NewMessage(packet.ProtocolV311, packet.PUBLISH)
+	m, _ = packet.New(packet.ProtocolV311, packet.PUBLISH)
 	msg, _ = m.(*packet.Publish)
 	msg.SetQoS(packet.QoS0)                     // nolint: errcheck
 	msg.SetTopic(topicPrefix + "/capabilities") // nolint: errcheck

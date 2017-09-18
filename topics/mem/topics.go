@@ -29,27 +29,17 @@ import (
 type provider struct {
 	// Sub/unSub mutex
 	smu sync.RWMutex
-
 	// Subscription tree
-	root *node
-
-	stat systree.TopicsStat
-
-	persist persistenceTypes.Retained
-
-	log struct {
-		prod *zap.Logger
-		dev  *zap.Logger
-	}
-
+	root               *node
+	stat               systree.TopicsStat
+	persist            persistenceTypes.Retained
+	log                *zap.Logger
 	onCleanUnsubscribe func([]string)
 	wgPublisher        sync.WaitGroup
 	wgPublisherStarted sync.WaitGroup
-
-	inbound    chan *packet.Publish
-	inRetained chan types.RetainObject
-
-	allowOverlapping bool
+	inbound            chan *packet.Publish
+	inRetained         chan types.RetainObject
+	allowOverlapping   bool
 }
 
 var _ topicsTypes.Provider = (*provider)(nil)
@@ -68,8 +58,7 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 	}
 	p.root = newNode(p.allowOverlapping, nil)
 
-	p.log.prod = configuration.GetProdLogger().Named("topics").Named(config.Name)
-	p.log.dev = configuration.GetDevLogger().Named("topics").Named(config.Name)
+	p.log = configuration.GetLogger().Named("topics").Named(config.Name)
 
 	if p.persist != nil {
 		entries, err := p.persist.Load()
@@ -81,16 +70,16 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 			v := packet.ProtocolVersion(d[0])
 			msg, _, err := packet.Decode(v, d[1:])
 			if err != nil {
-				p.log.prod.Error("Couldn't decode retained message", zap.Error(err))
+				p.log.Error("Couldn't decode retained message", zap.Error(err))
 			} else {
 				if m, ok := msg.(*packet.Publish); ok {
-					p.log.dev.Debug("Loading retained message",
+					p.log.Debug("Loading retained message",
 						zap.String("topic", m.Topic()),
 						zap.Int8("QoS", int8(m.QoS())))
 
 					p.Retain(m) // nolint: errcheck
 				} else {
-					p.log.prod.Warn("Unsupported retained message type", zap.String("type", m.Type().Name()))
+					p.log.Warn("Unsupported retained message type", zap.String("type", m.Type().Name()))
 				}
 			}
 		}
@@ -109,26 +98,22 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 	return p, nil
 }
 
-func (mT *provider) Subscribe(filter string, q packet.QosType, s topicsTypes.Subscriber, id uint32) (packet.QosType, []*packet.Publish, error) {
-	if !q.IsValid() {
-		return packet.QosFailure, nil, packet.ErrInvalidQoS
-	}
-
-	if s == nil {
-		return packet.QosFailure, nil, topicsTypes.ErrInvalidSubscriber
-	}
-
+func (mT *provider) Subscribe(filter string, s topicsTypes.Subscriber, p *topicsTypes.SubscriptionParams) (packet.QosType, []*packet.Publish, error) {
 	defer mT.smu.Unlock()
 	mT.smu.Lock()
 
-	mT.subscriptionInsert(filter, q, s, id)
+	p.Granted = p.Ops.QoS()
+	exists := mT.subscriptionInsert(filter, s, p)
 
 	var r []*packet.Publish
 
 	// [MQTT-3.3.1-5]
-	mT.retainSearch(filter, &r)
+	rh := p.Ops.RetainHandling()
+	if (rh == packet.RetainHandlingRetain) || ((rh == packet.RetainHandlingIfNotExists) && !exists) {
+		mT.retainSearch(filter, &r)
+	}
 
-	return q, r, nil
+	return p.Granted, r, nil
 }
 
 func (mT *provider) UnSubscribe(topic string, sub topicsTypes.Subscriber) error {
@@ -187,11 +172,11 @@ func (mT *provider) Close() error {
 			// Skip retained QoS0 messages
 			if m.QoS() != packet.QoS0 {
 				if sz, err := m.Size(); err != nil {
-					mT.log.prod.Error("Couldn't get retained message size", zap.Error(err))
+					mT.log.Error("Couldn't get retained message size", zap.Error(err))
 				} else {
 					buf := make([]byte, sz)
 					if _, err = m.Encode(buf); err != nil {
-						mT.log.prod.Error("Couldn't encode retained message", zap.Error(err))
+						mT.log.Error("Couldn't encode retained message", zap.Error(err))
 					} else {
 						encoded = append(encoded, buf)
 					}
@@ -199,9 +184,9 @@ func (mT *provider) Close() error {
 			}
 		}
 		if len(encoded) > 0 {
-			mT.log.dev.Debug("Storing retained messages", zap.Int("amount", len(encoded)))
+			mT.log.Debug("Storing retained messages", zap.Int("amount", len(encoded)))
 			if err := mT.persist.Store(encoded); err != nil {
-				mT.log.prod.Error("Couldn't persist retained messages", zap.Error(err))
+				mT.log.Error("Couldn't persist retained messages", zap.Error(err))
 			}
 		}
 	}
@@ -252,12 +237,12 @@ func (mT *provider) publisher() {
 		pubEntries := publishEntries{}
 
 		mT.smu.Lock()
-		mT.subscriptionSearch(msg.Topic(), &pubEntries)
+		mT.subscriptionSearch(msg.Topic(), msg.PublishID(), &pubEntries)
 
 		for _, pub := range pubEntries {
 			for _, e := range pub {
-				if err := e.s.Publish(msg, e.qos, e.ids); err != nil {
-					mT.log.prod.Error("Publish error", zap.Error(err))
+				if err := e.s.Publish(msg, e.qos, e.ops, e.ids); err != nil {
+					mT.log.Error("Publish error", zap.Error(err))
 				}
 				e.s.Release()
 			}

@@ -39,7 +39,7 @@ func main() {
 
 	configuration.Init(ops)
 
-	logger := configuration.GetProdLogger().Named("example")
+	logger := configuration.GetLogger().Named("example")
 
 	var err error
 

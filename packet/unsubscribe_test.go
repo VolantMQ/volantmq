@@ -21,7 +21,7 @@ import (
 )
 
 func TestUnSubscribeMessageFields(t *testing.T) {
-	m, err := NewMessage(ProtocolV311, UNSUBSCRIBE)
+	m, err := New(ProtocolV311, UNSUBSCRIBE)
 	require.NoError(t, err)
 
 	msg, ok := m.(*UnSubscribe)
@@ -114,7 +114,7 @@ func TestUnSubscribeMessageEncode(t *testing.T) {
 		'/', 'a', '/', 'b', '/', '#', '/', 'c', 'd', 'd',
 	}
 
-	m, err := NewMessage(ProtocolV311, UNSUBSCRIBE)
+	m, err := New(ProtocolV311, UNSUBSCRIBE)
 	require.NoError(t, err)
 
 	msg, ok := m.(*UnSubscribe)

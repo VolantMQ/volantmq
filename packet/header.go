@@ -38,18 +38,17 @@ const (
 )
 
 const (
-	maskMessageFlags         byte = 0x0F
-	maskConnFlagUsername     byte = 0x80
-	maskConnFlagPassword     byte = 0x40
-	maskConnFlagWillRetain   byte = 0x20
-	maskConnFlagWillQos      byte = 0x18
-	maskConnFlagWill         byte = 0x04
-	maskConnFlagCleanSession byte = 0x02
-	maskConnFlagReserved     byte = 0x01
-	maskPublishFlagRetain    byte = 0x01
-	maskPublishFlagQoS       byte = 0x06
-	maskPublishFlagDup       byte = 0x08
-
+	maskMessageFlags               byte = 0x0F
+	maskConnFlagUsername           byte = 0x80
+	maskConnFlagPassword           byte = 0x40
+	maskConnFlagWillRetain         byte = 0x20
+	maskConnFlagWillQos            byte = 0x18
+	maskConnFlagWill               byte = 0x04
+	maskConnFlagClean              byte = 0x02
+	maskConnFlagReserved           byte = 0x01
+	maskPublishFlagRetain          byte = 0x01
+	maskPublishFlagQoS             byte = 0x06
+	maskPublishFlagDup             byte = 0x08
 	maskSubscriptionQoS            byte = 0x03
 	maskSubscriptionNL             byte = 0x04
 	maskSubscriptionRAP            byte = 0x08
@@ -99,28 +98,28 @@ func (h *header) ID() (IDType, error) {
 	return IDType(binary.BigEndian.Uint16(h.packetID)), nil
 }
 
-func (h *header) Encode(dst []byte) (int, error) {
+func (h *header) Encode(to []byte) (int, error) {
 	expectedSize, err := h.Size()
 	if err != nil {
 		return 0, err
 	}
 
-	if expectedSize > len(dst) {
+	if expectedSize > len(to) {
 		return expectedSize, ErrInsufficientBufferSize
 	}
 
-	total := 0
+	offset := 0
 
-	dst[total] = byte(h.mType<<offsetPacketType) | h.mFlags
-	total++
+	to[offset] = byte(h.mType<<offsetPacketType) | h.mFlags
+	offset++
 
-	total += binary.PutUvarint(dst[total:], uint64(h.remLen))
+	offset += binary.PutUvarint(to[offset:], uint64(h.remLen))
 
 	var n int
 
-	n, err = h.cb.encode(dst[total:])
-	total += n
-	return total, err
+	n, err = h.cb.encode(to[offset:])
+	offset += n
+	return offset, err
 }
 
 func (h *header) SetVersion(v ProtocolVersion) {
@@ -138,9 +137,9 @@ func (h *header) Size() (int, error) {
 	return h.size() + ml, nil
 }
 
-func (h *header) PropertyGet(id PropertyID) (interface{}, error) {
+func (h *header) PropertyGet(id PropertyID) PropertyToType {
 	if h.version != ProtocolV50 {
-		return nil, ErrNotSupported
+		return nil
 	}
 
 	return h.properties.Get(id)
@@ -154,9 +153,13 @@ func (h *header) PropertySet(id PropertyID, val interface{}) error {
 	return h.properties.Set(h.mType, id, val)
 }
 
-func (h *header) PropertyForEach(f func(PropertyID, interface{})) error {
+func (h *header) PropertyForEach(f func(PropertyID, PropertyToType)) error {
 	if h.version != ProtocolV50 {
 		return ErrNotSupported
+	}
+
+	if h.properties == nil {
+		return ErrNotSet
 	}
 
 	h.properties.ForEach(f)
@@ -223,13 +226,13 @@ func (h *header) setType(t Type) {
 // decode reads fixed header and remaining length
 // if decode successful size of decoded data provided
 // if error happened offset points to error place
-func (h *header) decode(src []byte) (int, error) {
-	total := 0
+func (h *header) decode(from []byte) (int, error) {
+	offset := 0
 
 	// decode and validate fixed header
 	//h.mTypeFlags = src[total]
-	h.mType = Type(src[total] >> offsetPacketType)
-	h.mFlags = src[total] & maskMessageFlags
+	h.mType = Type(from[offset] >> offsetPacketType)
+	h.mFlags = from[offset] & maskMessageFlags
 
 	reject := false
 	// [MQTT-2.2.2-1]
@@ -246,33 +249,33 @@ func (h *header) decode(src []byte) (int, error) {
 		if h.version == ProtocolV50 {
 			rejectCode = CodeMalformedPacket
 		}
-		return total, rejectCode
+		return offset, rejectCode
 	}
 
-	total++
+	offset++
 
-	remLen, m := uvarint(src[total:])
+	remLen, m := uvarint(from[offset:])
 	if m <= 0 {
-		return total, ErrInsufficientDataSize
+		return offset, ErrInsufficientDataSize
 	}
 
-	total += m
+	offset += m
 	h.remLen = int32(remLen)
 
 	// verify if buffer has enough space for whole message
 	// if not return expected size
-	if int(h.remLen) > len(src[total:]) {
-		return total + int(h.remLen), ErrInsufficientDataSize
+	if int(h.remLen) > len(from[offset:]) {
+		return offset + int(h.remLen), ErrInsufficientDataSize
 	}
 
 	var err error
 	if h.cb.decode != nil {
 		var msgTotal int
 
-		msgTotal, err = h.cb.decode(src[total:])
-		total += msgTotal
+		msgTotal, err = h.cb.decode(from[offset:])
+		offset += msgTotal
 	}
-	return total, err
+	return offset, err
 }
 
 // uvarint decodes a uint32 from buf and returns that value and the

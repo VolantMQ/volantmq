@@ -1,21 +1,13 @@
 package clients
 
 import (
-	"net"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	"fmt"
-
-	"unsafe"
-
-	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/connection"
 	"github.com/VolantMQ/volantmq/packet"
 	"github.com/VolantMQ/volantmq/persistence/types"
 	"github.com/VolantMQ/volantmq/subscriber"
-	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/types"
 )
 
@@ -23,157 +15,160 @@ type exitReason int
 
 const (
 	exitReasonClean exitReason = iota
-	exitReasonKeepSubscriber
 	exitReasonShutdown
 	exitReasonExpired
 )
 
+type switchStatus int
+
+const (
+	swStatusSwitched switchStatus = iota
+	swStatusIsOnline
+	swStatusFinalized
+)
+
 type onSessionClose func(string, exitReason)
 type onSessionPersist func(string, *persistenceTypes.SessionMessages)
-type onDisconnect func(string, bool, packet.ReasonCode)
+type onDisconnect func(string, packet.ReasonCode, bool)
+type onSubscriberShutdown func(subscriber.ConnectionProvider)
 
-type sessionConfig struct {
-	id           string
-	createdAt    time.Time
-	onPersist    onSessionPersist
-	onClose      onSessionClose
-	onDisconnect onDisconnect
-	messenger    types.TopicMessenger
-	clean        bool
+type sessionEvents struct {
+	persist            onSessionPersist
+	signalClose        onSessionClose
+	signalDisconnected onDisconnect
+	shutdownSubscriber onSubscriberShutdown
 }
 
-type connectionConfig struct {
-	username  string
-	state     *persistenceTypes.SessionMessages
-	metric    systree.Metric
-	conn      net.Conn
-	auth      auth.SessionPermissions
-	keepAlive uint16
-	sendQuota uint16
-	version   packet.ProtocolVersion
+type sessionPreConfig struct {
+	sessionEvents
+	id        string
+	createdAt time.Time
+	messenger types.TopicMessenger
 }
 
-type setupConfig struct {
-	subscriber subscriber.ConnectionProvider
-	will       *packet.Publish
-	expireIn   *time.Duration
-	willDelay  time.Duration
-}
-
-type session struct {
-	self             uintptr
-	createdAt        time.Time
-	id               string
-	messenger        types.TopicMessenger
+type sessionReConfig struct {
 	subscriber       subscriber.ConnectionProvider
-	notifyDisconnect onDisconnect
-	onPersist        onSessionPersist
-	onClose          onSessionClose
-	startLock        sync.Mutex
-	lock             sync.Mutex
-	timerWorker      sync.WaitGroup
-	wgStopped        sync.WaitGroup
-	timerChan        chan struct{}
-	connStop         *types.Once
-	timer            *time.Timer
-	conn             *connection.Type
 	will             *packet.Publish
 	expireIn         *time.Duration
 	willDelay        time.Duration
-	timerStartedAt   time.Time
-	isOnline         uintptr
-	clean            bool
+	killOnDisconnect bool
 }
 
-func newSession(c *sessionConfig) (*session, error) {
+type session struct {
+	sessionEvents
+	*sessionReConfig
+	id             string
+	idLock         *sync.Mutex
+	messenger      types.TopicMessenger
+	createdAt      time.Time
+	expiringSince  time.Time
+	lock           sync.Mutex
+	connStop       *types.Once
+	disconnectOnce *types.OnceWait
+	wgDisconnected sync.WaitGroup
+	conn           *connection.Type
+	timer          *time.Timer
+	timerLock      sync.Mutex
+	finalized      bool
+	isOnline       chan struct{}
+}
+
+type sessionWrap struct {
+	s    *session
+	lock sync.Mutex
+}
+
+func (s *sessionWrap) acquire() {
+	s.lock.Lock()
+}
+
+func (s *sessionWrap) release() {
+	s.lock.Unlock()
+}
+
+func (s *sessionWrap) swap(w *sessionWrap) *session {
+	s.s = w.s
+	s.s.idLock = &s.lock
+	return s.s
+}
+
+func newSession(c *sessionPreConfig) *session {
 	s := &session{
-		id:               c.id,
-		createdAt:        c.createdAt,
-		clean:            c.clean,
-		messenger:        c.messenger,
-		onPersist:        c.onPersist,
-		onClose:          c.onClose,
-		notifyDisconnect: c.onDisconnect,
-		connStop:         &types.Once{},
-		isOnline:         1,
-		timerChan:        make(chan struct{}),
+		sessionEvents: c.sessionEvents,
+		id:            c.id,
+		createdAt:     c.createdAt,
+		messenger:     c.messenger,
+		isOnline:      make(chan struct{}),
 	}
 
-	s.self = uintptr(unsafe.Pointer(s))
-	close(s.timerChan)
+	s.timer = time.AfterFunc(10*time.Second, s.timerCallback)
+	s.timer.Stop()
 
-	return s, nil
+	close(s.isOnline)
+	return s
 }
 
-func (s *session) acquire() {
-	s.startLock.Lock()
-}
-
-func (s *session) release() {
-	s.startLock.Unlock()
-}
-
-func (s *session) configure(c *setupConfig, runExpiry bool) {
-	defer s.lock.Unlock()
-	s.lock.Lock()
-
-	s.will = c.will
-	s.expireIn = c.expireIn
-	s.willDelay = c.willDelay
-	s.subscriber = c.subscriber
-	s.isOnline = 1
-
+func (s *session) reconfigure(c *sessionReConfig, runExpiry bool) {
+	s.sessionReConfig = c
+	s.finalized = false
 	if runExpiry {
 		s.runExpiry(true)
 	}
 }
 
-func (s *session) allocConnection(c *connectionConfig) error {
-	var err error
-
-	s.conn, err = connection.New(&connection.Config{
-		ID:           s.id,
-		OnDisconnect: s.onDisconnect,
-		Subscriber:   s.subscriber,
-		Messenger:    s.messenger,
-		Clean:        s.clean,
-		ExpireIn:     s.expireIn,
-		Username:     c.username,
-		Auth:         c.auth,
-		State:        c.state,
-		Conn:         c.conn,
-		Metric:       c.metric,
-		KeepAlive:    c.keepAlive,
-		SendQuota:    c.sendQuota,
-		Version:      c.version,
-	})
-
-	if err == nil {
-		s.connStop = &types.Once{}
+func (s *session) allocConnection(c *connection.PreConfig) (present bool, err error) {
+	cfg := &connection.Config{
+		PreConfig:        c,
+		ID:               s.id,
+		OnDisconnect:     s.onDisconnect,
+		Subscriber:       s.subscriber,
+		Messenger:        s.messenger,
+		KillOnDisconnect: s.killOnDisconnect,
+		ExpireIn:         s.expireIn,
 	}
 
-	return err
+	s.disconnectOnce = &types.OnceWait{}
+	s.connStop = &types.Once{}
+
+	s.conn, present, err = connection.New(cfg)
+
+	return
 }
 
 func (s *session) start() {
-	s.wgStopped.Add(1)
+	s.isOnline = make(chan struct{})
+	s.wgDisconnected.Add(1)
 	s.conn.Start()
+	s.idLock.Unlock()
 }
 
 func (s *session) stop(reason packet.ReasonCode) *persistenceTypes.SessionState {
 	s.connStop.Do(func() {
 		if s.conn != nil {
 			s.conn.Stop(reason)
+			s.conn = nil
 		}
 	})
 
-	s.wgStopped.Wait()
+	s.wgDisconnected.Wait()
 
-	select {
-	case <-s.timerChan:
-	default:
-		close(s.timerChan)
-		s.timerWorker.Wait()
+	if !s.timer.Stop() {
+		s.timerLock.Lock()
+		s.timerLock.Unlock() // nolint: megacheck
+	}
+
+	if !s.finalized {
+		s.signalClose(s.id, exitReasonShutdown)
+		s.finalized = true
+	}
+
+	elapsed := time.Since(s.expiringSince)
+	if s.willDelay > 0 && (s.willDelay-elapsed) > 0 {
+		s.willDelay = s.willDelay - elapsed
+	}
+
+	if s.expireIn != nil && *s.expireIn > 0 && (*s.expireIn-elapsed) > 0 {
+		*s.expireIn = *s.expireIn - elapsed
 	}
 
 	state := &persistenceTypes.SessionState{
@@ -195,218 +190,163 @@ func (s *session) stop(reason packet.ReasonCode) *persistenceTypes.SessionState 
 	return state
 }
 
-func (s *session) toOnline() bool {
-	if atomic.CompareAndSwapUintptr(&s.isOnline, 0, 1) {
-		select {
-		case <-s.timerChan:
-		default:
-			close(s.timerChan)
+// setOnline try switch session state from offline to online. This is necessary when
+// when previous network connection has set session expiry or will delay or both
+// if switch is successful then swStatusSwitched returned.
+// if session has active network connection then returned value is swStatusIsOnline
+// if connection has been closed and must not be used anymore then it returns swStatusFinalized
+func (s *session) setOnline() switchStatus {
+	isOnline := false
+	// check session online status
+	s.lock.Lock()
+	select {
+	case <-s.isOnline:
+	default:
+		isOnline = true
+	}
+	s.lock.Unlock()
+
+	status := swStatusSwitched
+	if !isOnline {
+		// session is offline. before making any further step wait disconnect procedure is done
+		s.wgDisconnected.Wait()
+
+		// if stop returns false timer has been fired and there is goroutine might be running
+		if !s.timer.Stop() {
+			s.timerLock.Lock()
+			s.timerLock.Unlock() // nolint: megacheck
 		}
 
-		return true
+		if s.finalized {
+			status = swStatusFinalized
+		}
+	} else {
+		status = swStatusIsOnline
 	}
 
-	return false
+	return status
 }
 
 func (s *session) runExpiry(will bool) {
-	var expire *time.Duration
+	var timerPeriod time.Duration
 
 	// if meet will requirements point that
 	if will && s.will != nil && s.willDelay >= 0 {
-		expire = &s.willDelay
+		timerPeriod = s.willDelay
 	} else {
 		s.will = nil
 	}
 
-	//check if we set will delay before
-	//if will delay bigger than session expiry interval set timer period to expireIn value
-	//as will message (if presented) has to be published either session expiry or will delay (which done first)
-	//if will delay less than session expiry set timer to will delay interval and store difference between
-	//will delay and session expiry to let timer restart keep tick after will
-
-	if s.expireIn != nil && *s.expireIn != 0 {
+	if s.expireIn != nil {
 		// if will delay is set before and value less than expiration
 		// then timer should fire 2 times
-		if expire != nil && *expire < *s.expireIn {
-			*s.expireIn = *s.expireIn - s.willDelay
+		if (timerPeriod > 0) && (timerPeriod < *s.expireIn) {
+			*s.expireIn = *s.expireIn - timerPeriod
 		} else {
-			expire = s.expireIn
+			timerPeriod = *s.expireIn
 			*s.expireIn = 0
 		}
 	}
 
-	s.timerStartedAt = time.Now()
-	s.timerWorker.Add(1)
-	s.timerChan = make(chan struct{})
-	s.timer = time.NewTimer(*expire * time.Second)
-	go s.expiryWorker()
+	s.expiringSince = time.Now()
+	s.timer.Reset(timerPeriod * time.Second)
 }
 
 func (s *session) onDisconnect(p *connection.DisconnectParams) {
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Println(r)
+	s.disconnectOnce.Do(func() {
+		defer s.wgDisconnected.Done()
+
+		s.lock.Lock()
+		close(s.isOnline)
+		s.lock.Unlock()
+
+		finalize := func(err exitReason) {
+			s.signalClose(s.id, err)
+			s.finalized = true
 		}
-	}()
 
-	defer atomic.CompareAndSwapUintptr(&s.isOnline, 1, 0)
-	defer s.wgStopped.Done()
+		s.connStop.Do(func() {
+			s.conn = nil
+		})
 
-	signalClose := true
-	var shutdownReason exitReason
-
-	defer func() {
-		if signalClose {
-			s.onClose(s.id, shutdownReason)
+		if p.ExpireAt != nil {
+			s.expireIn = p.ExpireAt
 		}
-	}()
 
-	s.connStop.Do(func() {
-		s.conn = nil
-	})
+		// If session expiry is set to 0, the Session ends when the Network Connection is closed
+		if s.expireIn != nil && *s.expireIn == 0 {
+			s.killOnDisconnect = true
+		}
 
-	// valid willMsg pointer tells we have will message
-	if p.Will && s.will != nil {
+		// valid willMsg pointer tells we have will message
 		// if session is clean send will regardless to will delay
-		if s.clean || s.willDelay == 0 {
+		if p.Will && s.will != nil && (s.killOnDisconnect || s.willDelay == 0) {
 			s.messenger.Publish(s.will) // nolint: errcheck
 			s.will = nil
 		}
+
+		s.signalDisconnected(s.id, p.Reason, !s.killOnDisconnect)
+
+		if s.killOnDisconnect || !s.subscriber.HasSubscriptions() {
+			s.shutdownSubscriber(s.subscriber)
+			s.subscriber = nil
+		}
+
+		if s.killOnDisconnect {
+			defer finalize(exitReasonClean)
+		} else {
+			// session is not clean thus more difficult case
+			// persist state
+			s.persist(s.id, p.State)
+
+			// check if remaining subscriptions exists, expiry is presented and will delay not set to 0
+			if s.expireIn == nil && s.willDelay == 0 {
+				// signal to shutdown session
+				defer finalize(exitReasonShutdown)
+			} else if (s.expireIn != nil && *s.expireIn > 0) || s.willDelay > 0 {
+				// new expiry value might be received upon disconnect message from the client
+				if p.ExpireAt != nil {
+					s.expireIn = p.ExpireAt
+				}
+
+				s.runExpiry(p.Will)
+			}
+		}
+	})
+}
+
+func (s *session) timerCallback() {
+	defer s.timerLock.Unlock()
+	s.timerLock.Lock()
+
+	finalize := func(reason exitReason) {
+		s.signalClose(s.id, reason)
+		s.finalized = true
 	}
 
-	s.notifyDisconnect(s.id, !s.clean, 0)
+	// 1. check for will message available
+	if s.will != nil {
+		// publish if exists and wipe state
+		s.messenger.Publish(s.will) // nolint: errcheck
+		s.will = nil
+		s.willDelay = 0
+	}
 
-	if s.clean {
-		// session is clean. Signal upper layer to wipe it
-		shutdownReason = exitReasonClean
+	if s.expireIn == nil {
+		// 2.a session has processed delayed will and there is nothing to do
+		// completely shutdown the session
+		defer finalize(exitReasonShutdown)
+	} else if *s.expireIn == 0 {
+		// session has expired. WIPE IT
+		if s.subscriber != nil {
+			s.shutdownSubscriber(s.subscriber)
+		}
+		defer finalize(exitReasonExpired)
 	} else {
-		// session is not clean thus more difficult case
-
-		// persist state
-		s.onPersist(s.id, p.State)
-
-		// check if remaining subscriptions exists, expiry is presented and will delay not set to 0
-		if s.expireIn == nil && s.willDelay == 0 {
-			if !s.subscriber.HasSubscriptions() {
-				// above false thus no remaining subscriptions, session does not expire
-				// and does not require delayed will
-				// signal upper layer to persist state and wipe this object
-				shutdownReason = exitReasonShutdown
-			} else {
-				shutdownReason = exitReasonKeepSubscriber
-			}
-		} else if (s.expireIn != nil && *s.expireIn > 0) || s.willDelay > 0 {
-			// session has either to expire or will delay or both set
-
-			// do not signal upper layer about exit
-			signalClose = false
-
-			// new expiry value might be received upon disconnect message from the client
-			if p.ExpireAt != nil {
-				s.expireIn = p.ExpireAt
-			}
-
-			s.runExpiry(p.Will)
-		}
-	}
-}
-
-func (s *session) expiryWorker() {
-	var shutdownReason exitReason
-
-	defer func() {
-		select {
-		case <-s.timerChan:
-		default:
-			close(s.timerChan)
-		}
-		s.timerWorker.Done()
-
-		if shutdownReason > 0 {
-			s.onClose(s.id, shutdownReason)
-		}
-	}()
-
-	for {
-		select {
-		case <-s.timer.C:
-			// timer fired
-			// 1. check if it requires to publish will
-			if s.will != nil {
-				// publish if exists and wipe state
-				s.messenger.Publish(s.will) // nolint: errcheck
-				s.will = nil
-			}
-
-			// 2. if expireIn is present this session has expiry set
-			if s.expireIn != nil {
-				// 2.a if value pointed by expireIn is non zero there is some time after will left wait
-				if *s.expireIn != 0 {
-					// restart timer and wait again
-					val := *s.expireIn
-					// clear value pointed by expireIn so when next fire comes we signal session is expired
-					*s.expireIn = 0
-					s.timer.Reset(val)
-				} else {
-					// session has expired. WIPE IT
-					s.subscriber.Offline(true)
-					shutdownReason = exitReasonExpired
-					return
-				}
-			} else {
-				// 2.b session has processed delayed will
-				// if there is any subscriptions left tell upper layer to keep subscriber
-				// otherwise completely shutdown the session
-				if s.subscriber.HasSubscriptions() {
-					shutdownReason = exitReasonKeepSubscriber
-				} else {
-					shutdownReason = exitReasonShutdown
-				}
-
-				return
-			}
-		case <-s.timerChan:
-			if s.timer != nil {
-				s.timer.Stop()
-				elapsed := time.Since(s.timerStartedAt)
-				if s.willDelay > 0 && (s.willDelay-elapsed) > 0 {
-					s.willDelay = s.willDelay - elapsed
-				}
-
-				if s.expireIn != nil && *s.expireIn > 0 && (*s.expireIn-elapsed) > 0 {
-					*s.expireIn = *s.expireIn - elapsed
-				}
-			}
-			return
-		}
-	}
-}
-
-type properties struct {
-	ExpireIn           *time.Duration
-	WillDelay          time.Duration
-	UserProperties     interface{}
-	AuthData           []byte
-	AuthMethod         string
-	MaximumPacketSize  uint32
-	ReceiveMaximum     uint16
-	TopicAliasMaximum  uint16
-	RequestResponse    bool
-	RequestProblemInfo bool
-}
-
-func newProperties() *properties {
-	return &properties{
-		ExpireIn:           nil,
-		WillDelay:          0,
-		UserProperties:     nil,
-		AuthData:           []byte{},
-		AuthMethod:         "",
-		MaximumPacketSize:  2684354565,
-		ReceiveMaximum:     65535,
-		TopicAliasMaximum:  0xFFFF,
-		RequestResponse:    false,
-		RequestProblemInfo: false,
+		// restart timer and wait again
+		val := *s.expireIn
+		// clear value pointed by expireIn so when next fire comes we signal session is expired
+		*s.expireIn = 0
+		s.timer.Reset(val)
 	}
 }

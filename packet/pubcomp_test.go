@@ -21,7 +21,7 @@ import (
 )
 
 func TestPubCompMessageFields(t *testing.T) {
-	m, err := NewMessage(ProtocolV311, PUBCOMP)
+	m, err := New(ProtocolV311, PUBCOMP)
 	require.NoError(t, err)
 
 	msg, ok := m.(*Ack)
@@ -75,7 +75,7 @@ func TestPubCompMessageEncode(t *testing.T) {
 		7, // packet ID LSB (7)
 	}
 
-	m, err := NewMessage(ProtocolV311, PUBCOMP)
+	m, err := New(ProtocolV311, PUBCOMP)
 	require.NoError(t, err)
 
 	msg, ok := m.(*Ack)

@@ -78,6 +78,12 @@ type Retained interface {
 	Wipe() error
 }
 
+// ConnectionMessages interface for connection to handle messages
+type ConnectionMessages interface {
+	MessagesLoad([]byte) (*SessionMessages, error)
+	MessagesStore([]byte, *SessionMessages) error
+}
+
 // Sessions interface allows operating with sessions inside backend
 type Sessions interface {
 	StatesIterate(func([]byte, *SessionState) error) error

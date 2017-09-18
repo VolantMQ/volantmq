@@ -16,10 +16,12 @@ type LogInterface struct {
 
 // Default configs
 const (
-	DefaultKeepAlive        = 300 // DefaultKeepAlive default keep
-	DefaultConnectTimeout   = 2   // DefaultConnectTimeout connect timeout
-	DefaultAckTimeout       = 20  // DefaultAckTimeout ack timeout
-	DefaultTimeoutRetries   = 3   // DefaultTimeoutRetries retries
+	DefaultKeepAlive        = 60 // DefaultKeepAlive default keep
+	DefaultConnectTimeout   = 2  // DefaultConnectTimeout connect timeout
+	DefaultMaxPacketSize    = 268435455
+	DefaultReceiveMax       = 65535
+	DefaultAckTimeout       = 20 // DefaultAckTimeout ack timeout
+	DefaultTimeoutRetries   = 3  // DefaultTimeoutRetries retries
 	MinKeepAlive            = 30
 	DefaultSessionsProvider = "mem"         // DefaultSessionsProvider default session provider
 	DefaultAuthenticator    = "mockSuccess" // DefaultAuthenticator default auth provider
@@ -66,7 +68,7 @@ type Once struct {
 //
 // If f panics, Do considers it to have returned; future calls of Do return
 // without calling f.
-func (o *OnceWait) Do(f func()) {
+func (o *OnceWait) Do(f func()) bool {
 	o.lock.Lock()
 	res := atomic.CompareAndSwapUintptr(&o.val, 0, 1)
 	if res {
@@ -80,6 +82,8 @@ func (o *OnceWait) Do(f func()) {
 	} else {
 		o.wait.Wait()
 	}
+
+	return res
 }
 
 // Do calls the function f if and only if Do is being called for the
@@ -99,8 +103,11 @@ func (o *OnceWait) Do(f func()) {
 //
 // If f panics, Do considers it to have returned; future calls of Do return
 // without calling f.
-func (o *Once) Do(f func()) {
+func (o *Once) Do(f func()) bool {
 	if atomic.CompareAndSwapUintptr(&o.val, 0, 1) {
 		f()
+		return true
 	}
+
+	return false
 }

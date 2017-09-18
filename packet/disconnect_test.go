@@ -54,7 +54,7 @@ func TestDisconnectMessageEncode(t *testing.T) {
 		0,
 	}
 
-	msg, err := NewMessage(ProtocolV311, DISCONNECT)
+	msg, err := New(ProtocolV311, DISCONNECT)
 	require.NoError(t, err)
 	require.NotNil(t, msg)
 

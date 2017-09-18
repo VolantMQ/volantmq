@@ -11,36 +11,26 @@ import (
 
 // ConnectionProvider passed to present network connection
 type ConnectionProvider interface {
+	ID() string
 	Subscriptions() Subscriptions
-	Subscribe(string, *SubscriptionParams) (packet.QosType, []*packet.Publish, error)
+	Subscribe(string, *topicsTypes.SubscriptionParams) (packet.QosType, []*packet.Publish, error)
 	UnSubscribe(string) error
 	HasSubscriptions() bool
 	Online(c OnlinePublish)
+	OnlineRedirect(c OnlinePublish)
 	Offline(bool)
+	Hash() uintptr
 	Version() packet.ProtocolVersion
 }
 
 // OnlinePublish invoked when subscriber respective to sessions receive message
-type OnlinePublish func(*packet.Publish) error
+type OnlinePublish func(*packet.Publish)
 
 // OfflinePublish invoked when subscriber respective to sessions receive message
 type OfflinePublish func(string, *packet.Publish)
 
-// SubscriptionParams parameters of the subscription
-type SubscriptionParams struct {
-	// Subscription id
-	// V5.0 ONLY
-	ID uint32
-
-	// Requested QoS requested by subscriber
-	Requested packet.SubscriptionOptions
-
-	// Granted QoS granted by topics manager
-	Granted packet.QosType
-}
-
 // Subscriptions contains active subscriptions with respective subscription parameters
-type Subscriptions map[string]*SubscriptionParams
+type Subscriptions map[string]*topicsTypes.SubscriptionParams
 
 // Config subscriber config options
 type Config struct {
@@ -84,6 +74,11 @@ func New(c *Config) *Type {
 	return p
 }
 
+// ID get subscriber id
+func (s *Type) ID() string {
+	return s.id
+}
+
 // Hash returns address of the provider struct.
 // Used by topics provider as a key to subscriber object
 func (s *Type) Hash() uintptr {
@@ -116,10 +111,9 @@ func (s *Type) Subscriptions() Subscriptions {
 }
 
 // Subscribe to given topic
-func (s *Type) Subscribe(topic string, params *SubscriptionParams) (packet.QosType, []*packet.Publish, error) {
-	q, r, err := s.topics.Subscribe(topic, params.Requested.QoS(), s, params.ID)
+func (s *Type) Subscribe(topic string, params *topicsTypes.SubscriptionParams) (packet.QosType, []*packet.Publish, error) {
+	q, r, err := s.topics.Subscribe(topic, s, params)
 
-	params.Granted = q
 	s.subscriptions[topic] = params
 
 	return q, r, err
@@ -135,22 +129,24 @@ func (s *Type) UnSubscribe(topic string) error {
 // Publish message accordingly to subscriber state
 // online: forward message to session
 // offline: persist message
-func (s *Type) Publish(m *packet.Publish, grantedQoS packet.QosType, ids []uint32) error {
-	// message version should be same as session as encode/decode depends on it
-	mP, _ := packet.NewMessage(s.version, packet.PUBLISH)
-	msg, _ := mP.(*packet.Publish)
+func (s *Type) Publish(p *packet.Publish, grantedQoS packet.QosType, ops packet.SubscriptionOptions, ids []uint32) error {
+	pkt, err := p.Clone(s.version)
+	if err != nil {
+		return err
+	}
 
-	// TODO: copy properties for V5.0
-	msg.SetDup(false)
-	msg.SetQoS(m.QoS())     // nolint: errcheck
-	msg.SetTopic(m.Topic()) // nolint: errcheck
-	msg.SetRetain(false)
-	msg.SetPayload(m.Payload())
+	if len(ids) > 0 {
+		if err = pkt.PropertySet(packet.PropertySubscriptionIdentifier, ids); err != nil {
+			return err
+		}
+	}
 
-	msg.PropertySet(packet.PropertySubscriptionIdentifier, ids) // nolint: errcheck
+	if !ops.RAP() {
+		pkt.SetRetain(false)
+	}
 
-	if msg.QoS() != packet.QoS0 {
-		msg.SetPacketID(0)
+	if pkt.QoS() != packet.QoS0 {
+		pkt.SetPacketID(0)
 	}
 
 	switch grantedQoS {
@@ -160,8 +156,8 @@ func (s *Type) Publish(m *packet.Publish, grantedQoS packet.QosType, ids []uint3
 	// Message published to the same topic is downgraded by the Server to QoS 1 for delivery to the
 	// Client, so that Client might receive duplicate copies of the Message.
 	case packet.QoS1:
-		if msg.QoS() == packet.QoS2 {
-			msg.SetQoS(packet.QoS1) // nolint: errcheck
+		if pkt.QoS() == packet.QoS2 {
+			pkt.SetQoS(packet.QoS1) // nolint: errcheck
 		}
 
 		// If the subscribing Client has been granted maximum QoS 0, then an Application Message
@@ -175,11 +171,13 @@ func (s *Type) Publish(m *packet.Publish, grantedQoS packet.QosType, ids []uint3
 	case <-s.isOnline:
 		// if session is offline forward message to persisted storage
 		// only with QoS1 and QoS2 and QoS0 if set by config
-		qos := msg.QoS()
+		qos := pkt.QoS()
 		if qos != packet.QoS0 || (s.offlineQoS0 && qos == packet.QoS0) {
 			defer s.wgOffline.Done()
+			s.publishLock.RLock()
 			s.wgOffline.Add(1)
-			s.publishOffline(s.id, msg)
+			s.publishLock.RUnlock()
+			s.publishOffline(s.id, pkt)
 		}
 	default:
 		// forward message to publish queue
@@ -187,7 +185,7 @@ func (s *Type) Publish(m *packet.Publish, grantedQoS packet.QosType, ids []uint3
 		s.publishLock.RLock()
 		s.wgOnline.Add(1)
 		s.publishLock.RUnlock()
-		return s.publishOnline(msg)
+		s.publishOnline(pkt)
 	}
 
 	return nil
@@ -196,9 +194,18 @@ func (s *Type) Publish(m *packet.Publish, grantedQoS packet.QosType, ids []uint3
 // Online moves subscriber to online state
 // since this moment all of publishes are forwarded to provided callback
 func (s *Type) Online(c OnlinePublish) {
+	s.wgOffline.Wait()
+	defer s.publishLock.Unlock()
+	s.publishLock.Lock()
 	s.publishOnline = c
 	s.isOnline = make(chan struct{})
-	s.wgOffline.Wait()
+}
+
+// OnlineRedirect set new online publish callback
+func (s *Type) OnlineRedirect(c OnlinePublish) {
+	defer s.publishLock.Unlock()
+	s.publishLock.Lock()
+	s.publishOnline = c
 }
 
 // Offline put session offline

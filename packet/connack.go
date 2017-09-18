@@ -107,32 +107,32 @@ func (msg *ConnAck) decodeMessage(src []byte) (int, error) {
 	return total, nil
 }
 
-func (msg *ConnAck) encodeMessage(dst []byte) (int, error) {
-	total := 0
+func (msg *ConnAck) encodeMessage(to []byte) (int, error) {
+	offset := 0
 
 	if msg.sessionPresent {
-		dst[total] = 1
+		to[offset] = 1
 	} else {
-		dst[total] = 0
+		to[offset] = 0
 	}
-	total++
+	offset++
 
-	dst[total] = msg.returnCode.Value()
-	total++
+	to[offset] = msg.returnCode.Value()
+	offset++
 
 	var err error
 	// V5.0   [MQTT-3.1.2.11]
 	if msg.version == ProtocolV50 {
 		var n int
 
-		if n, err = encodeProperties(msg.properties, dst[total:]); err != nil {
-			return total + n, err
+		n, err = encodeProperties(msg.properties, to[offset:])
+		offset += n
+		if err != nil {
+			return offset, err
 		}
-
-		total += n
 	}
 
-	return total, err
+	return offset, err
 }
 
 func (msg *ConnAck) size() int {
@@ -140,8 +140,7 @@ func (msg *ConnAck) size() int {
 
 	// v5.0 [MQTT-3.1.2.11]
 	if msg.version == ProtocolV50 {
-		pLen, _ := encodeProperties(msg.properties, []byte{})
-		total += pLen
+		total += int(msg.properties.FullLen())
 	}
 
 	return total

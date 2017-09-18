@@ -10,15 +10,30 @@ import (
 )
 
 type subscribedEntry struct {
-	s          topicsTypes.Subscriber
-	id         uint32
-	grantedQoS packet.QosType
+	s topicsTypes.Subscriber
+	p *topicsTypes.SubscriptionParams
 }
 
 type subscribedEntries map[uintptr]*subscribedEntry
 
+func (s *subscribedEntry) acquire() *publishEntry {
+	s.s.Acquire()
+	pe := &publishEntry{
+		s:   s.s,
+		qos: s.p.Granted,
+		ops: s.p.Ops,
+	}
+
+	if s.p.ID > 0 {
+		pe.ids = []uint32{s.p.ID}
+	}
+
+	return pe
+}
+
 type publishEntry struct {
 	s   topicsTypes.Subscriber
+	ops packet.SubscriptionOptions
 	qos packet.QosType
 	ids []uint32
 }
@@ -30,7 +45,7 @@ type node struct {
 	subs           subscribedEntries
 	parent         *node
 	children       map[string]*node
-	getSubscribers func(p *publishEntries)
+	getSubscribers func(uintptr, *publishEntries)
 }
 
 func newNode(overlap bool, parent *node) *node {
@@ -82,22 +97,25 @@ func (mT *provider) leafSearchNode(levels []string) *node {
 	return root
 }
 
-func (mT *provider) subscriptionInsert(filter string, qos packet.QosType, sub topicsTypes.Subscriber, id uint32) {
+func (mT *provider) subscriptionInsert(filter string, sub topicsTypes.Subscriber, p *topicsTypes.SubscriptionParams) bool {
 	levels := strings.Split(filter, "/")
 
 	root := mT.leafInsertNode(levels)
 
 	// Let's see if the subscriber is already on the list and just update QoS if so
 	// Otherwise create new entry
+	exists := false
 	if s, ok := root.subs[sub.Hash()]; !ok {
 		root.subs[sub.Hash()] = &subscribedEntry{
-			s:          sub,
-			grantedQoS: qos,
-			id:         id,
+			s: sub,
+			p: p,
 		}
 	} else {
-		s.grantedQoS = qos
+		s.p = p
+		exists = true
 	}
+
+	return exists
 }
 
 func (mT *provider) subscriptionRemove(topic string, sub topicsTypes.Subscriber) error {
@@ -144,38 +162,38 @@ func (mT *provider) subscriptionRemove(topic string, sub topicsTypes.Subscriber)
 	return err
 }
 
-func subscriptionRecurseSearch(root *node, levels []string, p *publishEntries) {
+func subscriptionRecurseSearch(root *node, levels []string, publishID uintptr, p *publishEntries) {
 	if len(levels) == 0 {
 		// leaf level of the topic
 		// get all subscribers and return
-		root.getSubscribers(p)
+		root.getSubscribers(publishID, p)
 		if n, ok := root.children[topicsTypes.MWC]; ok {
-			n.getSubscribers(p)
+			n.getSubscribers(publishID, p)
 		}
 	} else {
 		if n, ok := root.children[topicsTypes.MWC]; ok && len(levels[0]) != 0 {
-			n.getSubscribers(p)
+			n.getSubscribers(publishID, p)
 		}
 
 		if n, ok := root.children[levels[0]]; ok {
-			subscriptionRecurseSearch(n, levels[1:], p)
+			subscriptionRecurseSearch(n, levels[1:], publishID, p)
 		}
 
 		if n, ok := root.children[topicsTypes.SWC]; ok {
-			subscriptionRecurseSearch(n, levels[1:], p)
+			subscriptionRecurseSearch(n, levels[1:], publishID, p)
 		}
 	}
 }
 
-func (mT *provider) subscriptionSearch(topic string, p *publishEntries) {
+func (mT *provider) subscriptionSearch(topic string, publishID uintptr, p *publishEntries) {
 	root := mT.root
 	levels := strings.Split(topic, "/")
 	level := levels[0]
 
 	if !strings.HasPrefix(level, "$") {
-		subscriptionRecurseSearch(root, levels, p)
+		subscriptionRecurseSearch(root, levels, publishID, p)
 	} else if n, ok := root.children[level]; ok {
-		subscriptionRecurseSearch(n, levels[1:], p)
+		subscriptionRecurseSearch(n, levels[1:], publishID, p)
 	}
 }
 
@@ -277,48 +295,34 @@ func (sn *node) allRetained(retained *[]*packet.Publish) {
 	}
 }
 
-func (sn *node) overlappingSubscribers(p *publishEntries) {
+func (sn *node) overlappingSubscribers(publishID uintptr, p *publishEntries) {
 	for id, sub := range sn.subs {
 		if s, ok := (*p)[id]; ok {
-			if sub.id > 0 {
-				s[0].ids = append(s[0].ids, sub.id)
+			if sub.p.ID > 0 {
+				s[0].ids = append(s[0].ids, sub.p.ID)
 			}
 
-			if s[0].qos < sub.grantedQoS {
-				s[0].qos = sub.grantedQoS
+			if s[0].qos < sub.p.Granted {
+				s[0].qos = sub.p.Granted
 			}
 		} else {
-			sub.s.Acquire()
-			pe := &publishEntry{
-				s:   sub.s,
-				qos: sub.grantedQoS,
+			if !sub.p.Ops.NL() || id != publishID {
+				pe := sub.acquire()
+				(*p)[id] = append((*p)[id], pe)
 			}
-
-			if sub.id > 0 {
-				pe.ids = []uint32{sub.id}
-			}
-
-			(*p)[id] = append((*p)[id], pe)
 		}
 	}
 }
 
-func (sn *node) nonOverlappingSubscribers(p *publishEntries) {
+func (sn *node) nonOverlappingSubscribers(publishID uintptr, p *publishEntries) {
 	for id, sub := range sn.subs {
-		sub.s.Acquire()
-		pe := &publishEntry{
-			s:   sub.s,
-			qos: sub.grantedQoS,
-		}
-
-		if sub.id > 0 {
-			pe.ids = []uint32{sub.id}
-		}
-
-		if _, ok := (*p)[id]; ok {
-			(*p)[id] = append((*p)[id], pe)
-		} else {
-			(*p)[id] = []*publishEntry{pe}
+		if !sub.p.Ops.NL() || id != publishID {
+			pe := sub.acquire()
+			if _, ok := (*p)[id]; ok {
+				(*p)[id] = append((*p)[id], pe)
+			} else {
+				(*p)[id] = []*publishEntry{pe}
+			}
 		}
 	}
 }

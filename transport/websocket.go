@@ -70,7 +70,7 @@ func NewWS(config *ConfigWS, internal *InternalConfig) (Provider, error) {
 	l.protocol = "ws"
 	l.InternalConfig = *internal
 	l.config = *config.transport
-	l.log = configuration.GetProdLogger().Named("server.transport.ws")
+	l.log = configuration.GetLogger().Named("server.transport.ws")
 
 	if len(config.Path) == 0 {
 		config.Path = "/"

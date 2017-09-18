@@ -7,11 +7,7 @@ import (
 )
 
 type config struct {
-	log struct {
-		Prod *zap.Logger
-		Dev  *zap.Logger
-	}
-
+	log  *zap.Logger
 	once sync.Once
 }
 
@@ -25,17 +21,13 @@ var cfg config
 
 func init() {
 	logCfg := zap.NewProductionConfig()
-	logDebugCfg := zap.NewProductionConfig()
 
 	logCfg.DisableStacktrace = true
-	logDebugCfg.DisableStacktrace = true
-	logDebugCfg.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
+	logCfg.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
 
 	log, _ := logCfg.Build()
-	dLog, _ := logDebugCfg.Build()
 
-	cfg.log.Prod = log.Named("mqtt")
-	cfg.log.Dev = dLog.Named("mqtt")
+	cfg.log = log.Named("mqtt")
 }
 
 // Init global MQTT config with given options
@@ -43,30 +35,20 @@ func init() {
 func Init(ops Options) {
 	cfg.once.Do(func() {
 		logCfg := zap.NewProductionConfig()
-		logDebugCfg := zap.NewDevelopmentConfig()
-		logDebugCfg.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
+		logCfg.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
 
 		logCfg.DisableStacktrace = true
-		logDebugCfg.DisableStacktrace = true
 
 		if !ops.LogWithTs {
 			logCfg.EncoderConfig.TimeKey = ""
-			logDebugCfg.EncoderConfig.TimeKey = ""
 		}
 
 		log, _ := logCfg.Build()
-		dLog, _ := logDebugCfg.Build()
-		cfg.log.Prod = log.Named("mqtt")
-		cfg.log.Dev = dLog.Named("mqtt")
+		cfg.log = log.Named("mqtt")
 	})
 }
 
-// GetProdLogger return production logger
-func GetProdLogger() *zap.Logger {
-	return cfg.log.Prod
-}
-
-// GetDevLogger return development logger
-func GetDevLogger() *zap.Logger {
-	return cfg.log.Prod
+// GetLogger return production logger
+func GetLogger() *zap.Logger {
+	return cfg.log
 }

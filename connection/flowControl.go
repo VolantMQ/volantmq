@@ -8,36 +8,40 @@ import (
 	"github.com/VolantMQ/volantmq/packet"
 )
 
+var (
+	errExit          = errors.New("exit")
+	errQuotaExceeded = errors.New("quota exceeded")
+)
+
 type packetsFlowControl struct {
-	counter       uint64
-	quit          chan struct{}
-	cond          *sync.Cond
-	inUse         map[packet.IDType]bool
-	sendQuota     int32
-	preserveOrder bool
+	counter uint64
+	quit    chan struct{}
+	inUse   sync.Map
+	quota   int32
 }
 
-func newFlowControl(quit chan struct{}, preserveOrder bool) *packetsFlowControl {
+func newFlowControl(quit chan struct{}, quota int32) *packetsFlowControl {
 	return &packetsFlowControl{
-		inUse:         make(map[packet.IDType]bool),
-		cond:          sync.NewCond(new(sync.Mutex)),
-		quit:          quit,
-		preserveOrder: preserveOrder,
+		quit:  quit,
+		quota: quota,
 	}
 }
 
-func (s *packetsFlowControl) acquire() (packet.IDType, error) {
-	defer s.cond.L.Unlock()
-	s.cond.L.Lock()
+func (s *packetsFlowControl) reAcquire(id packet.IDType) {
+	atomic.AddInt32(&s.quota, -1)
+	s.inUse.Store(id, true)
+}
 
-	if (s.preserveOrder && !atomic.CompareAndSwapInt32(&s.sendQuota, 0, 1)) ||
-		(atomic.AddInt32(&s.sendQuota, -1) == 0) {
-		s.cond.Wait()
-		select {
-		case <-s.quit:
-			return 0, errors.New("exit")
-		default:
-		}
+func (s *packetsFlowControl) acquire() (packet.IDType, error) {
+	select {
+	case <-s.quit:
+		return 0, errExit
+	default:
+	}
+
+	var err error
+	if atomic.AddInt32(&s.quota, -1) == 0 {
+		err = errQuotaExceeded
 	}
 
 	var id packet.IDType
@@ -45,41 +49,16 @@ func (s *packetsFlowControl) acquire() (packet.IDType, error) {
 	for count := 0; count <= 0xFFFF; count++ {
 		s.counter++
 		id = packet.IDType(s.counter)
-		if _, ok := s.inUse[id]; !ok {
-			s.inUse[id] = true
+		if _, ok := s.inUse.LoadOrStore(id, true); !ok {
 			break
 		}
 	}
 
-	return id, nil
+	return id, err
 }
 
-//func (s *packetsFlowControl) reAcquire(id message.IDType) error {
-//	defer s.lock.Unlock()
-//	s.lock.Lock()
-//
-//	if (s.preserveOrder && !atomic.CompareAndSwapInt32(&s.sendQuota, 0, 1)) ||
-//		(atomic.AddInt32(&s.sendQuota, -1) == 0) {
-//		s.cond.Wait()
-//		select {
-//		case <-s.quit:
-//			return errors.New("exit")
-//		default:
-//		}
-//	}
-//
-//	s.inUse[id] = true
-//
-//	return nil
-//}
+func (s *packetsFlowControl) release(id packet.IDType) bool {
+	s.inUse.Delete(id)
 
-func (s *packetsFlowControl) release(id packet.IDType) {
-	defer func() {
-		atomic.AddInt32(&s.sendQuota, -1)
-		s.cond.Signal()
-	}()
-
-	defer s.cond.L.Unlock()
-	s.cond.L.Lock()
-	delete(s.inUse, id)
+	return atomic.AddInt32(&s.quota, 1) == 1
 }

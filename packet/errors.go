@@ -100,6 +100,8 @@ func (e Error) Error() string {
 		return "Invalid arguments"
 	case ErrInvalidUtf8:
 		return "String is not UTF8"
+	case ErrInvalidProtocolVersion:
+		return "Invalid protocol name"
 	}
 
 	return "Unknown error"
