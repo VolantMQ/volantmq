@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The VolantMQ Authors. All rights reserved.
+// Copyright (c) 2017 The VolantMQ Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,19 +15,19 @@
 package main
 
 import (
+	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 
 	"github.com/VolantMQ/volantmq"
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
+	"github.com/VolantMQ/volantmq/persistence/boltdb"
 	"github.com/VolantMQ/volantmq/transport"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
-
-	_ "net/http/pprof"
-	_ "runtime/debug"
 )
 
 func main() {
@@ -42,6 +42,7 @@ func main() {
 	var err error
 
 	logger.Info("Starting application")
+	logger.Info("Allocated cores", zap.Int("GOMAXPROCS", runtime.GOMAXPROCS(0)))
 	viper.SetConfigName("config")
 	viper.AddConfigPath("conf")
 	viper.SetConfigType("json")
@@ -82,11 +83,19 @@ func main() {
 	}
 
 	serverConfig := volantmq.NewServerConfig()
-
 	serverConfig.OfflineQoS0 = true
 	serverConfig.TransportStatus = listenerStatus
 	serverConfig.AllowDuplicates = true
 	serverConfig.Authenticators = "internal"
+
+	serverConfig.Persistence, err = boltdb.New(&boltdb.Config{
+		File: "./persist.db",
+	})
+
+	if err != nil {
+		logger.Error("Couldn't init BoltDB persistence", zap.Error(err))
+		os.Exit(1)
+	}
 
 	srv, err = volantmq.NewServer(serverConfig)
 
@@ -102,15 +111,17 @@ func main() {
 		return
 	}
 
-	configWs := transport.NewConfigWS(
+	config := transport.NewConfigTCP(
 		&transport.Config{
-			Port:        8080,
+			Port:        1883,
 			AuthManager: authMng,
 		})
 
-	if err = srv.ListenAndServe(configWs); err != nil {
+	if err = srv.ListenAndServe(config); err != nil {
 		logger.Error("Couldn't start listener", zap.Error(err))
 	}
+
+	go http.ListenAndServe(":6061", nil) // nolint: errcheck
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
@@ -120,4 +131,6 @@ func main() {
 	if err = srv.Close(); err != nil {
 		logger.Error("Couldn't shutdown server", zap.Error(err))
 	}
+
+	os.Remove("./persist.db") // nolint: errcheck
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The VolantMQ Authors. All rights reserved.
+// Copyright (c) 2017 The VolantMQ Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,14 +23,9 @@ import (
 	"github.com/VolantMQ/volantmq"
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
-	"github.com/VolantMQ/volantmq/persistence/types"
 	"github.com/VolantMQ/volantmq/transport"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
-
-	"net/http"
-	_ "net/http/pprof"
-	_ "runtime/debug"
 )
 
 func main() {
@@ -88,9 +83,6 @@ func main() {
 	serverConfig := volantmq.NewServerConfig()
 
 	serverConfig.OfflineQoS0 = true
-	serverConfig.Persistence = &persistenceTypes.BoltDBConfig{
-		File: "./persist.db",
-	}
 	serverConfig.TransportStatus = listenerStatus
 	serverConfig.AllowDuplicates = true
 	serverConfig.Authenticators = "internal"
@@ -118,8 +110,6 @@ func main() {
 	if err = srv.ListenAndServe(config); err != nil {
 		logger.Error("Couldn't start listener", zap.Error(err))
 	}
-
-	go http.ListenAndServe(":6061", nil) // nolint: errcheck
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)

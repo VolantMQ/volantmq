@@ -2,11 +2,9 @@ package volantmq
 
 import (
 	"errors"
+	"regexp"
 	"strconv"
 	"sync"
-
-	"regexp"
-
 	"time"
 
 	"github.com/VolantMQ/volantmq/auth"
@@ -14,7 +12,6 @@ import (
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/packet"
 	"github.com/VolantMQ/volantmq/persistence"
-	"github.com/VolantMQ/volantmq/persistence/types"
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/topics"
 	"github.com/VolantMQ/volantmq/topics/types"
@@ -39,7 +36,7 @@ var (
 // ServerConfig configuration of the MQTT server
 type ServerConfig struct {
 	// Configuration of persistence provider
-	Persistence persistenceTypes.ProviderConfig
+	Persistence persistence.Provider
 
 	// OnDuplicate notify if there is attempt connect client with id that already exists and active
 	// If not not set than defaults to mock function
@@ -103,7 +100,7 @@ type ServerConfig struct {
 func NewServerConfig() *ServerConfig {
 	return &ServerConfig{
 		Authenticators:                "mockSuccess",
-		Persistence:                   persistenceTypes.MemConfig{},
+		Persistence:                   persistence.Default(),
 		OnDuplicate:                   func(string, bool) {},
 		OfflineQoS0:                   false,
 		AllowDuplicates:               false,
@@ -139,12 +136,11 @@ type Server interface {
 // server is a library implementation of the MQTT server that, as best it can, complies
 // with the MQTT 3.1/3.1.1 and 5.0 specs.
 type server struct {
-	config      *ServerConfig
+	*ServerConfig
 	authMgr     *auth.Manager
 	sessionsMgr *clients.Manager
 	log         *zap.Logger
 	topicsMgr   topicsTypes.Provider
-	persist     persistenceTypes.Provider
 	sysTree     systree.Provider
 	quit        chan struct{}
 	lock        sync.Mutex
@@ -161,7 +157,9 @@ type server struct {
 
 // NewServer allocate server object
 func NewServer(config *ServerConfig) (Server, error) {
-	s := &server{}
+	s := &server{
+		ServerConfig: config,
+	}
 
 	if config.NodeName != "" {
 		if !nodeNameRegexp.MatchString(config.NodeName) {
@@ -169,30 +167,24 @@ func NewServer(config *ServerConfig) (Server, error) {
 		}
 	}
 
-	s.config = config
-
 	s.log = configuration.GetLogger().Named("server")
 
 	s.quit = make(chan struct{})
 	s.transports.list = make(map[int]transport.Provider)
 
 	var err error
-	if s.authMgr, err = auth.NewManager(s.config.Authenticators); err != nil {
+	if s.authMgr, err = auth.NewManager(s.Authenticators); err != nil {
 		return nil, err
 	}
 
-	if s.config.Persistence == nil {
+	if s.Persistence == nil {
 		return nil, errors.New("persistence provider cannot be nil")
 	}
 
-	if s.persist, err = persistence.New(s.config.Persistence); err != nil {
-		return nil, err
-	}
+	var systemPersistence persistence.System
+	var systemState *persistence.SystemState
 
-	var systemPersistence persistenceTypes.System
-	var systemState *persistenceTypes.SystemState
-
-	if systemPersistence, err = s.persist.System(); err != nil {
+	if systemPersistence, err = s.Persistence.System(); err != nil {
 		return nil, err
 	}
 
@@ -204,29 +196,29 @@ func NewServer(config *ServerConfig) (Server, error) {
 		return uuid.New() + "@volantmq.io"
 	}
 
-	if systemState.NodeName == "" || s.config.RewriteNodeName {
-		if s.config.NodeName == "" {
-			s.config.NodeName = generateNodeID()
+	if systemState.NodeName == "" || s.RewriteNodeName {
+		if s.NodeName == "" {
+			s.NodeName = generateNodeID()
 		}
 
-		systemState.NodeName = s.config.NodeName
+		systemState.NodeName = s.NodeName
 	} else {
-		s.config.NodeName = systemState.NodeName
+		s.NodeName = systemState.NodeName
 	}
 
 	if err = systemPersistence.SetInfo(systemState); err != nil {
 		return nil, err
 	}
 
-	var persisRetained persistenceTypes.Retained
+	var persisRetained persistence.Retained
 	var retains []types.RetainObject
 	//var dynPublishes []systree.DynamicValue
 
-	if s.sysTree, retains, s.systree.publishes, err = systree.NewTree("$SYS/servers/" + s.config.NodeName); err != nil {
+	if s.sysTree, retains, s.systree.publishes, err = systree.NewTree("$SYS/servers/" + s.NodeName); err != nil {
 		return nil, err
 	}
 
-	persisRetained, _ = s.persist.Retained()
+	persisRetained, _ = s.Persistence.Retained()
 
 	tConfig := topicsTypes.NewMemConfig()
 
@@ -238,7 +230,7 @@ func NewServer(config *ServerConfig) (Server, error) {
 		return nil, err
 	}
 
-	if s.config.WithSystree {
+	if s.WithSystree {
 		s.sysTree.SetCallbacks(s.topicsMgr)
 
 		for _, o := range retains {
@@ -247,20 +239,20 @@ func NewServer(config *ServerConfig) (Server, error) {
 			}
 		}
 
-		if s.config.SystreeUpdateInterval > 0 {
-			s.systree.timer = time.AfterFunc(s.config.SystreeUpdateInterval*time.Second, s.systreeUpdater)
+		if s.SystreeUpdateInterval > 0 {
+			s.systree.timer = time.AfterFunc(s.SystreeUpdateInterval*time.Second, s.systreeUpdater)
 		}
 	}
 
 	mConfig := &clients.Config{
 		TopicsMgr:                     s.topicsMgr,
-		ConnectTimeout:                s.config.ConnectTimeout,
-		Persist:                       s.persist,
+		ConnectTimeout:                s.ConnectTimeout,
+		Persist:                       s.Persistence,
 		Systree:                       s.sysTree,
-		AllowReplace:                  s.config.AllowDuplicates,
-		OnReplaceAttempt:              s.config.OnDuplicate,
-		NodeName:                      s.config.NodeName,
-		OfflineQoS0:                   s.config.OfflineQoS0,
+		AllowReplace:                  s.AllowDuplicates,
+		OnReplaceAttempt:              s.OnDuplicate,
+		NodeName:                      s.NodeName,
+		OfflineQoS0:                   s.OfflineQoS0,
 		AvailableRetain:               true,
 		AvailableSubscriptionID:       false,
 		AvailableSharedSubscription:   false,
@@ -285,9 +277,9 @@ func (s *server) ListenAndServe(config interface{}) error {
 	internalConfig := transport.InternalConfig{
 		Metric:          s.sysTree.Metric(),
 		Sessions:        s.sessionsMgr,
-		ConnectTimeout:  s.config.ConnectTimeout,
-		KeepAlive:       s.config.KeepAlive,
-		AllowedVersions: s.config.AllowedVersions,
+		ConnectTimeout:  s.ConnectTimeout,
+		KeepAlive:       s.KeepAlive,
+		AllowedVersions: s.AllowedVersions,
 	}
 
 	switch c := config.(type) {
@@ -316,13 +308,13 @@ func (s *server) ListenAndServe(config interface{}) error {
 	go func() {
 		defer s.transports.wg.Done()
 
-		s.config.TransportStatus(":"+strconv.Itoa(l.Port()), "started")
+		s.TransportStatus(":"+strconv.Itoa(l.Port()), "started")
 
 		status := "stopped"
 		if e := l.Serve(); e != nil {
 			status = e.Error()
 		}
-		s.config.TransportStatus(":"+strconv.Itoa(l.Port()), status)
+		s.TransportStatus(":"+strconv.Itoa(l.Port()), status)
 	}()
 
 	return nil
@@ -353,7 +345,7 @@ func (s *server) Close() error {
 		}
 
 		if s.sessionsMgr != nil {
-			if s.persist != nil {
+			if s.Persistence != nil {
 				s.sessionsMgr.Shutdown() // nolint: errcheck, gas
 			}
 		}
@@ -384,5 +376,5 @@ func (s *server) systreeUpdater() {
 		s.topicsMgr.Publish(msg) // nolint: errcheck
 	}
 
-	s.systree.timer.Reset(s.config.SystreeUpdateInterval * time.Second)
+	s.systree.timer.Reset(s.SystreeUpdateInterval * time.Second)
 }

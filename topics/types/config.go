@@ -2,7 +2,7 @@ package topicsTypes
 
 import (
 	"github.com/VolantMQ/volantmq/packet"
-	persistTypes "github.com/VolantMQ/volantmq/persistence/types"
+	"github.com/VolantMQ/volantmq/persistence"
 	"github.com/VolantMQ/volantmq/systree"
 )
 
@@ -12,7 +12,7 @@ type ProviderConfig interface{}
 // MemConfig of topics manager
 type MemConfig struct {
 	Stat                          systree.TopicsStat
-	Persist                       persistTypes.Retained
+	Persist                       persistence.Retained
 	OnCleanUnsubscribe            func([]string)
 	Name                          string
 	MaxQosAllowed                 packet.QosType

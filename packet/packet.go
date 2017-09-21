@@ -200,6 +200,7 @@ func newMessage(v ProtocolVersion, t Type) (Provider, error) {
 	return m, nil
 }
 
+// Encode try encode packet with into newly allocated buffer
 func Encode(p Provider) ([]byte, error) {
 	var sz int
 	var buf []byte

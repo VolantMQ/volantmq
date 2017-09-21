@@ -1,8 +1,4 @@
-package persistenceTypes
-
-import (
-	"github.com/VolantMQ/volantmq/packet"
-)
+package persistence
 
 // Errors persistence errors
 type Errors int
@@ -44,12 +40,14 @@ func (e Errors) Error() string {
 	return "unknown error"
 }
 
+// PersistedPacket wraps packet to handle misc cases like expiration
 type PersistedPacket struct {
 	UnAck    bool
 	ExpireAt string
 	Data     []byte
 }
 
+// SessionDelays formerly known as expiry set timestamp to handle will delay and/or expiration
 type SessionDelays struct {
 	Since    string
 	ExpireIn string
@@ -63,7 +61,7 @@ type SessionState struct {
 	Timestamp     string
 	Errors        []error
 	Expire        *SessionDelays
-	Version       packet.ProtocolVersion
+	Version       byte
 }
 
 // SystemState system configuration
@@ -78,11 +76,13 @@ type Packets interface {
 	PacketsStore([]byte, []PersistedPacket) error
 }
 
+// Subscriptions session subscriptions interface
 type Subscriptions interface {
 	SubscriptionsStore([]byte, []byte) error
 	SubscriptionsDelete([]byte) error
 }
 
+// State session state interface
 type State interface {
 	StateStore([]byte, *SessionState) error
 	StateDelete([]byte) error
