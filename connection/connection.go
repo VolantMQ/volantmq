@@ -40,8 +40,7 @@ var (
 
 // DisconnectParams session state when stopped
 type DisconnectParams struct {
-	ExpireAt *time.Duration
-	State    *persistenceTypes.SessionMessages
+	ExpireAt *uint32
 	Desc     *netpoll.Desc
 	Reason   packet.ReasonCode
 	Will     bool
@@ -73,7 +72,7 @@ type PreConfig struct {
 	Username        string
 	AuthMethod      string
 	AuthData        []byte
-	State           persistenceTypes.ConnectionMessages
+	State           persistenceTypes.Packets
 	Metric          systree.Metric
 	Conn            net.Conn
 	Auth            auth.SessionPermissions
@@ -97,8 +96,8 @@ type Config struct {
 	Subscriber       subscriber.ConnectionProvider
 	Messenger        types.TopicMessenger
 	OnDisconnect     onDisconnect
-	ExpireIn         *time.Duration
-	WillDelay        time.Duration
+	ExpireIn         *uint32
+	WillDelay        uint32
 	KillOnDisconnect bool
 }
 
@@ -128,12 +127,12 @@ type Type struct {
 	will bool
 }
 
-type unacknowledgedPublish struct {
-	msg packet.Provider
+type unacknowledged struct {
+	packet packet.Provider
 }
 
-func (u *unacknowledgedPublish) Size() (int, error) {
-	return u.msg.Size()
+func (u *unacknowledged) Size() (int, error) {
+	return u.packet.Size()
 }
 
 type sizeAble interface {
@@ -141,7 +140,7 @@ type sizeAble interface {
 }
 
 // New allocate new connection object
-func New(c *Config) (s *Type, present bool, err error) {
+func New(c *Config) (s *Type, err error) {
 	s = &Type{
 		Config:       c,
 		onDisconnect: c.OnDisconnect,
@@ -212,7 +211,7 @@ func New(c *Config) (s *Type, present bool, err error) {
 	s.Subscriber.Online(subscribedPublish)
 
 	// restore persisted state of the session if any
-	if present, err = s.loadPersistence(); err != nil {
+	if err = s.loadPersistence(); err != nil {
 		return
 	}
 
@@ -278,8 +277,7 @@ func (s *Type) processIncoming(p packet.Provider) error {
 					if (s.ExpireIn != nil && *s.ExpireIn == 0) && val != 0 {
 						err = packet.CodeProtocolError
 					} else {
-						newExpireIn := time.Duration(val)
-						s.ExpireIn = &newExpireIn
+						s.ExpireIn = &val
 					}
 				}
 			}
@@ -298,26 +296,20 @@ func (s *Type) processIncoming(p packet.Provider) error {
 	return err
 }
 
-func (s *Type) loadPersistence() (present bool, err error) {
-	var state *persistenceTypes.SessionMessages
-	present = false
-
+func (s *Type) loadPersistence() error {
 	if s.State == nil {
-		return present, nil
+		return nil
 	}
 
-	if state, err = s.State.MessagesLoad([]byte(s.ID)); err != nil && err != persistenceTypes.ErrNotFound {
-		s.log.Error("Couldn't load session state", zap.String("ClientID", s.ID), zap.Error(err))
-	} else if err == nil {
-		// load first unacknowledged publishes if any to keep flow control working
-		for _, d := range state.UnAckMessages {
-			var pkt packet.Provider
-			if pkt, _, err = packet.Decode(s.Version, d); err != nil {
-				s.log.Error("Couldn't decode persisted message", zap.Error(err))
-				err = ErrPersistence
-				return
-			}
+	return s.State.PacketsForEach([]byte(s.ID), func(entry persistenceTypes.PersistedPacket) error {
+		var err error
+		var pkt packet.Provider
+		if pkt, _, err = packet.Decode(s.Version, entry.Data); err != nil {
+			s.log.Error("Couldn't decode persisted message", zap.Error(err))
+			return ErrPersistence
+		}
 
+		if entry.UnAck {
 			switch p := pkt.(type) {
 			case *packet.Publish:
 				id, _ := p.ID()
@@ -327,18 +319,17 @@ func (s *Type) loadPersistence() (present bool, err error) {
 				s.flowControl.reAcquire(id)
 			}
 
-			s.tx.qLoad(&unacknowledgedPublish{msg: pkt})
-		}
-
-		for _, d := range state.OutMessages {
-			var pkt packet.Provider
-			if pkt, _, err = packet.Decode(s.Version, d); err != nil {
-				s.log.Error("Couldn't decode persisted message", zap.Error(err))
-				err = ErrPersistence
-				return
-			}
-
+			s.tx.qLoad(&unacknowledged{packet: pkt})
+		} else {
 			if p, ok := pkt.(*packet.Publish); ok {
+				if len(entry.ExpireAt) > 0 {
+					if tm, err := time.Parse(time.RFC3339, entry.ExpireAt); err == nil {
+						p.SetExpiry(tm)
+					} else {
+						s.log.Error("Parse publish expiry", zap.String("ClientID", s.ID), zap.Error(err))
+					}
+				}
+
 				if p.QoS() == packet.QoS0 {
 					s.tx.gLoad(pkt)
 				} else {
@@ -347,11 +338,71 @@ func (s *Type) loadPersistence() (present bool, err error) {
 			}
 		}
 
-		present = true
+		return nil
+	})
+}
+
+func (s *Type) persist() {
+	var packets []persistenceTypes.PersistedPacket
+
+	persistAppend := func(p interface{}) {
+		var pkt packet.Provider
+		pPkt := persistenceTypes.PersistedPacket{UnAck: false}
+
+		switch tp := p.(type) {
+		case *packet.Publish:
+			if (s.OfflineQoS0 || tp.QoS() != packet.QoS0) && !tp.Expired(false) {
+				if exp := tp.GetExpiry(); exp != nil {
+					pPkt.ExpireAt = exp.Format(time.RFC3339)
+				}
+
+				if tp.QoS() != packet.QoS0 {
+					// make sure message has some IDType to prevent encode error
+					tp.SetPacketID(0)
+				}
+
+				pkt = tp
+			}
+		case *unacknowledged:
+			if pb, ok := tp.packet.(*packet.Publish); ok && pb.QoS() == packet.QoS1 {
+				pb.SetDup(true)
+			}
+
+			pkt = tp.packet
+			pPkt.UnAck = true
+		}
+
+		var err error
+		if pPkt.Data, err = packet.Encode(pkt); err != nil {
+			s.log.Error("Couldn't encode message for persistence", zap.Error(err))
+		} else {
+			packets = append(packets, pPkt)
+		}
 	}
 
-	err = nil
-	return
+	var next *list.Element
+	for elem := s.tx.qMessages.Front(); elem != nil; elem = next {
+		next = elem.Next()
+
+		persistAppend(s.tx.qMessages.Remove(elem))
+	}
+
+	for elem := s.tx.gMessages.Front(); elem != nil; elem = next {
+		next = elem.Next()
+		switch tp := s.tx.gMessages.Remove(elem).(type) {
+		case *packet.Publish:
+			persistAppend(tp)
+		}
+	}
+
+	s.pubOut.messages.Range(func(k, v interface{}) bool {
+		if pkt, ok := v.(packet.Provider); ok {
+			persistAppend(&unacknowledged{packet: pkt})
+		}
+		return true
+	})
+
+	s.State.PacketsStore([]byte(s.ID), packets)
 }
 
 // onSubscribedPublish is the method that gets added to the topic subscribers list by the
@@ -450,7 +501,7 @@ func (s *Type) preProcessPublishV50(p *packet.Publish) error {
 func (s *Type) postProcessPublishV50(p *packet.Publish) error {
 	// [MQTT-3.3.2.3.4]
 	if prop := p.PropertyGet(packet.PropertyTopicAlias); prop != nil {
-		if val, ok := prop.AsShort(); ok == nil {
+		if val, err := prop.AsShort(); err == nil {
 			if len(p.Topic()) != 0 {
 				// renew alias with new topic
 				s.topicAlias[val] = p.Topic()
@@ -462,17 +513,19 @@ func (s *Type) postProcessPublishV50(p *packet.Publish) error {
 					return packet.CodeInvalidTopicAlias
 				}
 			}
+		} else {
+			return packet.CodeInvalidTopicAlias
 		}
 	}
 
 	// [MQTT-3.3.2.3.3]
-	//if prop := p.PropertyGet(packet.PropertyPublicationExpiry); prop != nil {
-	//	 pkt = p.ToExpiring()
-	//
-	//	//if val, ok := prop.AsInt(); ok == nil {
-	//		//p.SetExpiry(time.Duration(val) * time.Second)
-	//	//}
-	//}
+	if prop := p.PropertyGet(packet.PropertyPublicationExpiry); prop != nil {
+		if val, err := prop.AsInt(); err == nil {
+			p.SetExpiry(time.Now().Add(time.Duration(val) * time.Second))
+		} else {
+			return err
+		}
+	}
 
 	return nil
 }

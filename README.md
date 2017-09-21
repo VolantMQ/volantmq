@@ -30,7 +30,6 @@ VolantMQ is a high performance MQTT broker that aims to be fully compliant with 
 
 **TODO**
 * V5.0:
-    * Publication expiry
     * Packets testing
 * Cluster
 * Bridge

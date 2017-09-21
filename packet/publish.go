@@ -14,6 +14,8 @@
 
 package packet
 
+import "time"
+
 // Publish A PUBLISH Control Packet is sent from a Client to a Server or from Server to a Client
 // to transport an Application Message.
 type Publish struct {
@@ -22,12 +24,43 @@ type Publish struct {
 	payload   []byte
 	topic     string
 	publishID uintptr
+	expireAt  *time.Time
 }
 
 var _ Provider = (*Publish)(nil)
 
 func newPublish() *Publish {
-	return &Publish{}
+	return &Publish{
+		expireAt:  nil,
+		publishID: 0,
+	}
+}
+
+// SetExpiry
+func (msg *Publish) SetExpiry(tm time.Time) {
+	msg.expireAt = &tm
+}
+
+func (msg *Publish) GetExpiry() *time.Time {
+	return msg.expireAt
+}
+
+// Expiry
+func (msg *Publish) Expired(set bool) bool {
+	expired := false
+	if msg.expireAt != nil {
+		now := time.Now()
+		if df := uint32(msg.expireAt.Sub(now) / time.Second); msg.expireAt.After(now) && df > 0 {
+			if set && msg.version >= ProtocolV50 {
+				// TODO(troian): check error
+				msg.properties.Set(msg.mType, PropertyPublicationExpiry, df) // nolint: errcheck
+			}
+		} else {
+			expired = true
+		}
+	}
+
+	return expired
 }
 
 // Clone packet
@@ -40,6 +73,10 @@ func (msg *Publish) Clone(v ProtocolVersion) (*Publish, error) {
 	// [MQTT-3.3.1-9]
 	// [MQTT-3.3.1-3]
 	pkt.Set(msg.topic, msg.Payload(), msg.QoS(), msg.Retain(), false) // nolint: errcheck
+
+	// clone expiration setting with no matter of version as message should not be delivered to V3 brokers
+	// when it expired
+	pkt.expireAt = msg.expireAt
 
 	if msg.version == ProtocolV50 && v == ProtocolV50 {
 		// [MQTT-3.3.2-4] forward Payload Format

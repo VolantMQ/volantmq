@@ -269,7 +269,7 @@ func (mT *provider) retainSearch(filter string, retained *[]*packet.Publish) {
 				n.allRetained(retained)
 			}
 		}
-	} else if strings.HasPrefix(level, "$") {
+	} else if strings.HasPrefix(level, "$") && mT.root.children[level] != nil {
 		retainRecurseSearch(mT.root.children[level], levels[1:], retained)
 	} else {
 		retainRecurseSearch(mT.root, levels, retained)
@@ -278,11 +278,21 @@ func (mT *provider) retainSearch(filter string, retained *[]*packet.Publish) {
 
 func (sn *node) getRetained(retained *[]*packet.Publish) {
 	if sn.retained != nil {
+		var p *packet.Publish
+
 		switch t := sn.retained.(type) {
 		case *packet.Publish:
-			*retained = append(*retained, t)
+			p = t
 		case systree.DynamicValue:
-			*retained = append(*retained, t.Retained())
+			p = t.Retained()
+		}
+
+		// if publish has expiration set check if there time left to live
+		if !p.Expired(false) {
+			*retained = append(*retained, p)
+		} else {
+			// publish has expired, thus nobody should get it
+			sn.retained = nil
 		}
 	}
 }

@@ -5,41 +5,23 @@ import (
 )
 
 type retained struct {
-	status   *dbStatus
-	messages [][]byte
+	status  *dbStatus
+	packets []persistenceTypes.PersistedPacket
 }
 
-func (r *retained) Load() ([][]byte, error) {
-	select {
-	case <-r.status.done:
-		return nil, persistenceTypes.ErrNotOpen
-	default:
-	}
-
-	return r.messages, nil
+func (r *retained) Load() ([]persistenceTypes.PersistedPacket, error) {
+	return r.packets, nil
 }
 
 // Store
-func (r *retained) Store(data [][]byte) error {
-	select {
-	case <-r.status.done:
-		return persistenceTypes.ErrNotOpen
-	default:
-	}
-
-	r.messages = data
+func (r *retained) Store(data []persistenceTypes.PersistedPacket) error {
+	r.packets = data
 
 	return nil
 }
 
 // Wipe
 func (r *retained) Wipe() error {
-	select {
-	case <-r.status.done:
-		return persistenceTypes.ErrNotOpen
-	default:
-	}
-
-	r.messages = [][]byte{}
+	r.packets = []persistenceTypes.PersistedPacket{}
 	return nil
 }

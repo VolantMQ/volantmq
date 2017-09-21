@@ -17,6 +17,8 @@ package mem
 import (
 	"sync"
 
+	"time"
+
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/packet"
 	"github.com/VolantMQ/volantmq/persistence/types"
@@ -27,9 +29,7 @@ import (
 )
 
 type provider struct {
-	// Sub/unSub mutex
-	smu sync.RWMutex
-	// Subscription tree
+	smu                sync.RWMutex
 	root               *node
 	stat               systree.TopicsStat
 	persist            persistenceTypes.Retained
@@ -67,16 +67,19 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 		}
 
 		for _, d := range entries {
-			v := packet.ProtocolVersion(d[0])
-			msg, _, err := packet.Decode(v, d[1:])
+			v := packet.ProtocolVersion(d.Data[0])
+			pkt, _, err := packet.Decode(v, d.Data[1:])
 			if err != nil {
 				p.log.Error("Couldn't decode retained message", zap.Error(err))
 			} else {
-				if m, ok := msg.(*packet.Publish); ok {
-					p.log.Debug("Loading retained message",
-						zap.String("topic", m.Topic()),
-						zap.Int8("QoS", int8(m.QoS())))
-
+				if m, ok := pkt.(*packet.Publish); ok {
+					if len(d.ExpireAt) > 0 {
+						if tm, err := time.Parse(time.RFC3339, d.ExpireAt); err == nil {
+							m.SetExpiry(tm)
+						} else {
+							p.log.Error("Decode publish expire at", zap.Error(err))
+						}
+					}
 					p.Retain(m) // nolint: errcheck
 				} else {
 					p.log.Warn("Unsupported retained message type", zap.String("type", m.Type().Name()))
@@ -161,25 +164,28 @@ func (mT *provider) Close() error {
 
 	mT.wgPublisher.Wait()
 
-	var res []*packet.Publish
-	// [MQTT-3.3.1-5]
-	//retainSearch(mT.root, []string{"#"}, &res)
-
 	if mT.persist != nil {
-		var encoded [][]byte
+		var res []*packet.Publish
+		// [MQTT-3.3.1-5]
+		mT.retainSearch("#", &res)
+		mT.retainSearch("/#", &res)
+		mT.retainSearch("$share/#", &res)
 
-		for _, m := range res {
-			// Skip retained QoS0 messages
-			if m.QoS() != packet.QoS0 {
-				if sz, err := m.Size(); err != nil {
-					mT.log.Error("Couldn't get retained message size", zap.Error(err))
+		var encoded []persistenceTypes.PersistedPacket
+
+		for _, pkt := range res {
+			// Discard retained QoS0 messages
+			if pkt.QoS() != packet.QoS0 && !pkt.Expired(false) {
+				if buf, err := packet.Encode(pkt); err != nil {
+					mT.log.Error("Couldn't encode retained message", zap.Error(err))
 				} else {
-					buf := make([]byte, sz)
-					if _, err = m.Encode(buf); err != nil {
-						mT.log.Error("Couldn't encode retained message", zap.Error(err))
-					} else {
-						encoded = append(encoded, buf)
+					entry := persistenceTypes.PersistedPacket{
+						Data: buf,
 					}
+					if tm := pkt.GetExpiry(); tm != nil {
+						entry.ExpireAt = tm.Format(time.RFC3339)
+					}
+					encoded = append(encoded, entry)
 				}
 			}
 		}

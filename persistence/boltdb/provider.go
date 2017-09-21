@@ -9,14 +9,13 @@ import (
 )
 
 var (
-	bucketRetained              = []byte("retained")
-	bucketSessionsStates        = []byte("sessionsStates")
-	bucketSessionsSubscriptions = []byte("sessionsSubscriptions")
-	bucketSessionsMessages      = []byte("sessionsMessages")
-	bucketSystem                = []byte("system")
-	//bucketMessages              = []byte("messages")
-	//bucketState                 = []byte("state")
-	//bucketSubscriptions = []byte("subscriptions")
+	bucketRetained      = []byte("retained")
+	bucketSessions      = []byte("sessions")
+	bucketSubscriptions = []byte("subscriptions")
+	bucketExpire        = []byte("expire")
+	bucketPackets       = []byte("packets")
+	bucketState         = []byte("state")
+	bucketSystem        = []byte("system")
 )
 
 type dbStatus struct {
@@ -38,9 +37,8 @@ type impl struct {
 
 var initialBuckets = [][]byte{
 	bucketRetained,
-	bucketSessionsStates,
-	bucketSessionsSubscriptions,
-	bucketSessionsMessages,
+	bucketSessions,
+	//bucketSubscriptions,
 	bucketSystem,
 }
 

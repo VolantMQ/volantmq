@@ -1,94 +1,11 @@
 package connection
 
 import (
-	"container/list"
-
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/packet"
-	"github.com/VolantMQ/volantmq/persistence/types"
 	"github.com/VolantMQ/volantmq/topics/types"
 	"go.uber.org/zap"
 )
-
-func (s *Type) getState() *persistenceTypes.SessionMessages {
-	encodeMessage := func(m packet.Provider) ([]byte, error) {
-		sz, err := m.Size()
-		if err != nil {
-			return nil, err
-		}
-
-		buf := make([]byte, sz)
-		if _, err = m.Encode(buf); err != nil {
-			return nil, err
-		}
-
-		return buf, nil
-	}
-
-	outMessages := [][]byte{}
-	unAckMessages := [][]byte{}
-
-	var next *list.Element
-	for elem := s.tx.qMessages.Front(); elem != nil; elem = next {
-		next = elem.Next()
-		switch m := s.tx.qMessages.Remove(elem).(type) {
-		case *packet.Publish:
-			// make sure message has some IDType to prevent encode error
-			m.SetPacketID(0)
-			if buf, err := encodeMessage(m); err != nil {
-				s.log.Error("Couldn't encode message for persistence", zap.Error(err))
-			} else {
-				outMessages = append(outMessages, buf)
-			}
-		case *unacknowledgedPublish:
-			if buf, err := encodeMessage(m.msg); err != nil {
-				s.log.Error("Couldn't encode message for persistence", zap.Error(err))
-			} else {
-				unAckMessages = append(unAckMessages, buf)
-			}
-		}
-	}
-
-	if s.OfflineQoS0 {
-		for elem := s.tx.qMessages.Front(); elem != nil; elem = next {
-			next = elem.Next()
-			switch m := s.tx.qMessages.Remove(elem).(type) {
-			case *packet.Publish:
-				if buf, err := encodeMessage(m); err != nil {
-					s.log.Error("Couldn't encode message for persistence", zap.Error(err))
-				} else {
-					outMessages = append(outMessages, buf)
-				}
-			}
-		}
-	}
-
-	s.pubOut.messages.Range(
-		func(k, v interface{}) bool {
-			pkt, ok := v.(packet.Provider)
-			if ok {
-				switch msg := v.(type) {
-				case *packet.Publish:
-					if msg.QoS() == packet.QoS1 {
-						msg.SetDup(true)
-					}
-				}
-
-				if buf, err := encodeMessage(pkt); err != nil {
-					s.log.Error("Couldn't encode message for persistence", zap.Error(err))
-				} else {
-					unAckMessages = append(unAckMessages, buf)
-				}
-			}
-
-			return true
-		})
-
-	return &persistenceTypes.SessionMessages{
-		OutMessages:   outMessages,
-		UnAckMessages: unAckMessages,
-	}
-}
 
 func (s *Type) onConnectionClose(will bool, err error) {
 	s.onConnDisconnect.Do(func() {
@@ -147,7 +64,7 @@ func (s *Type) onConnectionClose(will bool, err error) {
 		}
 
 		if !s.KillOnDisconnect {
-			params.State = s.getState()
+			s.persist()
 		}
 
 		s.onDisconnect(params)

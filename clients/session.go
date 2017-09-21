@@ -4,6 +4,8 @@ import (
 	"sync"
 	"time"
 
+	"strconv"
+
 	"github.com/VolantMQ/volantmq/connection"
 	"github.com/VolantMQ/volantmq/packet"
 	"github.com/VolantMQ/volantmq/persistence/types"
@@ -28,12 +30,10 @@ const (
 )
 
 type onSessionClose func(string, exitReason)
-type onSessionPersist func(string, *persistenceTypes.SessionMessages)
 type onDisconnect func(string, packet.ReasonCode, bool)
 type onSubscriberShutdown func(subscriber.ConnectionProvider)
 
 type sessionEvents struct {
-	persist            onSessionPersist
 	signalClose        onSessionClose
 	signalDisconnected onDisconnect
 	shutdownSubscriber onSubscriberShutdown
@@ -49,8 +49,8 @@ type sessionPreConfig struct {
 type sessionReConfig struct {
 	subscriber       subscriber.ConnectionProvider
 	will             *packet.Publish
-	expireIn         *time.Duration
-	willDelay        time.Duration
+	expireIn         *uint32
+	willDelay        uint32
 	killOnDisconnect bool
 }
 
@@ -116,7 +116,7 @@ func (s *session) reconfigure(c *sessionReConfig, runExpiry bool) {
 	}
 }
 
-func (s *session) allocConnection(c *connection.PreConfig) (present bool, err error) {
+func (s *session) allocConnection(c *connection.PreConfig) error {
 	cfg := &connection.Config{
 		PreConfig:        c,
 		ID:               s.id,
@@ -130,9 +130,10 @@ func (s *session) allocConnection(c *connection.PreConfig) (present bool, err er
 	s.disconnectOnce = &types.OnceWait{}
 	s.connStop = &types.Once{}
 
-	s.conn, present, err = connection.New(cfg)
+	var err error
+	s.conn, err = connection.New(cfg)
 
-	return
+	return err
 }
 
 func (s *session) start() {
@@ -162,29 +163,31 @@ func (s *session) stop(reason packet.ReasonCode) *persistenceTypes.SessionState 
 		s.finalized = true
 	}
 
-	elapsed := time.Since(s.expiringSince)
-	if s.willDelay > 0 && (s.willDelay-elapsed) > 0 {
-		s.willDelay = s.willDelay - elapsed
-	}
-
-	if s.expireIn != nil && *s.expireIn > 0 && (*s.expireIn-elapsed) > 0 {
-		*s.expireIn = *s.expireIn - elapsed
-	}
-
 	state := &persistenceTypes.SessionState{
 		Timestamp: s.createdAt.Format(time.RFC3339),
-		ExpireIn:  s.expireIn,
-		Will: &persistenceTypes.SessionWill{
-			Delay: s.willDelay,
-		},
 	}
 
-	if s.will != nil {
-		s.will.SetPacketID(0)
-		sz, _ := s.will.Size()
-		buf := make([]byte, sz)
-		s.will.Encode(buf) // nolint: errcheck
-		state.Will.Message = buf
+	if s.expireIn != nil || (s.willDelay > 0 && s.will != nil) {
+		state.Expire = &persistenceTypes.SessionDelays{
+			Since: s.expiringSince.Format(time.RFC3339),
+		}
+
+		elapsed := uint32(time.Since(s.expiringSince) / time.Second)
+
+		if (s.willDelay > 0 && s.will != nil) && (s.willDelay-elapsed) > 0 {
+			s.willDelay = s.willDelay - elapsed
+			s.will.SetPacketID(0)
+			if buf, err := packet.Encode(s.will); err != nil {
+
+			} else {
+				state.Expire.WillIn = strconv.Itoa(int(s.willDelay))
+				state.Expire.WillData = buf
+			}
+		}
+
+		if s.expireIn != nil && *s.expireIn > 0 && (*s.expireIn-elapsed) > 0 {
+			*s.expireIn = *s.expireIn - elapsed
+		}
 	}
 
 	return state
@@ -228,10 +231,10 @@ func (s *session) setOnline() switchStatus {
 }
 
 func (s *session) runExpiry(will bool) {
-	var timerPeriod time.Duration
+	var timerPeriod uint32
 
 	// if meet will requirements point that
-	if will && s.will != nil && s.willDelay >= 0 {
+	if will && s.will != nil && s.willDelay > 0 {
 		timerPeriod = s.willDelay
 	} else {
 		s.will = nil
@@ -249,7 +252,7 @@ func (s *session) runExpiry(will bool) {
 	}
 
 	s.expiringSince = time.Now()
-	s.timer.Reset(timerPeriod * time.Second)
+	s.timer.Reset(time.Duration(timerPeriod) * time.Second)
 }
 
 func (s *session) onDisconnect(p *connection.DisconnectParams) {
@@ -295,10 +298,6 @@ func (s *session) onDisconnect(p *connection.DisconnectParams) {
 		if s.killOnDisconnect {
 			defer finalize(exitReasonClean)
 		} else {
-			// session is not clean thus more difficult case
-			// persist state
-			s.persist(s.id, p.State)
-
 			// check if remaining subscriptions exists, expiry is presented and will delay not set to 0
 			if s.expireIn == nil && s.willDelay == 0 {
 				// signal to shutdown session
@@ -347,6 +346,6 @@ func (s *session) timerCallback() {
 		val := *s.expireIn
 		// clear value pointed by expireIn so when next fire comes we signal session is expired
 		*s.expireIn = 0
-		s.timer.Reset(val)
+		s.timer.Reset(time.Duration(val) * time.Second)
 	}
 }

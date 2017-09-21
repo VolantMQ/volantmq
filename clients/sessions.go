@@ -26,10 +26,11 @@ import (
 	"go.uber.org/zap"
 )
 
-var (
-	// ErrReplaceNotAllowed case when new client with existing ID connected
-	ErrReplaceNotAllowed = errors.New("duplicate not allowed")
-)
+// load sessions owning subscriptions
+type subscriberConfig struct {
+	version packet.ProtocolVersion
+	topics  subscriber.Subscriptions
+}
 
 // Config manager configuration
 type Config struct {
@@ -94,14 +95,14 @@ func NewManager(c *Config) (*Manager, error) {
 		return nil, err
 	}
 
-	if err = m.loadSubscribers(); err != nil {
-		return nil, err
-	}
+	//if err = m.loadSubscribers(); err != nil {
+	//	return nil, err
+	//}
 
 	m.log.Info("Sessions loaded")
 
-	m.persistence.StatesWipe()        // nolint: errcheck
-	m.persistence.SubscriptionsWipe() // nolint: errcheck
+	//m.persistence.StatesWipe()        // nolint: errcheck
+	//m.persistence.SubscriptionsWipe() // nolint: errcheck
 
 	return m, nil
 }
@@ -117,8 +118,8 @@ func (m *Manager) Shutdown() error {
 	}
 
 	m.sessions.Range(func(k, v interface{}) bool {
-		ses := v.(*session)
-		state := ses.stop(packet.CodeServerShuttingDown)
+		wrap := v.(*sessionWrap)
+		state := wrap.s.stop(packet.CodeServerShuttingDown)
 		m.persistence.StateStore([]byte(k.(string)), state) // nolint: errcheck
 		return true
 	})
@@ -264,7 +265,6 @@ func (m *Manager) allocSession(id string, createdAt time.Time) *sessionWrap {
 			createdAt: createdAt,
 			messenger: m.TopicsMgr,
 			sessionEvents: sessionEvents{
-				persist:            m.onSessionPersist,
 				signalClose:        m.onSessionClose,
 				signalDisconnected: m.onDisconnect,
 				shutdownSubscriber: m.onSubscriberShutdown,
@@ -350,12 +350,9 @@ func (m *Manager) configureSession(config *StartConfig, ses *session, id string,
 
 	ses.reconfigure(sConfig, false)
 
-	present, err := ses.allocConnection(cConfig)
 	var status *systree.ClientConnectStatus
 
-	sessionPresent = sessionPresent || present
-
-	if err == nil {
+	if err := ses.allocConnection(cConfig); err == nil {
 		if !config.Req.IsClean() {
 			m.persistence.Delete([]byte(id)) // nolint: errcheck
 		}
@@ -378,7 +375,7 @@ func (m *Manager) configureSession(config *StartConfig, ses *session, id string,
 
 	config.Resp.SetSessionPresent(sessionPresent)
 
-	return status, err
+	return status, nil
 }
 
 func boolToByte(v bool) byte {
@@ -393,15 +390,14 @@ func readSessionProperties(req *packet.Connect, sc *sessionReConfig, cc *connect
 	// [MQTT-3.1.2.11.2]
 	if prop := req.PropertyGet(packet.PropertySessionExpiryInterval); prop != nil {
 		if val, e := prop.AsInt(); e == nil {
-			v := time.Duration(val)
-			sc.expireIn = &v
+			sc.expireIn = &val
 		}
 	}
 
 	// [MQTT-3.1.2.11.3]
 	if prop := req.PropertyGet(packet.PropertyWillDelayInterval); prop != nil {
 		if val, e := prop.AsInt(); e == nil {
-			sc.willDelay = time.Duration(val)
+			sc.willDelay = val
 		}
 	}
 
@@ -480,7 +476,7 @@ func (m *Manager) writeSessionProperties(resp *packet.ConnAck, id string) {
 
 func (m *Manager) getSubscriber(id string, clean bool, v packet.ProtocolVersion) (subscriber.ConnectionProvider, bool) {
 	var sub subscriber.ConnectionProvider
-	present := false
+	var present bool
 
 	if clean {
 		if sb, ok := m.subscribers.Load(id); ok {
@@ -502,6 +498,7 @@ func (m *Manager) getSubscriber(id string, clean bool, v packet.ProtocolVersion)
 			Version:          v,
 		})
 
+		present = m.persistence.Exists([]byte(id))
 		m.subscribers.Store(id, sub)
 		m.log.Debug("Subscriber created", zap.String("ClientID", id))
 	} else {
@@ -520,10 +517,6 @@ func (m *Manager) genClientID() string {
 	}
 
 	return base64.URLEncoding.EncodeToString(b)
-}
-
-func (m *Manager) onSessionPersist(id string, state *persistenceTypes.SessionMessages) {
-	m.persistence.MessagesStore([]byte(id), state) // nolint: errcheck
 }
 
 func (m *Manager) signalStartRead(desc *netpoll.Desc, cb netpoll.CallbackFn) error {
@@ -575,92 +568,108 @@ func (m *Manager) onSessionClose(id string, reason exitReason) {
 }
 
 func (m *Manager) loadSessions() error {
-	err := m.persistence.StatesIterate(func(id []byte, state *persistenceTypes.SessionState) error {
+	subs := map[string]*subscriberConfig{}
+
+	delayedWills := []*packet.Publish{}
+
+	err := m.persistence.LoadForEach(func(id []byte, state *persistenceTypes.SessionState) error {
+		sID := string(id)
+
+		if len(state.Errors) != 0 {
+			m.log.Error("Session load", zap.String("ClientID", sID), zap.Errors("errors", state.Errors))
+			m.persistence.Delete(id)
+		}
+
+		if state.Expire != nil {
+			since, err := time.Parse(time.RFC3339, state.Expire.Since)
+			if err != nil {
+				m.log.Error("Parse expiration value", zap.String("ClientID", sID), zap.Error(err))
+				m.persistence.Delete(id)
+				return nil
+			}
+
+			var will *packet.Publish
+			var willIn uint32
+			var expireIn uint32
+
+			// if persisted state has delayed will lets check if it has not elapsed its time
+			if len(state.Expire.WillIn) > 0 && len(state.Expire.WillData) > 0 {
+				pkt, _, _ := packet.Decode(state.Version, state.Expire.WillData)
+				will, _ = pkt.(*packet.Publish)
+
+				if val, err := strconv.Atoi(state.Expire.WillIn); err == nil {
+					willIn = uint32(val)
+				} else {
+
+				}
+				willAt := since.Add(time.Duration(willIn) * time.Second)
+
+				if time.Now().Before(willAt) {
+					// will delay elapsed. notify that
+					delayedWills = append(delayedWills, will)
+					will = nil
+				}
+			}
+
+			if len(state.Expire.ExpireIn) > 0 {
+				if val, err := strconv.Atoi(state.Expire.ExpireIn); err == nil {
+					expireIn = uint32(val)
+				} else {
+
+				}
+
+				expireAt := since.Add(time.Duration(expireIn) * time.Second)
+
+				if time.Now().Before(expireAt) {
+					// persisted session has expired, wipe it
+					m.persistence.Delete(id)
+					return nil
+				}
+			}
+
+			// persisted session has either delayed will or expiry
+			// create it and run timer
+			if will != nil || expireIn > 0 {
+				createdAt, _ := time.Parse(time.RFC3339, state.Timestamp)
+				ses := m.allocSession(sID, createdAt)
+				var exp *uint32
+				if expireIn > 0 {
+					exp = &expireIn
+				}
+
+				setup := &sessionReConfig{
+					subscriber:       nil,
+					expireIn:         exp,
+					will:             will,
+					willDelay:        willIn,
+					killOnDisconnect: false,
+				}
+
+				ses.s.reconfigure(setup, true)
+				m.sessions.Store(id, ses)
+				m.sessionsCount.Add(1)
+				ses.release()
+			}
+		}
+
+		if len(state.Subscriptions) > 0 {
+			if sCfg, err := m.loadSubscriber(state.Subscriptions); err == nil {
+				subs[sID] = sCfg
+			} else {
+				m.log.Error("Decode subscriber", zap.String("ClientID", sID), zap.Error(err))
+			}
+
+			m.persistence.SubscriptionsDelete(id)
+		}
+
 		status := &systree.SessionCreatedStatus{
 			Clean:     false,
 			Timestamp: state.Timestamp,
 		}
 
-		if state.ExpireIn != nil {
-			if state.ExpireIn != nil {
-				status.ExpiryInterval = strconv.FormatUint(uint64(*state.ExpireIn), 10)
-			}
-		}
-
-		if state.Will != nil {
-			status.WillDelay = strconv.FormatUint(uint64(state.Will.Delay), 10)
-		}
-
-		if state.ExpireIn != nil || state.Will != nil {
-			createdAt, _ := time.Parse(time.RFC3339, state.Timestamp)
-			ses := m.allocSession(string(id), createdAt)
-			setup := &sessionReConfig{
-				subscriber:       nil,
-				expireIn:         state.ExpireIn,
-				killOnDisconnect: false,
-			}
-
-			if state.Will != nil {
-				msg, _, _ := packet.Decode(state.Version, state.Will.Message)
-				willMsg, _ := msg.(*packet.Publish)
-				setup.will = willMsg
-				setup.willDelay = state.Will.Delay
-			}
-			ses.s.reconfigure(setup, true)
-			m.sessions.Store(id, ses)
-			m.sessionsCount.Add(1)
-			ses.release()
-		}
-		m.Systree.Sessions().Created(string(id), status)
-
+		m.Systree.Sessions().Created(sID, status)
 		return nil
 	})
-
-	return err
-}
-
-func (m *Manager) loadSubscribers() error {
-	// load sessions owning subscriptions
-	type subscriberConfig struct {
-		version packet.ProtocolVersion
-		topics  subscriber.Subscriptions
-	}
-	subs := map[string]subscriberConfig{}
-
-	err := m.persistence.SubscriptionsIterate(func(id []byte, data []byte) error {
-		subscriptions := subscriber.Subscriptions{}
-		offset := 0
-		version := packet.ProtocolVersion(data[offset])
-		offset++
-		remaining := len(data) - 1
-		for offset != remaining {
-			t, total, e := packet.ReadLPBytes(data[offset:])
-			if e != nil {
-				return e
-			}
-
-			offset += total
-
-			params := &topicsTypes.SubscriptionParams{}
-
-			params.Ops = packet.SubscriptionOptions(data[offset])
-			offset++
-
-			params.ID = binary.BigEndian.Uint32(data[offset:])
-			offset += 4
-			subscriptions[string(t)] = params
-		}
-
-		subs[string(id)] = subscriberConfig{
-			version: version,
-			topics:  subscriptions,
-		}
-		return nil
-	})
-
-	if err != nil && err != persistenceTypes.ErrNotFound {
-		return err
-	}
 
 	for id, t := range subs {
 		sub := subscriber.New(
@@ -681,7 +690,42 @@ func (m *Manager) loadSubscribers() error {
 		m.subscribers.Store(id, sub)
 	}
 
-	return nil
+	// publish delayed wills if any
+	for _, will := range delayedWills {
+		m.TopicsMgr.Publish(will)
+	}
+
+	return err
+}
+
+func (m *Manager) loadSubscriber(from []byte) (*subscriberConfig, error) {
+	subscriptions := subscriber.Subscriptions{}
+	offset := 0
+	version := packet.ProtocolVersion(from[offset])
+	offset++
+	remaining := len(from) - 1
+	for offset != remaining {
+		t, total, e := packet.ReadLPBytes(from[offset:])
+		if e != nil {
+			return nil, e
+		}
+
+		offset += total
+
+		params := &topicsTypes.SubscriptionParams{}
+
+		params.Ops = packet.SubscriptionOptions(from[offset])
+		offset++
+
+		params.ID = binary.BigEndian.Uint32(from[offset:])
+		offset += 4
+		subscriptions[string(t)] = params
+	}
+
+	return &subscriberConfig{
+		version: version,
+		topics:  subscriptions,
+	}, nil
 }
 
 func (m *Manager) storeSubscribers() error {
@@ -725,7 +769,7 @@ func (m *Manager) storeSubscribers() error {
 			offset += 4
 		}
 
-		if err := m.persistence.SubscriptionStore([]byte(id), buf); err != nil {
+		if err := m.persistence.SubscriptionsStore([]byte(id), buf); err != nil {
 			m.log.Error("Couldn't persist subscriptions", zap.String("ClientID", id), zap.Error(err))
 		}
 
@@ -735,21 +779,27 @@ func (m *Manager) storeSubscribers() error {
 	return nil
 }
 
-func (m *Manager) onPublish(id string, msg *packet.Publish) {
-	msg.SetPacketID(0)
-	sz, err := msg.Size()
+func (m *Manager) onPublish(id string, p *packet.Publish) {
+	pkt := persistenceTypes.PersistedPacket{UnAck: false}
+
+	if p.Expired(false) {
+		return
+	}
+
+	if tm := p.GetExpiry(); tm != nil {
+		pkt.ExpireAt = tm.Format(time.RFC3339)
+	}
+
+	p.SetPacketID(0)
+
+	var err error
+	pkt.Data, err = packet.Encode(p)
 	if err != nil {
-		m.log.Error("Couldn't get message size", zap.String("ClientID", id), zap.Error(err))
+		m.log.Error("Couldn't encode packet", zap.String("ClientID", id), zap.Error(err))
 		return
 	}
 
-	buf := make([]byte, sz)
-	if _, err = msg.Encode(buf); err != nil {
-		m.log.Error("Couldn't encode message", zap.String("ClientID", id), zap.Error(err))
-		return
-	}
-
-	if err = m.persistence.MessageStore([]byte(id), buf); err != nil {
+	if err = m.persistence.PacketStore([]byte(id), pkt); err != nil {
 		m.log.Error("Couldn't persist message", zap.String("ClientID", id), zap.Error(err))
 	}
 }

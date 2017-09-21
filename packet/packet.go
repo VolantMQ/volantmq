@@ -200,6 +200,19 @@ func newMessage(v ProtocolVersion, t Type) (Provider, error) {
 	return m, nil
 }
 
+func Encode(p Provider) ([]byte, error) {
+	var sz int
+	var buf []byte
+	var err error
+
+	if sz, err = p.Size(); err == nil {
+		buf = make([]byte, sz)
+		_, err = p.Encode(buf)
+	}
+
+	return buf, err
+}
+
 // Decode buf into message and return Provider type
 func Decode(v ProtocolVersion, buf []byte) (msg Provider, total int, err error) {
 	defer func() {
