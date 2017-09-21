@@ -22,7 +22,6 @@ import (
 	"github.com/VolantMQ/volantmq"
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
-	"github.com/VolantMQ/volantmq/persistence/types"
 	"github.com/VolantMQ/volantmq/transport"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -87,7 +86,6 @@ func main() {
 	serverConfig := volantmq.NewServerConfig()
 
 	serverConfig.OfflineQoS0 = true
-	serverConfig.Persistence = &persistenceTypes.MemConfig{}
 	serverConfig.TransportStatus = listenerStatus
 	serverConfig.AllowDuplicates = true
 	serverConfig.Authenticators = "internal"

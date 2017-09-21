@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"sync"
 
-	"github.com/VolantMQ/volantmq/persistence/types"
+	"github.com/VolantMQ/volantmq/persistence"
 	"github.com/boltdb/bolt"
 )
 
@@ -17,6 +17,11 @@ var (
 	bucketState         = []byte("state")
 	bucketSystem        = []byte("system")
 )
+
+// Config configuration of the BoltDB backend
+type Config struct {
+	File string
+}
 
 type dbStatus struct {
 	db   *bolt.DB
@@ -43,7 +48,7 @@ var initialBuckets = [][]byte{
 }
 
 // New allocate new persistence provider of boltDB type
-func New(config *persistenceTypes.BoltDBConfig) (p persistenceTypes.Provider, err error) {
+func New(config *Config) (p persistence.Provider, err error) {
 	pl := &impl{
 		db: dbStatus{
 			done: make(chan struct{}),
@@ -90,10 +95,10 @@ func New(config *persistenceTypes.BoltDBConfig) (p persistenceTypes.Provider, er
 	return p, nil
 }
 
-func (p *impl) System() (persistenceTypes.System, error) {
+func (p *impl) System() (persistence.System, error) {
 	select {
 	case <-p.db.done:
-		return nil, persistenceTypes.ErrNotOpen
+		return nil, persistence.ErrNotOpen
 	default:
 	}
 
@@ -101,10 +106,10 @@ func (p *impl) System() (persistenceTypes.System, error) {
 }
 
 // Sessions
-func (p *impl) Sessions() (persistenceTypes.Sessions, error) {
+func (p *impl) Sessions() (persistence.Sessions, error) {
 	select {
 	case <-p.db.done:
-		return nil, persistenceTypes.ErrNotOpen
+		return nil, persistence.ErrNotOpen
 	default:
 	}
 
@@ -112,10 +117,10 @@ func (p *impl) Sessions() (persistenceTypes.Sessions, error) {
 }
 
 // Retained
-func (p *impl) Retained() (persistenceTypes.Retained, error) {
+func (p *impl) Retained() (persistence.Retained, error) {
 	select {
 	case <-p.db.done:
-		return nil, persistenceTypes.ErrNotOpen
+		return nil, persistence.ErrNotOpen
 	default:
 	}
 
@@ -129,7 +134,7 @@ func (p *impl) Shutdown() error {
 
 	select {
 	case <-p.db.done:
-		return persistenceTypes.ErrNotOpen
+		return persistence.ErrNotOpen
 	default:
 	}
 

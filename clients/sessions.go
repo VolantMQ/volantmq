@@ -16,7 +16,7 @@ import (
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/connection"
 	"github.com/VolantMQ/volantmq/packet"
-	"github.com/VolantMQ/volantmq/persistence/types"
+	"github.com/VolantMQ/volantmq/persistence"
 	"github.com/VolantMQ/volantmq/routines"
 	"github.com/VolantMQ/volantmq/subscriber"
 	"github.com/VolantMQ/volantmq/systree"
@@ -35,7 +35,7 @@ type subscriberConfig struct {
 // Config manager configuration
 type Config struct {
 	TopicsMgr                     topicsTypes.Provider
-	Persist                       persistenceTypes.Provider
+	Persist                       persistence.Provider
 	Systree                       systree.Provider
 	OnReplaceAttempt              func(string, bool)
 	NodeName                      string
@@ -57,7 +57,7 @@ type Config struct {
 // Manager clients manager
 type Manager struct {
 	Config
-	persistence   persistenceTypes.Sessions
+	persistence   persistence.Sessions
 	log           *zap.Logger
 	quit          chan struct{}
 	sessionsCount sync.WaitGroup
@@ -484,7 +484,7 @@ func (m *Manager) getSubscriber(id string, clean bool, v packet.ProtocolVersion)
 			sub.Offline(true)
 			m.subscribers.Delete(id)
 		}
-		if err := m.persistence.Delete([]byte(id)); err != nil && err != persistenceTypes.ErrNotFound {
+		if err := m.persistence.Delete([]byte(id)); err != nil && err != persistence.ErrNotFound {
 			m.log.Error("Couldn't wipe session", zap.String("ClientID", id), zap.Error(err))
 		}
 	}
@@ -544,7 +544,7 @@ func (m *Manager) onSubscriberShutdown(sub subscriber.ConnectionProvider) {
 
 func (m *Manager) onSessionClose(id string, reason exitReason) {
 	if reason == exitReasonClean || reason == exitReasonExpired {
-		if err := m.persistence.Delete([]byte(id)); err != nil && err != persistenceTypes.ErrNotFound {
+		if err := m.persistence.Delete([]byte(id)); err != nil && err != persistence.ErrNotFound {
 			m.log.Error("Couldn't wipe session", zap.String("ClientID", id), zap.Error(err))
 		}
 
@@ -572,19 +572,23 @@ func (m *Manager) loadSessions() error {
 
 	delayedWills := []*packet.Publish{}
 
-	err := m.persistence.LoadForEach(func(id []byte, state *persistenceTypes.SessionState) error {
+	err := m.persistence.LoadForEach(func(id []byte, state *persistence.SessionState) error {
 		sID := string(id)
 
 		if len(state.Errors) != 0 {
 			m.log.Error("Session load", zap.String("ClientID", sID), zap.Errors("errors", state.Errors))
-			m.persistence.Delete(id)
+			if err := m.persistence.SubscriptionsDelete(id); err != nil && err != persistence.ErrNotFound {
+				m.log.Error("Persisted subscriber delete", zap.Error(err))
+			}
 		}
 
 		if state.Expire != nil {
 			since, err := time.Parse(time.RFC3339, state.Expire.Since)
 			if err != nil {
 				m.log.Error("Parse expiration value", zap.String("ClientID", sID), zap.Error(err))
-				m.persistence.Delete(id)
+				if err := m.persistence.SubscriptionsDelete(id); err != nil && err != persistence.ErrNotFound {
+					m.log.Error("Persisted subscriber delete", zap.Error(err))
+				}
 				return nil
 			}
 
@@ -594,36 +598,37 @@ func (m *Manager) loadSessions() error {
 
 			// if persisted state has delayed will lets check if it has not elapsed its time
 			if len(state.Expire.WillIn) > 0 && len(state.Expire.WillData) > 0 {
-				pkt, _, _ := packet.Decode(state.Version, state.Expire.WillData)
+				pkt, _, _ := packet.Decode(packet.ProtocolVersion(state.Version), state.Expire.WillData)
 				will, _ = pkt.(*packet.Publish)
 
 				if val, err := strconv.Atoi(state.Expire.WillIn); err == nil {
 					willIn = uint32(val)
+					willAt := since.Add(time.Duration(willIn) * time.Second)
+
+					if time.Now().Before(willAt) {
+						// will delay elapsed. notify that
+						delayedWills = append(delayedWills, will)
+						will = nil
+					}
 				} else {
-
-				}
-				willAt := since.Add(time.Duration(willIn) * time.Second)
-
-				if time.Now().Before(willAt) {
-					// will delay elapsed. notify that
-					delayedWills = append(delayedWills, will)
-					will = nil
+					m.log.Error("Decode will at", zap.String("ClientID", sID), zap.Error(err))
 				}
 			}
 
 			if len(state.Expire.ExpireIn) > 0 {
 				if val, err := strconv.Atoi(state.Expire.ExpireIn); err == nil {
 					expireIn = uint32(val)
+					expireAt := since.Add(time.Duration(expireIn) * time.Second)
+
+					if time.Now().Before(expireAt) {
+						// persisted session has expired, wipe it
+						if err := m.persistence.Delete(id); err != nil && err != persistence.ErrNotFound {
+							m.log.Error("Persisted session delete", zap.Error(err))
+						}
+						return nil
+					}
 				} else {
-
-				}
-
-				expireAt := since.Add(time.Duration(expireIn) * time.Second)
-
-				if time.Now().Before(expireAt) {
-					// persisted session has expired, wipe it
-					m.persistence.Delete(id)
-					return nil
+					m.log.Error("Decode expire at", zap.String("ClientID", sID), zap.Error(err))
 				}
 			}
 
@@ -659,7 +664,9 @@ func (m *Manager) loadSessions() error {
 				m.log.Error("Decode subscriber", zap.String("ClientID", sID), zap.Error(err))
 			}
 
-			m.persistence.SubscriptionsDelete(id)
+			if err := m.persistence.SubscriptionsDelete(id); err != nil && err != persistence.ErrNotFound {
+				m.log.Error("Persisted subscriber delete", zap.Error(err))
+			}
 		}
 
 		status := &systree.SessionCreatedStatus{
@@ -692,7 +699,9 @@ func (m *Manager) loadSessions() error {
 
 	// publish delayed wills if any
 	for _, will := range delayedWills {
-		m.TopicsMgr.Publish(will)
+		if err = m.TopicsMgr.Publish(will); err != nil {
+			m.log.Error("Publish delayed will", zap.Error(err))
+		}
 	}
 
 	return err
@@ -780,7 +789,7 @@ func (m *Manager) storeSubscribers() error {
 }
 
 func (m *Manager) onPublish(id string, p *packet.Publish) {
-	pkt := persistenceTypes.PersistedPacket{UnAck: false}
+	pkt := persistence.PersistedPacket{UnAck: false}
 
 	if p.Expired(false) {
 		return

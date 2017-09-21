@@ -36,16 +36,18 @@ func newPublish() *Publish {
 	}
 }
 
-// SetExpiry
+// SetExpiry time object
 func (msg *Publish) SetExpiry(tm time.Time) {
 	msg.expireAt = &tm
 }
 
+// GetExpiry time object
 func (msg *Publish) GetExpiry() *time.Time {
 	return msg.expireAt
 }
 
-// Expiry
+// Expired check if packet has elapsed it's time or not
+// if not expirable returns false
 func (msg *Publish) Expired(set bool) bool {
 	expired := false
 	if msg.expireAt != nil {

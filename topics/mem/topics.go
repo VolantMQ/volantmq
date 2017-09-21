@@ -21,7 +21,7 @@ import (
 
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/packet"
-	"github.com/VolantMQ/volantmq/persistence/types"
+	"github.com/VolantMQ/volantmq/persistence"
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/topics/types"
 	"github.com/VolantMQ/volantmq/types"
@@ -32,7 +32,7 @@ type provider struct {
 	smu                sync.RWMutex
 	root               *node
 	stat               systree.TopicsStat
-	persist            persistenceTypes.Retained
+	persist            persistence.Retained
 	log                *zap.Logger
 	onCleanUnsubscribe func([]string)
 	wgPublisher        sync.WaitGroup
@@ -62,7 +62,7 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 
 	if p.persist != nil {
 		entries, err := p.persist.Load()
-		if err != nil && err != persistenceTypes.ErrNotFound {
+		if err != nil && err != persistence.ErrNotFound {
 			return nil, err
 		}
 
@@ -171,7 +171,7 @@ func (mT *provider) Close() error {
 		mT.retainSearch("/#", &res)
 		mT.retainSearch("$share/#", &res)
 
-		var encoded []persistenceTypes.PersistedPacket
+		var encoded []persistence.PersistedPacket
 
 		for _, pkt := range res {
 			// Discard retained QoS0 messages
@@ -179,7 +179,7 @@ func (mT *provider) Close() error {
 				if buf, err := packet.Encode(pkt); err != nil {
 					mT.log.Error("Couldn't encode retained message", zap.Error(err))
 				} else {
-					entry := persistenceTypes.PersistedPacket{
+					entry := persistence.PersistedPacket{
 						Data: buf,
 					}
 					if tm := pkt.GetExpiry(); tm != nil {
