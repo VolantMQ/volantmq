@@ -1,7 +1,7 @@
 VolantMQ
 =======
 
-[![Build Status](https://travis-ci.org/VolantMQ/volantmq.svg?branch=master)](https://travis-ci.org/volantmq/volantmq)
+[![Build Status](https://travis-ci.org/VolantMQ/volantmq.svg?branch=master)](https://travis-ci.org/VolantMQ/volantmq)
 [![BCH compliance](https://bettercodehub.com/edge/badge/VolantMQ/volantmq?branch=master)](https://bettercodehub.com/)
 [![Codacy Badge](https://api.codacy.com/project/badge/Grade/1a43f2f6e0534fd180d0a1b0b8c93614)](https://www.codacy.com/app/VolantMQ/volantmq?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=VolantMQ/volantmq&amp;utm_campaign=Badge_Grade)
 [![codecov.io](https://codecov.io/gh/VolantMQ/volantmq/coverage.svg?branch=master)](https://codecov.io/gh/VolantMQ/volantmq?branch=master)
