@@ -795,7 +795,7 @@ func (m *Manager) onPublish(id string, p *packet.Publish) {
 		return
 	}
 
-	if tm := p.GetExpiry(); tm != nil {
+	if tm := p.GetExpiry(); !tm.IsZero() {
 		pkt.ExpireAt = tm.Format(time.RFC3339)
 	}
 

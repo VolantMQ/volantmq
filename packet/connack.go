@@ -61,11 +61,11 @@ func (msg *ConnAck) SetReturnCode(ret ReasonCode) error {
 	return nil
 }
 
-func (msg *ConnAck) decodeMessage(src []byte) (int, error) {
-	total := 0
+func (msg *ConnAck) decodeMessage(from []byte) (int, error) {
+	offset := 0
 
 	// [MQTT-3.2.2.1]
-	b := src[total]
+	b := from[offset]
 	if b&(^maskConnAckSessionPresent) != 0 {
 		var rejectCode ReasonCode
 		if msg.version == ProtocolV50 {
@@ -74,13 +74,13 @@ func (msg *ConnAck) decodeMessage(src []byte) (int, error) {
 			rejectCode = CodeRefusedServerUnavailable
 		}
 
-		return total, rejectCode
+		return offset, rejectCode
 	}
 
 	msg.sessionPresent = b&maskConnAckSessionPresent != 0
-	total++
+	offset++
 
-	b = src[total]
+	b = from[offset]
 	msg.returnCode = ReasonCode(b)
 
 	if !msg.returnCode.IsValidForType(msg.mType) {
@@ -88,23 +88,21 @@ func (msg *ConnAck) decodeMessage(src []byte) (int, error) {
 		if msg.version == ProtocolV50 {
 			reason = CodeProtocolError
 		}
-		return total, reason
+		return offset, reason
 	}
 
-	total++
+	offset++
 
 	// v5 [MQTT-3.1.2.11] specifies properties in variable header
 	if msg.version == ProtocolV50 {
-		var err error
-		var n int
-		msg.properties, n, err = decodeProperties(msg.mType, src[total:])
-		total += n
+		n, err := msg.properties.decode(msg.Type(), from[offset:])
+		offset += n
 		if err != nil {
-			return total, err
+			return offset, err
 		}
 	}
 
-	return total, nil
+	return offset, nil
 }
 
 func (msg *ConnAck) encodeMessage(to []byte) (int, error) {
@@ -124,8 +122,7 @@ func (msg *ConnAck) encodeMessage(to []byte) (int, error) {
 	// V5.0   [MQTT-3.1.2.11]
 	if msg.version == ProtocolV50 {
 		var n int
-
-		n, err = encodeProperties(msg.properties, to[offset:])
+		n, err = msg.properties.encode(to[offset:])
 		offset += n
 		if err != nil {
 			return offset, err

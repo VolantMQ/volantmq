@@ -290,14 +290,6 @@ var propertyCalcLen = map[PropertyType]func(id PropertyID, val interface{}) (int
 	PropertyTypeBinary:     calcLenBinary,
 }
 
-func newProperty() *property {
-	p := &property{
-		properties: make(map[PropertyID]interface{}),
-	}
-
-	return p
-}
-
 // DupAllowed check if property id allows keys duplication
 func (p PropertyID) DupAllowed(t Type) bool {
 	d, ok := propertyAllowedMessageTypes[p]
@@ -369,6 +361,10 @@ func (p *property) Get(id PropertyID) PropertyToType {
 
 // ForEach iterate over existing properties
 func (p *property) ForEach(f func(PropertyID, PropertyToType)) {
+	if p.properties == nil {
+		return
+	}
+
 	for k, v := range p.properties {
 		t := propertyTypeMap[k]
 		f(k, &propertyToType{v: v, t: t})
@@ -379,27 +375,27 @@ func writePrefixID(id PropertyID, b []byte) int {
 	return binary.PutUvarint(b, uint64(id))
 }
 
-func decodeProperties(t Type, buf []byte) (*property, int, error) {
-	p := newProperty()
+//func decodeProperties(t Type, buf []byte) (*property, int, error) {
+//	p := newProperty()
+//
+//	total, err := p.decode(t, buf)
+//	if err != nil {
+//		return nil, total, err
+//	}
+//
+//	return p, total, nil
+//}
 
-	total, err := p.decode(t, buf)
-	if err != nil {
-		return nil, total, err
-	}
-
-	return p, total, nil
-}
-
-func encodeProperties(p *property, dst []byte) (int, error) {
-	if p == nil {
-		if len(dst) > 0 {
-			dst[0] = 0
-		}
-		return 1, nil
-	}
-
-	return p.encode(dst)
-}
+//func encodeProperties(p *property, dst []byte) (int, error) {
+//	if p == nil {
+//		if len(dst) > 0 {
+//			dst[0] = 0
+//		}
+//		return 1, nil
+//	}
+//
+//	return p.encode(dst)
+//}
 
 func (p *property) decode(t Type, from []byte) (int, error) {
 	offset := 0

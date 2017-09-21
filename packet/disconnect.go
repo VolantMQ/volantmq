@@ -64,14 +64,11 @@ func (msg *Disconnect) decodeMessage(from []byte) (int, error) {
 		if msg.remLen < 2 {
 			offset++
 		} else {
-			var err error
-			var n int
-
-			if msg.properties, n, err = decodeProperties(msg.mType, from[offset:]); err != nil {
-				return offset + n, err
-			}
-
+			n, err := msg.properties.decode(msg.Type(), from[offset:])
 			offset += n
+			if err != nil {
+				return offset, err
+			}
 		}
 	} else {
 		if msg.remLen > 0 {
@@ -94,7 +91,7 @@ func (msg *Disconnect) encodeMessage(to []byte) (int, error) {
 
 			if pLen > 1 {
 				var n int
-				n, err = encodeProperties(msg.properties, to[offset:])
+				n, err = msg.properties.encode(to[offset:])
 				offset += n
 			}
 		}

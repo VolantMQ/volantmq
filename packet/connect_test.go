@@ -467,7 +467,7 @@ func TestConnectMessageEncode(t *testing.T) {
 	// V5.0
 	msgBytes = []byte{
 		byte(CONNECT << 4),
-		62,
+		63,
 		0, // Length MSB (0)
 		4, // Length LSB (4)
 		'M', 'Q', 'T', 'T',
@@ -475,9 +475,9 @@ func TestConnectMessageEncode(t *testing.T) {
 		206, // connect flags 11001110, will QoS = 01
 		0,   // Keep Alive MSB (0)
 		10,  // Keep Alive LSB (10)
-		0,
-		0, // Client ID MSB (0)
-		8, // Client ID LSB (8)
+		0,   // Property length
+		0,   // Client ID MSB (0)
+		8,   // Client ID LSB (8)
 		'v', 'o', 'l', 'a', 'n', 't', 'm', 'q',
 		0, // Will Topic MSB (0)
 		4, // Will Topic LSB (4)

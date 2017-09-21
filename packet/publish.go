@@ -24,25 +24,22 @@ type Publish struct {
 	payload   []byte
 	topic     string
 	publishID uintptr
-	expireAt  *time.Time
+	expireAt  time.Time
 }
 
 var _ Provider = (*Publish)(nil)
 
 func newPublish() *Publish {
-	return &Publish{
-		expireAt:  nil,
-		publishID: 0,
-	}
+	return &Publish{}
 }
 
 // SetExpiry time object
 func (msg *Publish) SetExpiry(tm time.Time) {
-	msg.expireAt = &tm
+	msg.expireAt = tm
 }
 
 // GetExpiry time object
-func (msg *Publish) GetExpiry() *time.Time {
+func (msg *Publish) GetExpiry() time.Time {
 	return msg.expireAt
 }
 
@@ -50,7 +47,7 @@ func (msg *Publish) GetExpiry() *time.Time {
 // if not expirable returns false
 func (msg *Publish) Expired(set bool) bool {
 	expired := false
-	if msg.expireAt != nil {
+	if !msg.expireAt.IsZero() {
 		now := time.Now()
 		if df := uint32(msg.expireAt.Sub(now) / time.Second); msg.expireAt.After(now) && df > 0 {
 			if set && msg.version >= ProtocolV50 {
@@ -302,7 +299,7 @@ func (msg *Publish) decodeMessage(from []byte) (int, error) {
 	}
 
 	if msg.version == ProtocolV50 {
-		msg.properties, n, err = decodeProperties(msg.Type(), from[offset:])
+		n, err = msg.properties.decode(msg.Type(), from[offset:])
 		offset += n
 		if err != nil {
 			return offset, err
@@ -393,11 +390,11 @@ func (msg *Publish) encodeMessage(to []byte) (int, error) {
 
 	// V5.0   [MQTT-3.1.2.11]
 	if msg.version == ProtocolV50 {
-		if n, err = msg.properties.encode(to[offset:]); err != nil {
-			return offset + n, err
-		}
-
+		n, err = msg.properties.encode(to[offset:])
 		offset += n
+		if err != nil {
+			return offset, err
+		}
 	}
 
 	offset += copy(to[offset:], msg.payload)

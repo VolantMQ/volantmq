@@ -352,8 +352,8 @@ func (s *Type) persist() {
 		switch tp := p.(type) {
 		case *packet.Publish:
 			if (s.OfflineQoS0 || tp.QoS() != packet.QoS0) && !tp.Expired(false) {
-				if exp := tp.GetExpiry(); exp != nil {
-					pPkt.ExpireAt = exp.Format(time.RFC3339)
+				if tm := tp.GetExpiry(); !tm.IsZero() {
+					pPkt.ExpireAt = tm.Format(time.RFC3339)
 				}
 
 				if tp.QoS() != packet.QoS0 {

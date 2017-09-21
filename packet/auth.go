@@ -52,32 +52,26 @@ func (msg *Auth) SetReasonCode(c ReasonCode) error {
 }
 
 // decode message
-func (msg *Auth) decodeMessage(src []byte) (int, error) {
-	total := 0
-	msg.authReason = ReasonCode(src[total])
+func (msg *Auth) decodeMessage(from []byte) (int, error) {
+	offset := 0
+	msg.authReason = ReasonCode(from[offset])
 
 	if !msg.authReason.IsValidForType(msg.mType) {
-		return total, CodeProtocolError
+		return offset, CodeProtocolError
 	}
 
-	var n int
-	var err error
-	msg.properties, n, err = decodeProperties(msg.Type(), src[total:])
-
-	return total + n, err
+	n, err := msg.properties.decode(msg.Type(), from[offset:])
+	return offset + n, err
 }
 
-func (msg *Auth) encodeMessage(dst []byte) (int, error) {
-	total := 0
+func (msg *Auth) encodeMessage(to []byte) (int, error) {
+	offset := 0
+	to[offset] = byte(msg.authReason)
+	n, err := msg.properties.encode(to[offset:])
 
-	dst[total] = byte(msg.authReason)
-
-	n, err := encodeProperties(msg.properties, dst[total:])
-
-	return total + n, err
+	return offset + n, err
 }
 
 func (msg *Auth) size() int {
-	pLen, _ := encodeProperties(msg.properties, []byte{})
-	return 1 + pLen
+	return 1 + int(msg.properties.FullLen())
 }

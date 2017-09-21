@@ -66,13 +66,11 @@ func (msg *UnSubAck) decodeMessage(from []byte) (int, error) {
 	offset := msg.decodePacketID(from)
 
 	if msg.version == ProtocolV50 && (int(msg.remLen)-offset) > 0 {
-		var n int
-		var err error
-		if msg.properties, n, err = decodeProperties(msg.Type(), from[offset:]); err != nil {
-			return offset + n, err
-		}
-
+		n, err := msg.properties.decode(msg.Type(), from[offset:])
 		offset += n
+		if err != nil {
+			return offset, err
+		}
 	}
 
 	return offset, nil
@@ -89,8 +87,7 @@ func (msg *UnSubAck) encodeMessage(to []byte) (int, error) {
 	var err error
 	if msg.version == ProtocolV50 {
 		var n int
-
-		n, err = encodeProperties(msg.properties, to[offset:])
+		n, err = msg.properties.encode(to[offset:])
 		offset += n
 	}
 
@@ -103,9 +100,6 @@ func (msg *UnSubAck) size() int {
 
 	if msg.version == ProtocolV50 {
 		total += int(msg.properties.FullLen())
-		//if pLen := msg.properties.FullLen(); pLen > 1 {
-		//	total += int(pLen)
-		//}
 	}
 
 	return total

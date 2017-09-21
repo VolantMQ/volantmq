@@ -35,20 +35,6 @@ func (msg *PingResp) encodeMessage(dst []byte) (int, error) {
 	return 0, nil
 }
 
-// Encode message
-//func (msg *PingResp) Encode(dst []byte) (int, error) {
-//	expectedSize, err := msg.Size()
-//	if err != nil {
-//		return 0, err
-//	}
-//
-//	if len(dst) < expectedSize {
-//		return 0, ErrInsufficientBufferSize
-//	}
-//
-//	return msg.preEncode(dst), nil
-//}
-
 // Len of message
 func (msg *PingResp) size() int {
 	return 0

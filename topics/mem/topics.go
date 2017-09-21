@@ -182,7 +182,7 @@ func (mT *provider) Close() error {
 					entry := persistence.PersistedPacket{
 						Data: buf,
 					}
-					if tm := pkt.GetExpiry(); tm != nil {
+					if tm := pkt.GetExpiry(); !tm.IsZero() {
 						entry.ExpireAt = tm.Format(time.RFC3339)
 					}
 					encoded = append(encoded, entry)

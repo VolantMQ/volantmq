@@ -78,12 +78,11 @@ func (msg *Ack) decodeMessage(from []byte) (int, error) {
 
 		if len(from[offset:]) > 0 {
 			// v5 [MQTT-3.1.2.11] specifies properties in variable header
-			var err error
-			var n int
-			if msg.properties, n, err = decodeProperties(msg.mType, from[offset:]); err != nil {
-				return offset + n, err
-			}
+			n, err := msg.properties.decode(msg.Type(), from[offset:])
 			offset += n
+			if err != nil {
+				return offset, err
+			}
 		}
 	}
 
@@ -107,7 +106,7 @@ func (msg *Ack) encodeMessage(to []byte) (int, error) {
 
 			if pLen > 1 {
 				var n int
-				n, err = encodeProperties(msg.properties, to[offset:])
+				n, err = msg.properties.encode(to[offset:])
 				offset += n
 			}
 		}

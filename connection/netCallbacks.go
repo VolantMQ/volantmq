@@ -205,11 +205,7 @@ func (s *Type) onSubscribe(msg *packet.Subscribe) packet.Provider {
 	var retCodes []packet.ReasonCode
 	var retainedPublishes []*packet.Publish
 
-	iter := msg.Topics().Iterator()
-	for kv, ok := iter(); ok; kv, ok = iter() {
-		t := kv.Key.(string)
-		ops := kv.Value.(packet.SubscriptionOptions)
-
+	msg.RangeTopics(func(t string, ops packet.SubscriptionOptions) {
 		reason := packet.CodeSuccess // nolint: ineffassign
 		//authorized := true
 		// TODO: check permissions here
@@ -242,7 +238,7 @@ func (s *Type) onSubscribe(msg *packet.Subscribe) packet.Provider {
 		}
 
 		retCodes = append(retCodes, reason)
-	}
+	})
 
 	if err := resp.AddReturnCodes(retCodes); err != nil {
 		return nil
@@ -262,12 +258,9 @@ func (s *Type) onSubscribe(msg *packet.Subscribe) packet.Provider {
 }
 
 func (s *Type) onUnSubscribe(msg *packet.UnSubscribe) packet.Provider {
-	iter := msg.Topics().Iterator()
-
 	var retCodes []packet.ReasonCode
 
-	for kv, ok := iter(); ok; kv, ok = iter() {
-		t := kv.Key.(string)
+	for _, t := range msg.Topics() {
 		// TODO: check permissions here
 		authorized := true
 		reason := packet.CodeSuccess

@@ -63,60 +63,56 @@ func (msg *SubAck) SetPacketID(v IDType) {
 }
 
 // decode message
-func (msg *SubAck) decodeMessage(src []byte) (int, error) {
-	total := msg.decodePacketID(src)
+func (msg *SubAck) decodeMessage(from []byte) (int, error) {
+	offset := msg.decodePacketID(from)
 
 	if msg.version == ProtocolV50 {
-		var n int
-		var err error
-		if msg.properties, n, err = decodeProperties(msg.Type(), src[total:]); err != nil {
-			return total + n, err
+		n, err := msg.properties.decode(msg.Type(), from[offset:])
+		offset += n
+		if err != nil {
+			return offset, err
 		}
-
-		total += n
 	}
 
-	numCodes := int(msg.remLen) - total
+	numCodes := int(msg.remLen) - offset
 
-	for i, q := range src[total : total+numCodes] {
+	for i, q := range from[offset : offset+numCodes] {
 		code := ReasonCode(q)
 		if msg.version == ProtocolV50 && !code.IsValidForType(msg.mType) {
-			return total + i, CodeProtocolError
+			return offset + i, CodeProtocolError
 		} else if !QosType(code).IsValidFull() {
-			return total + i, CodeRefusedServerUnavailable
+			return offset + i, CodeRefusedServerUnavailable
 		}
 		msg.returnCodes = append(msg.returnCodes, ReasonCode(q))
 	}
 
-	total += numCodes
+	offset += numCodes
 
-	return total, nil
+	return offset, nil
 }
 
-func (msg *SubAck) encodeMessage(dst []byte) (int, error) {
+func (msg *SubAck) encodeMessage(to []byte) (int, error) {
 	// [MQTT-2.3.1]
 	if len(msg.packetID) == 0 {
 		return 0, ErrPackedIDZero
 	}
 
-	total := msg.encodePacketID(dst)
+	offset := msg.encodePacketID(to)
 
 	if msg.version == ProtocolV50 {
-		var n int
-		var err error
-		if n, err = encodeProperties(msg.properties, dst[total:]); err != nil {
-			return total + n, err
+		n, err := msg.properties.encode(to[offset:])
+		offset += n
+		if err != nil {
+			return offset, err
 		}
-
-		total += n
 	}
 
 	for _, q := range msg.returnCodes {
-		dst[total] = byte(q)
-		total++
+		to[offset] = byte(q)
+		offset++
 	}
 
-	return total, nil
+	return offset, nil
 }
 
 func (msg *SubAck) size() int {

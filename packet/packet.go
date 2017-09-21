@@ -136,15 +136,7 @@ type Provider interface {
 // one of the New*Message functions. If an error is returned then the message type
 // is invalid.
 func New(v ProtocolVersion, t Type) (Provider, error) {
-	m, err := newMessage(v, t)
-	if err == nil {
-		h := m.getHeader()
-		if v == ProtocolV50 && (t != PINGREQ && t != PINGRESP) {
-			h.properties = newProperty()
-		}
-	}
-
-	return m, err
+	return newMessage(v, t)
 }
 
 func newMessage(v ProtocolVersion, t Type) (Provider, error) {
@@ -196,6 +188,10 @@ func newMessage(v ProtocolVersion, t Type) (Provider, error) {
 	h.cb.encode = m.encodeMessage
 	h.cb.decode = m.decodeMessage
 	h.cb.size = m.size
+
+	if v >= ProtocolV50 {
+		h.properties.properties = make(map[PropertyID]interface{})
+	}
 
 	return m, nil
 }

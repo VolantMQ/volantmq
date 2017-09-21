@@ -13,13 +13,12 @@ type header struct {
 		size   sizeCallback
 	}
 
-	properties *property // presented only in V5.0
+	properties property
 	packetID   []byte
-
-	remLen  int32
-	mFlags  byte
-	mType   Type
-	version ProtocolVersion
+	remLen     int32
+	mFlags     byte
+	mType      Type
+	version    ProtocolVersion
 }
 
 const (
@@ -156,10 +155,6 @@ func (h *header) PropertySet(id PropertyID, val interface{}) error {
 func (h *header) PropertyForEach(f func(PropertyID, PropertyToType)) error {
 	if h.version != ProtocolV50 {
 		return ErrNotSupported
-	}
-
-	if h.properties == nil {
-		return ErrNotSet
 	}
 
 	h.properties.ForEach(f)
