@@ -3,7 +3,7 @@ package boltdb
 import (
 	"sync"
 
-	"github.com/VolantMQ/volantmq/persistence/types"
+	"github.com/VolantMQ/volantmq/persistence"
 	"github.com/boltdb/bolt"
 )
 
@@ -15,13 +15,13 @@ type system struct {
 	lock *sync.Mutex
 }
 
-func (s *system) GetInfo() (*persistenceTypes.SystemState, error) {
-	state := &persistenceTypes.SystemState{}
+func (s *system) GetInfo() (*persistence.SystemState, error) {
+	state := &persistence.SystemState{}
 
 	err := s.db.db.View(func(tx *bolt.Tx) error {
 		sys := tx.Bucket(bucketSystem)
 		if sys == nil {
-			return persistenceTypes.ErrNotInitialized
+			return persistence.ErrNotInitialized
 		}
 
 		state.Version = string(sys.Get([]byte("version")))
@@ -37,11 +37,11 @@ func (s *system) GetInfo() (*persistenceTypes.SystemState, error) {
 	return state, nil
 }
 
-func (s *system) SetInfo(state *persistenceTypes.SystemState) error {
+func (s *system) SetInfo(state *persistence.SystemState) error {
 	err := s.db.db.Update(func(tx *bolt.Tx) error {
 		sys := tx.Bucket(bucketSystem)
 		if sys == nil {
-			return persistenceTypes.ErrNotInitialized
+			return persistence.ErrNotInitialized
 		}
 
 		if e := sys.Put([]byte("version"), []byte(state.Version)); e != nil {

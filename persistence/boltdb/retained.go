@@ -3,7 +3,7 @@ package boltdb
 import (
 	"sync"
 
-	"github.com/VolantMQ/volantmq/persistence/types"
+	"github.com/VolantMQ/volantmq/persistence"
 	"github.com/boltdb/bolt"
 )
 
@@ -15,14 +15,14 @@ type retained struct {
 	lock *sync.Mutex
 }
 
-func (r *retained) Load() ([]persistenceTypes.PersistedPacket, error) {
-	var res []persistenceTypes.PersistedPacket
+func (r *retained) Load() ([]persistence.PersistedPacket, error) {
+	var res []persistence.PersistedPacket
 
 	err := r.db.db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(bucketRetained)
 
 		return bucket.ForEach(func(k, v []byte) error {
-			pkt := persistenceTypes.PersistedPacket{}
+			pkt := persistence.PersistedPacket{}
 
 			if buck := bucket.Bucket(k); buck != nil {
 				pkt.Data = buck.Get([]byte("data"))
@@ -39,7 +39,7 @@ func (r *retained) Load() ([]persistenceTypes.PersistedPacket, error) {
 }
 
 // Store
-func (r *retained) Store(packets []persistenceTypes.PersistedPacket) error {
+func (r *retained) Store(packets []persistence.PersistedPacket) error {
 	return r.db.db.Update(func(tx *bolt.Tx) error {
 		tx.DeleteBucket(bucketRetained) // nolint: errcheck
 		bucket, err := tx.CreateBucket(bucketRetained)

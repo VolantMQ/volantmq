@@ -1,8 +1,4 @@
-package persistenceTypes
-
-import (
-	"github.com/VolantMQ/volantmq/packet"
-)
+package persistence
 
 // Errors persistence errors
 type Errors int
@@ -63,7 +59,7 @@ type SessionState struct {
 	Timestamp     string
 	Errors        []error
 	Expire        *SessionDelays
-	Version       packet.ProtocolVersion
+	Version       byte
 }
 
 // SystemState system configuration

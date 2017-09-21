@@ -1,9 +1,7 @@
-package mem
+package persistence
 
 import (
 	"sync"
-
-	"github.com/VolantMQ/volantmq/persistence/types"
 )
 
 type subscriptions struct {
@@ -16,7 +14,7 @@ type subscriptions struct {
 func (s *subscriptions) Store(id []byte, data []byte) error {
 	select {
 	case <-s.status.done:
-		return persistenceTypes.ErrNotOpen
+		return ErrNotOpen
 	default:
 	}
 
@@ -31,7 +29,7 @@ func (s *subscriptions) Store(id []byte, data []byte) error {
 func (s *subscriptions) Load(load func([]byte, []byte) error) error {
 	select {
 	case <-s.status.done:
-		return persistenceTypes.ErrNotOpen
+		return ErrNotOpen
 	default:
 	}
 
@@ -48,7 +46,7 @@ func (s *subscriptions) Load(load func([]byte, []byte) error) error {
 func (s *subscriptions) Delete(id []byte) error {
 	select {
 	case <-s.status.done:
-		return persistenceTypes.ErrNotOpen
+		return ErrNotOpen
 	default:
 	}
 
@@ -63,7 +61,7 @@ func (s *subscriptions) Delete(id []byte) error {
 func (s *subscriptions) Wipe() error {
 	select {
 	case <-s.status.done:
-		return persistenceTypes.ErrNotOpen
+		return ErrNotOpen
 	default:
 	}
 

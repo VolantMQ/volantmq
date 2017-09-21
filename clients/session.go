@@ -8,7 +8,7 @@ import (
 
 	"github.com/VolantMQ/volantmq/connection"
 	"github.com/VolantMQ/volantmq/packet"
-	"github.com/VolantMQ/volantmq/persistence/types"
+	"github.com/VolantMQ/volantmq/persistence"
 	"github.com/VolantMQ/volantmq/subscriber"
 	"github.com/VolantMQ/volantmq/types"
 )
@@ -143,7 +143,7 @@ func (s *session) start() {
 	s.idLock.Unlock()
 }
 
-func (s *session) stop(reason packet.ReasonCode) *persistenceTypes.SessionState {
+func (s *session) stop(reason packet.ReasonCode) *persistence.SessionState {
 	s.connStop.Do(func() {
 		if s.conn != nil {
 			s.conn.Stop(reason)
@@ -163,12 +163,12 @@ func (s *session) stop(reason packet.ReasonCode) *persistenceTypes.SessionState 
 		s.finalized = true
 	}
 
-	state := &persistenceTypes.SessionState{
+	state := &persistence.SessionState{
 		Timestamp: s.createdAt.Format(time.RFC3339),
 	}
 
 	if s.expireIn != nil || (s.willDelay > 0 && s.will != nil) {
-		state.Expire = &persistenceTypes.SessionDelays{
+		state.Expire = &persistence.SessionDelays{
 			Since: s.expiringSince.Format(time.RFC3339),
 		}
 
