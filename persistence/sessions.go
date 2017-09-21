@@ -1,9 +1,7 @@
-package mem
+package persistence
 
 import (
 	"sync"
-
-	"github.com/VolantMQ/volantmq/persistence/types"
 )
 
 type sessions struct {
@@ -13,8 +11,8 @@ type sessions struct {
 
 type session struct {
 	lock    sync.Mutex
-	state   *persistenceTypes.SessionState
-	packets []persistenceTypes.PersistedPacket
+	state   *SessionState
+	packets []PersistedPacket
 }
 
 func (s *sessions) Exists(id []byte) bool {
@@ -23,11 +21,15 @@ func (s *sessions) Exists(id []byte) bool {
 }
 
 func (s *sessions) SubscriptionsStore(id []byte, data []byte) error {
-	elem, _ := s.entries.LoadOrStore(id, &session{})
+	elem, _ := s.entries.LoadOrStore(string(id), &session{})
 
 	ses := elem.(*session)
 	ses.lock.Lock()
 	defer ses.lock.Unlock()
+	if ses.state == nil {
+		ses.state = &SessionState{}
+	}
+
 	ses.state.Subscriptions = data
 
 	return nil
@@ -44,7 +46,7 @@ func (s *sessions) SubscriptionsDelete(id []byte) error {
 	return nil
 }
 
-func (s *sessions) PacketsForEach(id []byte, load func(persistenceTypes.PersistedPacket) error) error {
+func (s *sessions) PacketsForEach(id []byte, load func(PersistedPacket) error) error {
 	if elem, ok := s.entries.Load(string(id)); ok {
 		ses := elem.(*session)
 
@@ -56,7 +58,7 @@ func (s *sessions) PacketsForEach(id []byte, load func(persistenceTypes.Persiste
 	return nil
 }
 
-func (s *sessions) PacketsStore(id []byte, packets []persistenceTypes.PersistedPacket) error {
+func (s *sessions) PacketsStore(id []byte, packets []PersistedPacket) error {
 	if elem, ok := s.entries.Load(string(id)); ok {
 		ses := elem.(*session)
 
@@ -73,14 +75,14 @@ func (s *sessions) PacketsDelete(id []byte) error {
 		ses := elem.(*session)
 
 		ses.lock.Lock()
-		ses.packets = []persistenceTypes.PersistedPacket{}
+		ses.packets = []PersistedPacket{}
 		ses.lock.Unlock()
 	}
 
 	return nil
 }
 
-func (s *sessions) PacketStore(id []byte, packet persistenceTypes.PersistedPacket) error {
+func (s *sessions) PacketStore(id []byte, packet PersistedPacket) error {
 	if elem, ok := s.entries.Load(string(id)); ok {
 		ses := elem.(*session)
 
@@ -91,11 +93,11 @@ func (s *sessions) PacketStore(id []byte, packet persistenceTypes.PersistedPacke
 	return nil
 }
 
-func (s *sessions) LoadForEach(load func([]byte, *persistenceTypes.SessionState) error) error {
+func (s *sessions) LoadForEach(load func([]byte, *SessionState) error) error {
 	var err error
 	s.entries.Range(func(key, value interface{}) bool {
 		sID := []byte(key.(string))
-		ses := value.(*persistenceTypes.SessionState)
+		ses := value.(*SessionState)
 		err = load(sID, ses)
 		return err == nil
 	})
@@ -103,7 +105,7 @@ func (s *sessions) LoadForEach(load func([]byte, *persistenceTypes.SessionState)
 	return err
 }
 
-func (s *sessions) StateStore(id []byte, state *persistenceTypes.SessionState) error {
+func (s *sessions) StateStore(id []byte, state *SessionState) error {
 	elem, _ := s.entries.LoadOrStore(string(id), &session{})
 	ses := elem.(*session)
 	ses.lock.Lock()

@@ -24,7 +24,7 @@ import (
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/packet"
-	"github.com/VolantMQ/volantmq/persistence/types"
+	"github.com/VolantMQ/volantmq/persistence"
 	"github.com/VolantMQ/volantmq/subscriber"
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/types"
@@ -72,7 +72,7 @@ type PreConfig struct {
 	Username        string
 	AuthMethod      string
 	AuthData        []byte
-	State           persistenceTypes.Packets
+	State           persistence.Packets
 	Metric          systree.Metric
 	Conn            net.Conn
 	Auth            auth.SessionPermissions
@@ -301,7 +301,7 @@ func (s *Type) loadPersistence() error {
 		return nil
 	}
 
-	return s.State.PacketsForEach([]byte(s.ID), func(entry persistenceTypes.PersistedPacket) error {
+	return s.State.PacketsForEach([]byte(s.ID), func(entry persistence.PersistedPacket) error {
 		var err error
 		var pkt packet.Provider
 		if pkt, _, err = packet.Decode(s.Version, entry.Data); err != nil {
@@ -343,11 +343,11 @@ func (s *Type) loadPersistence() error {
 }
 
 func (s *Type) persist() {
-	var packets []persistenceTypes.PersistedPacket
+	var packets []persistence.PersistedPacket
 
 	persistAppend := func(p interface{}) {
 		var pkt packet.Provider
-		pPkt := persistenceTypes.PersistedPacket{UnAck: false}
+		pPkt := persistence.PersistedPacket{UnAck: false}
 
 		switch tp := p.(type) {
 		case *packet.Publish:

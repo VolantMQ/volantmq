@@ -4,8 +4,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/VolantMQ/volantmq/packet"
-	"github.com/VolantMQ/volantmq/persistence/types"
+	"github.com/VolantMQ/volantmq/persistence"
 	"github.com/boltdb/bolt"
 )
 
@@ -21,7 +20,7 @@ func (s *sessions) Exists(id []byte) bool {
 	err := s.db.db.View(func(tx *bolt.Tx) error {
 		sessions := tx.Bucket(bucketSessions)
 		if sessions == nil {
-			return persistenceTypes.ErrNotInitialized
+			return persistence.ErrNotInitialized
 		}
 
 		ses := sessions.Bucket(id)
@@ -39,7 +38,7 @@ func (s *sessions) SubscriptionsStore(id []byte, data []byte) error {
 	return s.db.db.Update(func(tx *bolt.Tx) error {
 		sessions := tx.Bucket(bucketSessions)
 		if sessions == nil {
-			return persistenceTypes.ErrNotInitialized
+			return persistence.ErrNotInitialized
 		}
 
 		session, err := sessions.CreateBucketIfNotExists(id)
@@ -55,12 +54,12 @@ func (s *sessions) SubscriptionsDelete(id []byte) error {
 	return s.db.db.Update(func(tx *bolt.Tx) error {
 		sessions := tx.Bucket(bucketSessions)
 		if sessions == nil {
-			return persistenceTypes.ErrNotInitialized
+			return persistence.ErrNotInitialized
 		}
 
 		session := tx.Bucket(id)
 		if session == nil {
-			return persistenceTypes.ErrNotFound
+			return persistence.ErrNotFound
 		}
 
 		session.Delete(id) // nolint: errcheck
@@ -83,11 +82,11 @@ func byteToBool(v byte) bool {
 	return true
 }
 
-func (s *sessions) PacketsForEach(id []byte, load func(persistenceTypes.PersistedPacket) error) error {
+func (s *sessions) PacketsForEach(id []byte, load func(persistence.PersistedPacket) error) error {
 	return s.db.db.View(func(tx *bolt.Tx) error {
 		root := tx.Bucket(bucketSessions)
 		if root == nil {
-			return persistenceTypes.ErrNotInitialized
+			return persistence.ErrNotInitialized
 		}
 
 		session := root.Bucket(id)
@@ -102,7 +101,7 @@ func (s *sessions) PacketsForEach(id []byte, load func(persistenceTypes.Persiste
 
 		packs.ForEach(func(k, v []byte) error {
 			if packet := packs.Bucket(k); packet != nil {
-				pPkt := persistenceTypes.PersistedPacket{UnAck: false}
+				pPkt := persistence.PersistedPacket{UnAck: false}
 
 				if data := packet.Get([]byte("data")); len(data) > 0 {
 					pPkt.Data = data
@@ -141,7 +140,7 @@ func createPacketsBucket(tx *bolt.Tx, id []byte) (*bolt.Bucket, error) {
 	return session.CreateBucketIfNotExists(bucketPackets)
 }
 
-func storePacket(buck *bolt.Bucket, packet persistenceTypes.PersistedPacket) error {
+func storePacket(buck *bolt.Bucket, packet persistence.PersistedPacket) error {
 	id, _ := buck.NextSequence() // nolint: gas
 	pBuck, err := buck.CreateBucketIfNotExists(itob64(id))
 	if err != nil {
@@ -165,7 +164,7 @@ func storePacket(buck *bolt.Bucket, packet persistenceTypes.PersistedPacket) err
 	return nil
 }
 
-func (s *sessions) PacketsStore(id []byte, packets []persistenceTypes.PersistedPacket) error {
+func (s *sessions) PacketsStore(id []byte, packets []persistence.PersistedPacket) error {
 	return s.db.db.Update(func(tx *bolt.Tx) error {
 		buck, err := createPacketsBucket(tx, id)
 		if err != nil {
@@ -182,7 +181,7 @@ func (s *sessions) PacketsStore(id []byte, packets []persistenceTypes.PersistedP
 	})
 }
 
-func (s *sessions) PacketStore(id []byte, packet persistenceTypes.PersistedPacket) error {
+func (s *sessions) PacketStore(id []byte, packet persistence.PersistedPacket) error {
 	err := s.db.db.Update(func(tx *bolt.Tx) error {
 		buck, err := createPacketsBucket(tx, id)
 		if err != nil {
@@ -200,7 +199,7 @@ func (s *sessions) PacketsDelete(id []byte) error {
 		if sessions := tx.Bucket(bucketSessions); sessions != nil {
 			ses := sessions.Bucket(id)
 			if ses == nil {
-				return persistenceTypes.ErrNotFound
+				return persistence.ErrNotFound
 			}
 			ses.DeleteBucket(bucketPackets) // nolint: errcheck
 		}
@@ -208,7 +207,7 @@ func (s *sessions) PacketsDelete(id []byte) error {
 	})
 }
 
-func (s *sessions) LoadForEach(load func([]byte, *persistenceTypes.SessionState) error) error {
+func (s *sessions) LoadForEach(load func([]byte, *persistence.SessionState) error) error {
 	return s.db.db.Update(func(tx *bolt.Tx) error {
 		sessions := tx.Bucket(bucketSessions)
 		if sessions == nil {
@@ -217,14 +216,14 @@ func (s *sessions) LoadForEach(load func([]byte, *persistenceTypes.SessionState)
 
 		return sessions.ForEach(func(k, v []byte) error {
 			session := sessions.Bucket(k)
-			st := &persistenceTypes.SessionState{}
+			st := &persistence.SessionState{}
 
 			state := session.Bucket(bucketState)
 			if st == nil {
 				st.Errors = append(st.Errors, errors.New("session does not have state"))
 			} else {
 				if v := state.Get([]byte("version")); len(v) > 0 {
-					st.Version = packet.ProtocolVersion(v[0])
+					st.Version = v[0]
 				} else {
 					st.Errors = append(st.Errors, errors.New("protocol version not found"))
 				}
@@ -233,7 +232,7 @@ func (s *sessions) LoadForEach(load func([]byte, *persistenceTypes.SessionState)
 				st.Subscriptions = state.Get(bucketSubscriptions)
 
 				if expire := state.Bucket(bucketExpire); expire != nil {
-					st.Expire = &persistenceTypes.SessionDelays{
+					st.Expire = &persistence.SessionDelays{
 						Since:    string(expire.Get([]byte("since"))),
 						ExpireIn: string(expire.Get([]byte("expireIn"))),
 						WillIn:   string(expire.Get([]byte("willIn"))),
@@ -246,11 +245,11 @@ func (s *sessions) LoadForEach(load func([]byte, *persistenceTypes.SessionState)
 	})
 }
 
-func (s *sessions) StateStore(id []byte, state *persistenceTypes.SessionState) error {
+func (s *sessions) StateStore(id []byte, state *persistence.SessionState) error {
 	return s.db.db.Update(func(tx *bolt.Tx) error {
 		sessions := tx.Bucket(bucketSessions)
 		if sessions == nil {
-			return persistenceTypes.ErrNotInitialized
+			return persistence.ErrNotInitialized
 		}
 
 		session, err := sessions.CreateBucketIfNotExists(id)
@@ -310,7 +309,7 @@ func (s *sessions) StateDelete(id []byte) error {
 	return s.db.db.Update(func(tx *bolt.Tx) error {
 		sessions := tx.Bucket(bucketSessions)
 		if sessions == nil {
-			return persistenceTypes.ErrNotInitialized
+			return persistence.ErrNotInitialized
 		}
 
 		session, err := sessions.CreateBucketIfNotExists(id)
