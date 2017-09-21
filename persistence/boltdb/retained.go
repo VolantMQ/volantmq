@@ -15,21 +15,22 @@ type retained struct {
 	lock *sync.Mutex
 }
 
-func (r *retained) Load() ([][]byte, error) {
-	select {
-	case <-r.db.done:
-		return nil, persistenceTypes.ErrNotOpen
-	default:
-	}
-
-	var res [][]byte
+func (r *retained) Load() ([]persistenceTypes.PersistedPacket, error) {
+	var res []persistenceTypes.PersistedPacket
 
 	err := r.db.db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(bucketRetained)
+
 		return bucket.ForEach(func(k, v []byte) error {
-			buf := make([]byte, len(v))
-			copy(buf, v)
-			res = append(res, buf)
+			pkt := persistenceTypes.PersistedPacket{}
+
+			if buck := bucket.Bucket(k); buck != nil {
+				pkt.Data = buck.Get([]byte("data"))
+				pkt.ExpireAt = string(buck.Get([]byte("expireAt")))
+
+				res = append(res, pkt)
+			}
+
 			return nil
 		})
 	})
@@ -38,13 +39,7 @@ func (r *retained) Load() ([][]byte, error) {
 }
 
 // Store
-func (r *retained) Store(data [][]byte) error {
-	select {
-	case <-r.db.done:
-		return persistenceTypes.ErrNotOpen
-	default:
-	}
-
+func (r *retained) Store(packets []persistenceTypes.PersistedPacket) error {
 	return r.db.db.Update(func(tx *bolt.Tx) error {
 		tx.DeleteBucket(bucketRetained) // nolint: errcheck
 		bucket, err := tx.CreateBucket(bucketRetained)
@@ -52,11 +47,19 @@ func (r *retained) Store(data [][]byte) error {
 			return err
 		}
 
-		for _, d := range data {
+		for _, p := range packets {
 			id, _ := bucket.NextSequence() // nolint: gas
-			if err = bucket.Put(itob64(id), d); err != nil {
+			pack, err := bucket.CreateBucketIfNotExists(itob64(id))
+			if err != nil {
 				return err
 			}
+
+			err = pack.Put([]byte("data"), p.Data)
+			if err != nil {
+				return err
+			}
+
+			return pack.Put([]byte("expireAt"), []byte(p.ExpireAt))
 		}
 
 		return nil
@@ -65,12 +68,6 @@ func (r *retained) Store(data [][]byte) error {
 
 // Wipe
 func (r *retained) Wipe() error {
-	select {
-	case <-r.db.done:
-		return persistenceTypes.ErrNotOpen
-	default:
-	}
-
 	return r.db.db.Update(func(tx *bolt.Tx) error {
 		if err := tx.DeleteBucket(bucketRetained); err != nil {
 			return err

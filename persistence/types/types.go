@@ -1,8 +1,6 @@
 package persistenceTypes
 
 import (
-	"time"
-
 	"github.com/VolantMQ/volantmq/packet"
 )
 
@@ -22,6 +20,9 @@ const (
 	ErrNotFound
 	// ErrNotOpen storage is not open
 	ErrNotOpen
+
+	// ErrBrokenEntry persisted entry does not meet requirements
+	ErrBrokenEntry
 )
 
 var errorsDesc = map[Errors]string{
@@ -31,6 +32,7 @@ var errorsDesc = map[Errors]string{
 	ErrNotInitialized:  "persistence: not initialized",
 	ErrNotFound:        "persistence: not found",
 	ErrNotOpen:         "persistence: not open",
+	ErrBrokenEntry:     "persistence: broken entry",
 }
 
 // Errors description during persistence
@@ -42,24 +44,26 @@ func (e Errors) Error() string {
 	return "unknown error"
 }
 
-// SessionMessages persisted session messages
-type SessionMessages struct {
-	OutMessages   [][]byte
-	UnAckMessages [][]byte
+type PersistedPacket struct {
+	UnAck    bool
+	ExpireAt string
+	Data     []byte
 }
 
-// SessionWill object
-type SessionWill struct {
-	Delay   time.Duration
-	Message []byte
+type SessionDelays struct {
+	Since    string
+	ExpireIn string
+	WillIn   string
+	WillData []byte
 }
 
 // SessionState object
 type SessionState struct {
-	Timestamp string
-	ExpireIn  *time.Duration
-	Will      *SessionWill
-	Version   packet.ProtocolVersion
+	Subscriptions []byte
+	Timestamp     string
+	Errors        []error
+	Expire        *SessionDelays
+	Version       packet.ProtocolVersion
 }
 
 // SystemState system configuration
@@ -68,39 +72,41 @@ type SystemState struct {
 	NodeName string
 }
 
+// Packets interface for connection to handle packets
+type Packets interface {
+	PacketsForEach([]byte, func(PersistedPacket) error) error
+	PacketsStore([]byte, []PersistedPacket) error
+}
+
+type Subscriptions interface {
+	SubscriptionsStore([]byte, []byte) error
+	SubscriptionsDelete([]byte) error
+}
+
+type State interface {
+	StateStore([]byte, *SessionState) error
+	StateDelete([]byte) error
+}
+
 // Retained provider for load/store retained messages
 type Retained interface {
 	// Store persist retained message
-	Store([][]byte) error
+	Store([]PersistedPacket) error
 	// Load load retained messages
-	Load() ([][]byte, error)
+	Load() ([]PersistedPacket, error)
 	// Wipe retained storage
 	Wipe() error
 }
 
-// ConnectionMessages interface for connection to handle messages
-type ConnectionMessages interface {
-	MessagesLoad([]byte) (*SessionMessages, error)
-	MessagesStore([]byte, *SessionMessages) error
-}
-
 // Sessions interface allows operating with sessions inside backend
 type Sessions interface {
-	StatesIterate(func([]byte, *SessionState) error) error
-	StateStore([]byte, *SessionState) error
-	StateWipe([]byte) error
-	StatesWipe() error
-
-	MessagesLoad([]byte) (*SessionMessages, error)
-	MessagesStore([]byte, *SessionMessages) error
-	MessageStore([]byte, []byte) error
-	MessagesWipe([]byte) error
-
-	SubscriptionsIterate(func([]byte, []byte) error) error
-	SubscriptionStore([]byte, []byte) error
-	SubscriptionDelete([]byte) error
-	SubscriptionsWipe() error
-
+	Packets
+	Subscriptions
+	State
+	LoadForEach(func([]byte, *SessionState) error) error
+	PacketStore([]byte, PersistedPacket) error
+	PacketsDelete([]byte) error
+	Exists(id []byte) bool
 	Delete([]byte) error
 }
 

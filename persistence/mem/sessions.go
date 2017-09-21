@@ -7,201 +7,131 @@ import (
 )
 
 type sessions struct {
-	status        *dbStatus
-	messages      sync.Map
-	state         sync.Map
-	subscriptions sync.Map
+	status  *dbStatus
+	entries sync.Map
 }
 
-func (s *sessions) SubscriptionsIterate(load func([]byte, []byte) error) error {
-	select {
-	case <-s.status.done:
-		return persistenceTypes.ErrNotOpen
-	default:
+type session struct {
+	lock    sync.Mutex
+	state   *persistenceTypes.SessionState
+	packets []persistenceTypes.PersistedPacket
+}
+
+func (s *sessions) Exists(id []byte) bool {
+	_, ok := s.entries.Load(string(id))
+	return ok
+}
+
+func (s *sessions) SubscriptionsStore(id []byte, data []byte) error {
+	elem, _ := s.entries.LoadOrStore(id, &session{})
+
+	ses := elem.(*session)
+	ses.lock.Lock()
+	defer ses.lock.Unlock()
+	ses.state.Subscriptions = data
+
+	return nil
+}
+
+func (s *sessions) SubscriptionsDelete(id []byte) error {
+	if elem, ok := s.entries.Load(string(id)); ok {
+		ses := elem.(*session)
+		ses.lock.Lock()
+		defer ses.lock.Unlock()
+		ses.state.Subscriptions = []byte{}
 	}
 
-	s.subscriptions.Range(func(k, v interface{}) bool {
-		id := k.([]byte)
-		val := v.([]byte)
+	return nil
+}
 
-		if err := load(id, val); err != nil {
-			return false
+func (s *sessions) PacketsForEach(id []byte, load func(persistenceTypes.PersistedPacket) error) error {
+	if elem, ok := s.entries.Load(string(id)); ok {
+		ses := elem.(*session)
+
+		for _, p := range ses.packets {
+			load(p)
 		}
-		return true
+	}
+
+	return nil
+}
+
+func (s *sessions) PacketsStore(id []byte, packets []persistenceTypes.PersistedPacket) error {
+	if elem, ok := s.entries.Load(string(id)); ok {
+		ses := elem.(*session)
+
+		ses.lock.Lock()
+		ses.packets = append(ses.packets, packets...)
+		ses.lock.Unlock()
+	}
+
+	return nil
+}
+
+func (s *sessions) PacketsDelete(id []byte) error {
+	if elem, ok := s.entries.Load(string(id)); ok {
+		ses := elem.(*session)
+
+		ses.lock.Lock()
+		ses.packets = []persistenceTypes.PersistedPacket{}
+		ses.lock.Unlock()
+	}
+
+	return nil
+}
+
+func (s *sessions) PacketStore(id []byte, packet persistenceTypes.PersistedPacket) error {
+	if elem, ok := s.entries.Load(string(id)); ok {
+		ses := elem.(*session)
+
+		ses.lock.Lock()
+		ses.packets = append(ses.packets, packet)
+		ses.lock.Unlock()
+	}
+	return nil
+}
+
+func (s *sessions) LoadForEach(load func([]byte, *persistenceTypes.SessionState) error) error {
+	var err error
+	s.entries.Range(func(key, value interface{}) bool {
+		sID := []byte(key.(string))
+		ses := value.(*persistenceTypes.SessionState)
+		err = load(sID, ses)
+		return err == nil
 	})
 
-	return nil
-}
-
-func (s *sessions) SubscriptionStore(id []byte, data []byte) error {
-	select {
-	case <-s.status.done:
-		return persistenceTypes.ErrNotOpen
-	default:
-	}
-
-	s.subscriptions.Store(id, data)
-
-	return nil
-}
-
-func (s *sessions) SubscriptionDelete(id []byte) error {
-	select {
-	case <-s.status.done:
-		return persistenceTypes.ErrNotOpen
-	default:
-	}
-
-	s.subscriptions.Delete(id)
-
-	return nil
-}
-
-func (s *sessions) SubscriptionsWipe() error {
-	select {
-	case <-s.status.done:
-		return persistenceTypes.ErrNotOpen
-	default:
-	}
-
-	s.subscriptions.Range(func(k, v interface{}) bool {
-		s.subscriptions.Delete(k)
-		return true
-	})
-
-	return nil
-}
-
-func (s *sessions) MessageStore(id []byte, data []byte) error {
-	select {
-	case <-s.status.done:
-		return persistenceTypes.ErrNotOpen
-	default:
-	}
-
-	messages := &persistenceTypes.SessionMessages{}
-	messages.OutMessages = append(messages.OutMessages, data)
-
-	if state, ok := s.messages.LoadOrStore(id, messages); ok {
-		msg := state.(*persistenceTypes.SessionMessages)
-		msg.OutMessages = append(msg.OutMessages, data)
-	}
-
-	return nil
-}
-
-func (s *sessions) MessagesLoad(id []byte) (*persistenceTypes.SessionMessages, error) {
-	select {
-	case <-s.status.done:
-		return nil, persistenceTypes.ErrNotOpen
-	default:
-	}
-
-	if st, ok := s.messages.Load(id); ok {
-		state := st.(*persistenceTypes.SessionMessages)
-		return state, nil
-	}
-
-	return nil, persistenceTypes.ErrNotFound
-}
-
-func (s *sessions) MessagesStore(id []byte, state *persistenceTypes.SessionMessages) error {
-	select {
-	case <-s.status.done:
-		return persistenceTypes.ErrNotOpen
-	default:
-	}
-
-	if st, ok := s.messages.LoadOrStore(id, state); ok {
-		state := st.(*persistenceTypes.SessionMessages)
-		state.OutMessages = append(state.OutMessages, state.OutMessages...)
-		state.UnAckMessages = append(state.UnAckMessages, state.UnAckMessages...)
-	}
-
-	return nil
-}
-
-func (s *sessions) MessagesWipe(id []byte) error {
-	select {
-	case <-s.status.done:
-		return persistenceTypes.ErrNotOpen
-	default:
-	}
-
-	s.messages.Delete(id)
-
-	return nil
+	return err
 }
 
 func (s *sessions) StateStore(id []byte, state *persistenceTypes.SessionState) error {
-	select {
-	case <-s.status.done:
-		return persistenceTypes.ErrNotOpen
-	default:
-	}
+	elem, _ := s.entries.LoadOrStore(string(id), &session{})
+	ses := elem.(*session)
+	ses.lock.Lock()
+	defer ses.lock.Unlock()
 
-	s.state.Store(id, state)
-
-	return nil
-}
-
-func (s *sessions) StatesIterate(load func([]byte, *persistenceTypes.SessionState) error) error {
-	select {
-	case <-s.status.done:
-		return persistenceTypes.ErrNotOpen
-	default:
-	}
-
-	s.state.Range(func(k, v interface{}) bool {
-		id := k.([]byte)
-		state := v.(*persistenceTypes.SessionState)
-		if err := load(id, state); err != nil {
-			return false
+	if ses.state != nil {
+		if len(ses.state.Subscriptions) > 0 && len(state.Subscriptions) == 0 {
+			state.Subscriptions = ses.state.Subscriptions
 		}
-
-		return true
-	})
-
-	return nil
-}
-
-func (s *sessions) StateWipe(id []byte) error {
-	select {
-	case <-s.status.done:
-		return persistenceTypes.ErrNotOpen
-	default:
 	}
 
-	s.state.Delete(id)
-
+	ses.state = state
 	return nil
 }
 
-func (s *sessions) StatesWipe() error {
-	select {
-	case <-s.status.done:
-		return persistenceTypes.ErrNotOpen
-	default:
+func (s *sessions) StateDelete(id []byte) error {
+	if elem, ok := s.entries.Load(string(id)); ok {
+		ses := elem.(*session)
+		ses.lock.Lock()
+		defer ses.lock.Unlock()
+		ses.state = nil
 	}
 
-	s.state.Range(func(k, v interface{}) bool {
-		s.state.Delete(k)
-		return true
-	})
-
 	return nil
 }
 
+// Delete
 func (s *sessions) Delete(id []byte) error {
-	select {
-	case <-s.status.done:
-		return persistenceTypes.ErrNotOpen
-	default:
-	}
-
-	s.messages.Delete(id)
-	s.state.Delete(id)
-	s.subscriptions.Delete(id)
-
+	s.entries.Delete(string(id))
 	return nil
 }

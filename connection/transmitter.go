@@ -149,7 +149,7 @@ func (p *transmitter) flushBuffers(buf net.Buffers) error {
 	return e
 }
 
-func (p *transmitter) packetSize(value interface{}) (int, bool) {
+func (p *transmitter) packetFitsSize(value interface{}) bool {
 	var sz int
 	var err error
 	if obj, ok := value.(sizeAble); !ok {
@@ -159,7 +159,7 @@ func (p *transmitter) packetSize(value interface{}) (int, bool) {
 	} else {
 		if sz, err = obj.Size(); err != nil {
 			p.log.Error("Couldn't calculate message size", zap.String("ClientID", p.id), zap.Error(err))
-			return 0, false
+			return false
 		}
 	}
 
@@ -169,10 +169,10 @@ func (p *transmitter) packetSize(value interface{}) (int, bool) {
 			zap.String("ClientID", p.id),
 			zap.Uint32("negotiated", p.maxPacketSize),
 			zap.Int("actual", sz))
-		return 0, false
+		return false
 	}
 
-	return sz, true
+	return true
 }
 
 func (p *transmitter) gAvailable() bool {
@@ -226,8 +226,8 @@ func (p *transmitter) qPopPacket() packet.Provider {
 
 			m.SetPacketID(id)
 			pkt = m
-		case *unacknowledgedPublish:
-			pkt = m.msg
+		case *unacknowledged:
+			pkt = m.packet
 
 		}
 		p.qMessages.Remove(elem)
@@ -272,28 +272,24 @@ func (p *transmitter) routine() {
 		case <-p.available:
 			// check if there any control packets except PUBLISH QoS 1/2
 			// and process them
-			var packets []packet.Provider
-			if pkt := p.gPopPacket(); pkt != nil {
-				packets = append(packets, pkt)
-			}
-
-			if pkt := p.qPopPacket(); pkt != nil {
-				packets = append(packets, pkt)
-			}
-
 			prevLen := len(sendBuffers)
-			for _, pkt := range packets {
-				switch pkt := pkt.(type) {
+			for _, pkt := range p.popPackets() {
+				switch _p := pkt.(type) {
 				case *packet.Publish:
-					p.setTopicAlias(pkt)
+					if _p.Expired(true) {
+						pkt = nil
+					} else {
+						p.setTopicAlias(_p)
+					}
 				}
 
-				if sz, ok := p.packetSize(pkt); ok {
-					buf := make([]byte, sz)
-					if _, err = pkt.Encode(buf); err != nil {
-						p.log.Error("Message encode", zap.Error(err))
-					} else {
-						sendBuffers = append(sendBuffers, buf)
+				if pkt != nil {
+					if ok := p.packetFitsSize(pkt); ok {
+						if buf, e := packet.Encode(pkt); e != nil {
+							p.log.Error("Message encode", zap.String("ClientID", p.id), zap.Error(err))
+						} else {
+							sendBuffers = append(sendBuffers, buf)
+						}
 					}
 				}
 			}
@@ -322,6 +318,19 @@ func (p *transmitter) routine() {
 			}
 		}
 	}
+}
+
+func (p *transmitter) popPackets() []packet.Provider {
+	var packets []packet.Provider
+	if pkt := p.gPopPacket(); pkt != nil {
+		packets = append(packets, pkt)
+	}
+
+	if pkt := p.qPopPacket(); pkt != nil {
+		packets = append(packets, pkt)
+	}
+
+	return packets
 }
 
 func (p *transmitter) setTopicAlias(pkt *packet.Publish) {

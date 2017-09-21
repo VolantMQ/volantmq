@@ -105,6 +105,12 @@
 
 [[projects]]
   branch = "master"
+  name = "github.com/troian/easygo"
+  packages = ["netpoll"]
+  revision = "8178659869d31744fe5f2ea18468008cc8b39dd1"
+
+[[projects]]
+  branch = "master"
   name = "github.com/troian/omap"
   packages = ["."]
   revision = "bf92c506ddb0f2cc90f2ed8aab7dad6dce349194"
@@ -154,6 +160,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "ff53b5f9fcbd74c1a6d7008101ed8b2f5145a7ffc9c6fc7e77ee659993d4a1f7"
+  inputs-digest = "15140bc082289d0121fc53373c8d4a094c0beed14c58e95b0dc0db6cf7e2cc52"
   solver-name = "gps-cdcl"
   solver-version = 1
