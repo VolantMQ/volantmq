@@ -106,7 +106,7 @@ func main() {
 
 	config := transport.NewConfigTCP(
 		&transport.Config{
-			Port:        1883,
+			Port:        "1883",
 			AuthManager: authMng,
 		})
 
@@ -116,7 +116,7 @@ func main() {
 
 	configWs := transport.NewConfigWS(
 		&transport.Config{
-			Port:        8080,
+			Port:        "8080",
 			AuthManager: authMng,
 		})
 

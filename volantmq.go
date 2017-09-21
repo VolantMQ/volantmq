@@ -3,7 +3,6 @@ package volantmq
 import (
 	"errors"
 	"regexp"
-	"strconv"
 	"sync"
 	"time"
 
@@ -146,7 +145,7 @@ type server struct {
 	lock        sync.Mutex
 	onClose     sync.Once
 	transports  struct {
-		list map[int]transport.Provider
+		list map[string]transport.Provider
 		wg   sync.WaitGroup
 	}
 	systree struct {
@@ -170,7 +169,7 @@ func NewServer(config *ServerConfig) (Server, error) {
 	s.log = configuration.GetLogger().Named("server")
 
 	s.quit = make(chan struct{})
-	s.transports.list = make(map[int]transport.Provider)
+	s.transports.list = make(map[string]transport.Provider)
 
 	var err error
 	if s.authMgr, err = auth.NewManager(s.Authenticators); err != nil {
@@ -308,13 +307,13 @@ func (s *server) ListenAndServe(config interface{}) error {
 	go func() {
 		defer s.transports.wg.Done()
 
-		s.TransportStatus(":"+strconv.Itoa(l.Port()), "started")
+		s.TransportStatus(":"+l.Port(), "started")
 
 		status := "stopped"
 		if e := l.Serve(); e != nil {
 			status = e.Error()
 		}
-		s.TransportStatus(":"+strconv.Itoa(l.Port()), status)
+		s.TransportStatus(":"+l.Port(), status)
 	}()
 
 	return nil

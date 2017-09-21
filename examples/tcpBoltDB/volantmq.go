@@ -113,7 +113,7 @@ func main() {
 
 	config := transport.NewConfigTCP(
 		&transport.Config{
-			Port:        1883,
+			Port:        "1883",
 			AuthManager: authMng,
 		})
 

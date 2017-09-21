@@ -19,7 +19,7 @@ type Config struct {
 	AuthManager *auth.Manager
 
 	// Port tcp port to listen on
-	Port int
+	Port string
 }
 
 // InternalConfig used by server implementation to configure internal specific needs
@@ -56,11 +56,11 @@ type Provider interface {
 	Protocol() string
 	Serve() error
 	Close() error
-	Port() int
+	Port() string
 }
 
 // Port return tcp port used by transport
-func (c *baseConfig) Port() int {
+func (c *baseConfig) Port() string {
 	return c.config.Port
 }
 
