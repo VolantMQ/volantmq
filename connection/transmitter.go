@@ -13,7 +13,6 @@ import (
 	"math/rand"
 
 	"github.com/VolantMQ/volantmq/packet"
-	"github.com/VolantMQ/volantmq/types"
 	"go.uber.org/zap"
 )
 
@@ -37,7 +36,6 @@ type transmitter struct {
 	gMessages         *list.List
 	qMessages         *list.List
 	wg                sync.WaitGroup
-	onStop            types.OnceWait
 	gLock             sync.Mutex
 	qLock             sync.Mutex
 	topicAlias        map[string]uint16
@@ -61,17 +59,15 @@ func newTransmitter(config *transmitterConfig) *transmitter {
 }
 
 func (p *transmitter) shutdown() {
-	p.onStop.Do(func() {
-		atomic.StoreUint32(&p.running, 0)
-		p.timer.Stop()
-		p.wg.Wait()
+	atomic.StoreUint32(&p.running, 2)
+	p.timer.Stop()
+	p.wg.Wait()
 
-		select {
-		case <-p.available:
-		default:
-			close(p.available)
-		}
-	})
+	select {
+	case <-p.available:
+	default:
+		close(p.available)
+	}
 }
 
 func (p *transmitter) gPush(pkt packet.Provider) {

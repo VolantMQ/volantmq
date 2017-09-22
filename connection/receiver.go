@@ -27,11 +27,10 @@ type receiverConfig struct {
 
 type receiver struct {
 	receiverConfig
-	wg sync.WaitGroup
-	//started       sync.WaitGroup
-	running       uint32
+	wg            sync.WaitGroup
 	recv          []byte
 	remainingRecv int
+	running       uint32
 }
 
 func newReceiver(config *receiverConfig) *receiver {
