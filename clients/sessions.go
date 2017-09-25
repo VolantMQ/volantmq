@@ -300,9 +300,7 @@ func (m *Manager) newConnectionPreConfig(config *StartConfig) *connection.PreCon
 		MaxTxPacketSize: types.DefaultMaxPacketSize,
 		SendQuota:       types.DefaultReceiveMax,
 		State:           m.persistence,
-		StartReceiving:  m.signalStartRead,
-		WaitForData:     m.signalWaitForRead,
-		StopReceiving:   m.signalReceiveStop,
+		EventPoll:       m.poll,
 		Metric:          m.Systree.Metric(),
 		RetainAvailable: m.AvailableRetain,
 		OfflineQoS0:     m.OfflineQoS0,
@@ -517,18 +515,6 @@ func (m *Manager) genClientID() string {
 	}
 
 	return base64.URLEncoding.EncodeToString(b)
-}
-
-func (m *Manager) signalStartRead(desc *netpoll.Desc, cb netpoll.CallbackFn) error {
-	return m.poll.Start(desc, cb)
-}
-
-func (m *Manager) signalWaitForRead(desc *netpoll.Desc) error {
-	return m.poll.Resume(desc)
-}
-
-func (m *Manager) signalReceiveStop(desc *netpoll.Desc) error {
-	return m.poll.Stop(desc)
 }
 
 func (m *Manager) onDisconnect(id string, reason packet.ReasonCode, retain bool) {

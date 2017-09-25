@@ -66,9 +66,7 @@ type WillConfig struct {
 // a bit of ugly
 // TODO(troian): try rid it off
 type PreConfig struct {
-	StartReceiving  func(*netpoll.Desc, netpoll.CallbackFn) error
-	StopReceiving   func(*netpoll.Desc) error
-	WaitForData     func(*netpoll.Desc) error
+	EventPoll       netpoll.EventPoll
 	Username        string
 	AuthMethod      string
 	AuthData        []byte
@@ -104,27 +102,40 @@ type Config struct {
 // Type connection
 type Type struct {
 	*Config
-	pubIn            *ackQueue
-	pubOut           *ackQueue
-	flowControl      *packetsFlowControl
-	tx               *transmitter
-	rx               *receiver
-	onDisconnect     onDisconnect
-	quit             chan struct{}
-	onStart          types.Once
-	onConnDisconnect types.Once
-	started          sync.WaitGroup
-	topicAlias       map[uint16]string
-	retained         struct {
+	preProcessPublish  func(*packet.Publish) error
+	postProcessPublish func(*packet.Publish) error
+	pubIn              ackQueue
+	pubOut             ackQueue
+	quit               chan struct{}
+	onStart            types.Once
+	onConnDisconnect   types.Once
+	started            sync.WaitGroup
+	txWg               sync.WaitGroup
+	rxWg               sync.WaitGroup
+	txTopicAlias       map[string]uint16
+	rxTopicAlias       map[uint16]string
+	txTimer            *time.Timer
+	log                *zap.Logger
+	keepAliveTimer     *time.Timer
+	txGMessages        list.List
+	txQMessages        list.List
+	txGLock            sync.Mutex
+	txQLock            sync.Mutex
+	keepAlive          time.Duration
+	txAvailable        chan int
+	rxRecv             []byte
+	retained           struct {
 		lock sync.Mutex
 		list []*packet.Publish
 	}
-
-	preProcessPublish  func(*packet.Publish) error
-	postProcessPublish func(*packet.Publish) error
-
-	log  *zap.Logger
-	will bool
+	flowInUse         sync.Map
+	flowCounter       uint64
+	rxRemaining       int
+	txRunning         uint32
+	rxRunning         uint32
+	topicAliasCurrMax uint16
+	txQuotaExceeded   bool
+	will              bool
 }
 
 type unacknowledged struct {
@@ -143,16 +154,19 @@ type sizeAble interface {
 func New(c *Config) (s *Type, err error) {
 	s = &Type{
 		Config:       c,
-		onDisconnect: c.OnDisconnect,
 		quit:         make(chan struct{}),
-		topicAlias:   make(map[uint16]string),
+		txAvailable:  make(chan int, 1),
+		txTopicAlias: make(map[string]uint16),
+		rxTopicAlias: make(map[uint16]string),
+		txTimer:      time.NewTimer(1 * time.Second),
 		will:         true,
 	}
 
+	s.txTimer.Stop()
+
 	s.started.Add(1)
-	s.pubIn = newAckQueue(s.onReleaseIn)
-	s.pubOut = newAckQueue(s.onReleaseOut)
-	s.flowControl = newFlowControl(s.quit, c.SendQuota)
+	s.pubIn.onRelease = s.onReleaseIn
+	s.pubOut.onRelease = s.onReleaseOut
 
 	s.log = configuration.GetLogger().Named("connection." + s.ID)
 
@@ -164,36 +178,11 @@ func New(c *Config) (s *Type, err error) {
 		s.postProcessPublish = func(*packet.Publish) error { return nil }
 	}
 
-	s.tx = newTransmitter(&transmitterConfig{
-		quit:          s.quit,
-		log:           s.log,
-		id:            s.ID,
-		pubIn:         s.pubIn,
-		pubOut:        s.pubOut,
-		flowControl:   s.flowControl,
-		conn:          s.Conn,
-		onDisconnect:  s.onConnectionClose,
-		maxPacketSize: c.MaxTxPacketSize,
-		topicAliasMax: c.MaxTxTopicAlias,
-	})
-
-	var keepAlive time.Duration
 	if c.KeepAlive > 0 {
-		keepAlive = time.Second * time.Duration(c.KeepAlive)
-		keepAlive = keepAlive + (keepAlive / 2)
+		s.keepAlive = time.Second * time.Duration(c.KeepAlive)
+		s.keepAlive = s.keepAlive + (s.keepAlive / 2)
+		s.keepAliveTimer = time.AfterFunc(s.keepAlive, s.keepAliveExpired)
 	}
-
-	s.rx = newReceiver(&receiverConfig{
-		keepAlive:     keepAlive,
-		quit:          s.quit,
-		conn:          s.Conn,
-		waitForRead:   s.onWaitForRead,
-		onDisconnect:  s.onConnectionClose,
-		onPacket:      s.processIncoming,
-		version:       s.Version,
-		maxPacketSize: c.MaxRxPacketSize,
-		will:          &s.will,
-	})
 
 	gList := list.New()
 	qList := list.New()
@@ -217,8 +206,8 @@ func New(c *Config) (s *Type, err error) {
 
 	s.Subscriber.OnlineRedirect(s.onSubscribedPublish)
 
-	s.tx.gLoadList(gList)
-	s.tx.qLoadList(qList)
+	s.gLoadList(gList)
+	s.qLoadList(qList)
 
 	return
 }
@@ -226,8 +215,8 @@ func New(c *Config) (s *Type, err error) {
 // Start run connection
 func (s *Type) Start() {
 	s.onStart.Do(func() {
-		s.tx.run()
-		s.StartReceiving(s.Desc, s.rx.run) // nolint: errcheck
+		s.txRun()
+		s.EventPoll.Start(s.Desc, s.rxRun) // nolint: errcheck
 		s.started.Done()
 	})
 }
@@ -290,7 +279,7 @@ func (s *Type) processIncoming(p packet.Provider) error {
 	}
 
 	if resp != nil {
-		s.tx.gPush(resp)
+		s.gPush(resp)
 	}
 
 	return err
@@ -313,13 +302,13 @@ func (s *Type) loadPersistence() error {
 			switch p := pkt.(type) {
 			case *packet.Publish:
 				id, _ := p.ID()
-				s.flowControl.reAcquire(id)
+				s.flowReAcquire(id)
 			case *packet.Ack:
 				id, _ := p.ID()
-				s.flowControl.reAcquire(id)
+				s.flowReAcquire(id)
 			}
 
-			s.tx.qLoad(&unacknowledged{packet: pkt})
+			s.qLoad(&unacknowledged{packet: pkt})
 		} else {
 			if p, ok := pkt.(*packet.Publish); ok {
 				if len(entry.ExpireAt) > 0 {
@@ -331,9 +320,9 @@ func (s *Type) loadPersistence() error {
 				}
 
 				if p.QoS() == packet.QoS0 {
-					s.tx.gLoad(pkt)
+					s.gLoad(pkt)
 				} else {
-					s.tx.qLoad(pkt)
+					s.qLoad(pkt)
 				}
 			}
 		}
@@ -381,15 +370,15 @@ func (s *Type) persist() {
 	}
 
 	var next *list.Element
-	for elem := s.tx.qMessages.Front(); elem != nil; elem = next {
+	for elem := s.txQMessages.Front(); elem != nil; elem = next {
 		next = elem.Next()
 
-		persistAppend(s.tx.qMessages.Remove(elem))
+		persistAppend(s.txQMessages.Remove(elem))
 	}
 
-	for elem := s.tx.gMessages.Front(); elem != nil; elem = next {
+	for elem := s.txGMessages.Front(); elem != nil; elem = next {
 		next = elem.Next()
-		switch tp := s.tx.gMessages.Remove(elem).(type) {
+		switch tp := s.txGMessages.Remove(elem).(type) {
 		case *packet.Publish:
 			persistAppend(tp)
 		}
@@ -416,9 +405,9 @@ func (s *Type) persist() {
 // will call publish() to send the message.
 func (s *Type) onSubscribedPublish(p *packet.Publish) {
 	if p.QoS() == packet.QoS0 {
-		s.tx.gPush(p)
+		s.gPush(p)
 	} else {
-		s.tx.qPush(p)
+		s.qPush(p)
 	}
 }
 
@@ -472,14 +461,10 @@ func (s *Type) onReleaseOut(o, n packet.Provider) {
 		fallthrough
 	case packet.PUBCOMP:
 		id, _ := n.ID()
-		if s.flowControl.release(id) {
-			s.tx.signalQuota()
+		if s.flowRelease(id) {
+			s.signalQuota()
 		}
 	}
-}
-
-func (s *Type) onWaitForRead() error {
-	return s.WaitForData(s.Desc)
 }
 
 func (s *Type) preProcessPublishV50(p *packet.Publish) error {
@@ -506,9 +491,9 @@ func (s *Type) postProcessPublishV50(p *packet.Publish) error {
 		if val, err := prop.AsShort(); err == nil {
 			if len(p.Topic()) != 0 {
 				// renew alias with new topic
-				s.topicAlias[val] = p.Topic()
+				s.rxTopicAlias[val] = p.Topic()
 			} else {
-				if topic, kk := s.topicAlias[val]; kk {
+				if topic, kk := s.rxTopicAlias[val]; kk {
 					// do not check for error as topic has been validated when arrived
 					p.SetTopic(topic) // nolint: errcheck
 				} else {

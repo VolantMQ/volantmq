@@ -1,11 +1,34 @@
 package connection
 
 import (
+	"sync/atomic"
+
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/packet"
 	"github.com/VolantMQ/volantmq/topics/types"
 	"go.uber.org/zap"
 )
+
+func (s *Type) txShutdown() {
+	atomic.StoreUint32(&s.txRunning, 2)
+	s.txTimer.Stop()
+	s.txWg.Wait()
+
+	select {
+	case <-s.txAvailable:
+	default:
+		close(s.txAvailable)
+	}
+}
+
+func (s *Type) rxShutdown() {
+	s.rxWg.Wait()
+
+	if s.keepAlive > 0 {
+		s.keepAliveTimer.Stop()
+		s.keepAliveTimer = nil
+	}
+}
 
 func (s *Type) onConnectionClose(will bool, err error) {
 	s.onConnDisconnect.Do(func() {
@@ -14,10 +37,11 @@ func (s *Type) onConnectionClose(will bool, err error) {
 
 		// shutdown quit channel tells all routines finita la commedia
 		close(s.quit)
-		s.StopReceiving(s.Desc) // nolint: errcheck
-		s.rx.shutdown()
+		if e := s.EventPoll.Stop(s.Desc); e != nil {
+			s.log.Error("remove receiver from netpoll", zap.String("ClientID", s.ID), zap.Error(e))
+		}
 		// clean up transmitter to allow send disconnect command to client if needed
-		s.tx.shutdown()
+		s.txShutdown()
 
 		// put subscriber in offline mode
 		s.Subscriber.Offline(s.KillOnDisconnect)
@@ -29,18 +53,22 @@ func (s *Type) onConnectionClose(will bool, err error) {
 			pkt, _ := p.(*packet.Disconnect)
 			pkt.SetReasonCode(reason)
 
-			sz, _ := pkt.Size()
-			buf := make([]byte, sz)
-			pkt.Encode(buf) // nolint: errcheck
-
-			if _, err = s.Conn.Write(buf); err != nil {
-				s.log.Info("Couldn't write disconnect message", zap.String("ClientID", s.ID), zap.Error(err))
+			var buf []byte
+			buf, err = packet.Encode(pkt)
+			if err != nil {
+				s.log.Error("encode disconnect packet", zap.String("ClientID", s.ID), zap.Error(err))
+			} else {
+				if _, err = s.Conn.Write(buf); err != nil {
+					s.log.Error("Couldn't write disconnect message", zap.String("ClientID", s.ID), zap.Error(err))
+				}
 			}
 		}
 
 		if err = s.Conn.Close(); err != nil {
 			s.log.Error("close connection", zap.String("ClientID", s.ID), zap.Error(err))
 		}
+
+		s.rxShutdown()
 
 		// [MQTT-3.3.1-7]
 		// Discard retained messages with QoS 0
@@ -67,7 +95,7 @@ func (s *Type) onConnectionClose(will bool, err error) {
 			s.persist()
 		}
 
-		s.onDisconnect(params)
+		s.OnDisconnect(params)
 	})
 }
 
@@ -152,9 +180,8 @@ func (s *Type) onAck(msg packet.Provider) packet.Provider {
 
 			if s.Version == packet.ProtocolV50 && mIn.Reason() >= packet.CodeUnspecifiedError {
 				// v5.9 [MQTT-4.9]
-				//atomic.AddInt32(&s.SendQuota, 1)
-				if s.flowControl.release(id) {
-					s.tx.signalQuota()
+				if s.flowRelease(id) {
+					s.signalQuota()
 				}
 
 				discard = true

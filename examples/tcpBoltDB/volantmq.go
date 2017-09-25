@@ -28,6 +28,9 @@ import (
 	"github.com/VolantMQ/volantmq/transport"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
+
+	_ "net/http/pprof"
+	_ "runtime/debug"
 )
 
 func main() {
@@ -46,6 +49,10 @@ func main() {
 	viper.SetConfigName("config")
 	viper.AddConfigPath("conf")
 	viper.SetConfigType("json")
+
+	go func() {
+		http.ListenAndServe("localhost:6061", nil) // nolint: errcheck
+	}()
 
 	logger.Info("Initializing configs")
 	if err = viper.ReadInConfig(); err != nil {

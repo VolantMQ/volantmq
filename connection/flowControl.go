@@ -2,7 +2,6 @@ package connection
 
 import (
 	"errors"
-	"sync"
 	"sync/atomic"
 
 	"github.com/VolantMQ/volantmq/packet"
@@ -13,26 +12,19 @@ var (
 	errQuotaExceeded = errors.New("quota exceeded")
 )
 
-type packetsFlowControl struct {
-	counter uint64
-	quit    chan struct{}
-	inUse   sync.Map
-	quota   int32
+//type packetsFlowControl struct {
+//	counter uint64
+//	quit    chan struct{}
+//	inUse   sync.Map
+//	quota   int32
+//}
+
+func (s *Type) flowReAcquire(id packet.IDType) {
+	atomic.AddInt32(&s.SendQuota, -1)
+	s.flowInUse.Store(id, true)
 }
 
-func newFlowControl(quit chan struct{}, quota int32) *packetsFlowControl {
-	return &packetsFlowControl{
-		quit:  quit,
-		quota: quota,
-	}
-}
-
-func (s *packetsFlowControl) reAcquire(id packet.IDType) {
-	atomic.AddInt32(&s.quota, -1)
-	s.inUse.Store(id, true)
-}
-
-func (s *packetsFlowControl) acquire() (packet.IDType, error) {
+func (s *Type) flowAcquire() (packet.IDType, error) {
 	select {
 	case <-s.quit:
 		return 0, errExit
@@ -40,16 +32,16 @@ func (s *packetsFlowControl) acquire() (packet.IDType, error) {
 	}
 
 	var err error
-	if atomic.AddInt32(&s.quota, -1) == 0 {
+	if atomic.AddInt32(&s.SendQuota, -1) == 0 {
 		err = errQuotaExceeded
 	}
 
 	var id packet.IDType
 
 	for count := 0; count <= 0xFFFF; count++ {
-		s.counter++
-		id = packet.IDType(s.counter)
-		if _, ok := s.inUse.LoadOrStore(id, true); !ok {
+		s.flowCounter++
+		id = packet.IDType(s.flowCounter)
+		if _, ok := s.flowInUse.LoadOrStore(id, true); !ok {
 			break
 		}
 	}
@@ -57,8 +49,8 @@ func (s *packetsFlowControl) acquire() (packet.IDType, error) {
 	return id, err
 }
 
-func (s *packetsFlowControl) release(id packet.IDType) bool {
-	s.inUse.Delete(id)
+func (s *Type) flowRelease(id packet.IDType) bool {
+	s.flowInUse.Delete(id)
 
-	return atomic.AddInt32(&s.quota, 1) == 1
+	return atomic.AddInt32(&s.SendQuota, 1) == 1
 }
