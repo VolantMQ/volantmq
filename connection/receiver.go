@@ -3,128 +3,82 @@ package connection
 import (
 	"bufio"
 	"encoding/binary"
-	"net"
-	"sync"
 	"sync/atomic"
-	"time"
+
+	"errors"
 
 	"github.com/VolantMQ/volantmq/packet"
 	"github.com/troian/easygo/netpoll"
 )
 
-type receiverConfig struct {
-	conn           net.Conn
-	keepAliveTimer *time.Timer // nolint: structcheck
-	will           *bool
-	quit           chan struct{}
-	keepAlive      time.Duration // nolint: structcheck
-	waitForRead    func() error
-	onPacket       func(packet.Provider) error
-	onDisconnect   func(bool, error) // nolint: megacheck
-	maxPacketSize  uint32
-	version        packet.ProtocolVersion
+func (s *Type) keepAliveExpired() {
+	s.onConnectionClose(true, nil)
 }
 
-type receiver struct {
-	receiverConfig
-	wg sync.WaitGroup
-	//started       sync.WaitGroup
-	running       uint32
-	recv          []byte
-	remainingRecv int
-}
-
-func newReceiver(config *receiverConfig) *receiver {
-	r := &receiver{
-		receiverConfig: *config,
-	}
-
-	if r.keepAlive > 0 {
-		r.keepAliveTimer = time.AfterFunc(r.keepAlive, r.keepAliveExpired)
-	}
-
-	return r
-}
-
-func (r *receiver) keepAliveExpired() {
-	r.onDisconnect(true, nil)
-}
-
-func (r *receiver) shutdown() {
-	r.wg.Wait()
-
-	if r.keepAlive > 0 {
-		r.keepAliveTimer.Stop()
-		r.keepAliveTimer = nil
-	}
-}
-
-func (r *receiver) run(event netpoll.Event) {
+func (s *Type) rxRun(event netpoll.Event) {
 	select {
-	case <-r.quit:
+	case <-s.quit:
 		return
 	default:
 	}
 
-	if atomic.CompareAndSwapUint32(&r.running, 0, 1) {
-		r.wg.Wait()
-		r.wg.Add(1)
+	if atomic.CompareAndSwapUint32(&s.rxRunning, 0, 1) {
+		s.rxWg.Wait()
+		s.rxWg.Add(1)
 
 		exit := false
 		if event&(netpoll.EventReadHup|netpoll.EventWriteHup|netpoll.EventHup|netpoll.EventErr) != 0 {
 			exit = true
 		}
 
-		go r.routine(exit)
+		go s.rxRoutine(exit)
 	}
 }
 
-func (r *receiver) routine(exit bool) {
+func (s *Type) rxRoutine(exit bool) {
 	var err error
 
-	signalDisconnect := func() {
-		r.wg.Done()
-		if _, ok := err.(packet.ReasonCode); !ok {
-			err = nil
+	defer func() {
+		s.rxWg.Done()
+
+		if err != nil {
+			if _, ok := err.(packet.ReasonCode); !ok {
+				err = nil
+			}
+			s.onConnectionClose(s.will, err)
 		}
-		r.onDisconnect(*r.will, err)
-	}
+	}()
 
 	if exit {
-		defer signalDisconnect()
+		err = errors.New("disconnect")
 		return
 	}
 
-	buf := bufio.NewReader(r.conn)
+	buf := bufio.NewReader(s.Conn)
 
-	for atomic.LoadUint32(&r.running) == 1 {
-		if r.keepAlive > 0 {
-			r.keepAliveTimer.Reset(r.keepAlive)
+	for atomic.LoadUint32(&s.rxRunning) == 1 {
+		if s.keepAlive > 0 {
+			s.keepAliveTimer.Reset(s.keepAlive)
 		}
 		var pkt packet.Provider
-		if pkt, err = r.readPacket(buf); err == nil {
-			err = r.onPacket(pkt)
+		if pkt, err = s.readPacket(buf); err == nil {
+			err = s.processIncoming(pkt)
 		}
 
 		if err != nil {
-			atomic.StoreUint32(&r.running, 0)
+			atomic.StoreUint32(&s.rxRunning, 0)
 		}
 	}
 
-	if _, ok := err.(packet.ReasonCode); ok {
-		defer signalDisconnect()
-	} else {
-		r.wg.Done()
-		if err = r.waitForRead(); err != nil {
-			defer signalDisconnect()
-		}
+	if _, ok := err.(packet.ReasonCode); !ok {
+		err = s.EventPoll.Resume(s.Desc)
 	}
 }
 
-func (r *receiver) readPacket(buf *bufio.Reader) (packet.Provider, error) {
+func (s *Type) readPacket(buf *bufio.Reader) (packet.Provider, error) {
 	var err error
 
-	if len(r.recv) == 0 {
+	if len(s.rxRecv) == 0 {
 		var header []byte
 		peekCount := 2
 		// Let's read enough bytes to get the fixed header/fh (msg type/flags, remaining length)
@@ -156,29 +110,29 @@ func (r *receiver) readPacket(buf *bufio.Reader) (packet.Provider, error) {
 		// Get the remaining length of the message
 		remLen, m := binary.Uvarint(header[1:])
 		// Total message length is remlen + 1 (msg type) + m (remlen bytes)
-		r.remainingRecv = int(remLen) + 1 + m
-		r.recv = make([]byte, r.remainingRecv)
+		s.rxRemaining = int(remLen) + 1 + m
+		s.rxRecv = make([]byte, s.rxRemaining)
 	}
 
-	if r.remainingRecv > int(r.maxPacketSize) {
+	if s.rxRemaining > int(s.MaxRxPacketSize) {
 		return nil, packet.CodePacketTooLarge
 	}
 
-	offset := len(r.recv) - r.remainingRecv
+	offset := len(s.rxRecv) - s.rxRemaining
 
-	for offset != r.remainingRecv {
+	for offset != s.rxRemaining {
 		var n int
-		if n, err = buf.Read(r.recv[offset:]); err != nil {
+		if n, err = buf.Read(s.rxRecv[offset:]); err != nil {
 			return nil, err
 		}
 		offset += n
 	}
 
 	var pkt packet.Provider
-	pkt, _, err = packet.Decode(r.version, r.recv)
+	pkt, _, err = packet.Decode(s.Version, s.rxRecv)
 
-	r.recv = []byte{}
-	r.remainingRecv = 0
+	s.rxRecv = []byte{}
+	s.rxRemaining = 0
 
 	return pkt, err
 }
