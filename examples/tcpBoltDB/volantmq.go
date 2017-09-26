@@ -21,10 +21,10 @@ import (
 	"runtime"
 	"syscall"
 
+	"github.com/VolantMQ/persistence-boltdb"
 	"github.com/VolantMQ/volantmq"
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
-	"github.com/VolantMQ/volantmq/persistence/boltdb"
 	"github.com/VolantMQ/volantmq/transport"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
