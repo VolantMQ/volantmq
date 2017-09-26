@@ -12,11 +12,11 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/VolantMQ/persistence"
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/connection"
 	"github.com/VolantMQ/volantmq/packet"
-	"github.com/VolantMQ/volantmq/persistence"
 	"github.com/VolantMQ/volantmq/routines"
 	"github.com/VolantMQ/volantmq/subscriber"
 	"github.com/VolantMQ/volantmq/systree"
