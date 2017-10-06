@@ -41,3 +41,5 @@ persistence/examples/bolt/test.db
 examples/tcp/persist.db
 coverage.txt
 vendor
+
+persist.db

@@ -87,7 +87,7 @@ var packetTypeCodeMap = map[Type]map[ReasonCode]struct {
 		CodeBanned:                             {iss: CodeIssuerServer, desc: "This Client has been banned by administrative action. Contact the server administrator"},
 		CodeBadAuthMethod:                      {iss: CodeIssuerServer, desc: "The authentication method is not supported or does not match the authentication method currently in use"},
 		CodeInvalidTopicName:                   {iss: CodeIssuerServer, desc: "The Will Topic Name is not malformed, but is not accepted by this Server"},
-		CodePacketTooLarge:                     {iss: CodeIssuerServer, desc: "The Connect Packet exceeded the maximum permissible size"},
+		CodePacketTooLarge:                     {iss: CodeIssuerServer, desc: "The Accept Packet exceeded the maximum permissible size"},
 		CodeQuotaExceeded:                      {iss: CodeIssuerServer, desc: "An implementation or administrative imposed limit has been exceeded"},
 		CodeRetainNotSupported:                 {iss: CodeIssuerServer, desc: "The Server does not support retained messages, and Will Retain was set to 1"},
 		CodeNotSupportedQoS:                    {iss: CodeIssuerServer, desc: "The Server does not support the QoS set in Will QoS"},
@@ -250,7 +250,7 @@ func (c ReasonCode) PacketTypeDir(p Type) (CodeIssuer, error) {
 		return CodeIssuerInvalid, ErrInvalidMessageType
 	}
 
-	if issuer, ok := pT[c]; ok {
+	if issuer, kk := pT[c]; kk {
 		return issuer.iss, ErrInvalidReturnCode
 	}
 
@@ -272,10 +272,7 @@ func (c ReasonCode) IsValid() bool {
 
 // IsValidV3 check either reason code is valid for MQTT V3.1/V3.1.1 or not
 func (c ReasonCode) IsValidV3() bool {
-	if c >= CodeSuccess && c <= CodeRefusedNotAuthorized {
-		return true
-	}
-	return false
+	return c <= CodeRefusedNotAuthorized
 }
 
 // IsValidV5 check either reason code is valid for MQTT V5.0 or not

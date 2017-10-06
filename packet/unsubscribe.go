@@ -31,6 +31,13 @@ func newUnSubscribe() *UnSubscribe {
 	return &UnSubscribe{}
 }
 
+// NewUnSubscribe creates a new UNSUBSCRIBE packet
+func NewUnSubscribe(v ProtocolVersion) *UnSubscribe {
+	p := newUnSubscribe()
+	p.init(UNSUBSCRIBE, v, p.size, p.encodeMessage, p.decodeMessage)
+	return p
+}
+
 // Topics returns a list of topics sent by the Client.
 func (msg *UnSubscribe) Topics() []string {
 	return msg.topics

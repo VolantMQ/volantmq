@@ -9,16 +9,16 @@ import (
 	"github.com/VolantMQ/volantmq/types"
 )
 
-type subscribedEntry struct {
+type subscriber struct {
 	s topicsTypes.Subscriber
 	p *topicsTypes.SubscriptionParams
 }
 
-type subscribedEntries map[uintptr]*subscribedEntry
+type subscribers map[uintptr]*subscriber
 
-func (s *subscribedEntry) acquire() *publishEntry {
+func (s *subscriber) acquire() *publish {
 	s.s.Acquire()
-	pe := &publishEntry{
+	pe := &publish{
 		s:   s.s,
 		qos: s.p.Granted,
 		ops: s.p.Ops,
@@ -31,26 +31,26 @@ func (s *subscribedEntry) acquire() *publishEntry {
 	return pe
 }
 
-type publishEntry struct {
+type publish struct {
 	s   topicsTypes.Subscriber
 	ops packet.SubscriptionOptions
 	qos packet.QosType
 	ids []uint32
 }
 
-type publishEntries map[uintptr][]*publishEntry
+type publishes map[uintptr][]*publish
 
 type node struct {
 	retained       interface{}
-	subs           subscribedEntries
+	subs           subscribers
 	parent         *node
 	children       map[string]*node
-	getSubscribers func(uintptr, *publishEntries)
+	getSubscribers func(uintptr, *publishes)
 }
 
 func newNode(overlap bool, parent *node) *node {
 	n := &node{
-		subs:     make(subscribedEntries),
+		subs:     make(subscribers),
 		children: make(map[string]*node),
 		parent:   parent,
 	}
@@ -106,7 +106,7 @@ func (mT *provider) subscriptionInsert(filter string, sub topicsTypes.Subscriber
 	// Otherwise create new entry
 	exists := false
 	if s, ok := root.subs[sub.Hash()]; !ok {
-		root.subs[sub.Hash()] = &subscribedEntry{
+		root.subs[sub.Hash()] = &subscriber{
 			s: sub,
 			p: p,
 		}
@@ -133,7 +133,7 @@ func (mT *provider) subscriptionRemove(topic string, sub topicsTypes.Subscriber)
 	// otherwise try remove subscriber or set error if not exists
 	if sub == nil {
 		// If subscriber == nil, then it's signal to remove ALL subscribers
-		root.subs = make(subscribedEntries)
+		root.subs = make(subscribers)
 	} else {
 		id := sub.Hash()
 		if _, ok := root.subs[id]; ok {
@@ -162,7 +162,7 @@ func (mT *provider) subscriptionRemove(topic string, sub topicsTypes.Subscriber)
 	return err
 }
 
-func subscriptionRecurseSearch(root *node, levels []string, publishID uintptr, p *publishEntries) {
+func subscriptionRecurseSearch(root *node, levels []string, publishID uintptr, p *publishes) {
 	if len(levels) == 0 {
 		// leaf level of the topic
 		// get all subscribers and return
@@ -185,7 +185,7 @@ func subscriptionRecurseSearch(root *node, levels []string, publishID uintptr, p
 	}
 }
 
-func (mT *provider) subscriptionSearch(topic string, publishID uintptr, p *publishEntries) {
+func (mT *provider) subscriptionSearch(topic string, publishID uintptr, p *publishes) {
 	root := mT.root
 	levels := strings.Split(topic, "/")
 	level := levels[0]
@@ -288,7 +288,7 @@ func (sn *node) getRetained(retained *[]*packet.Publish) {
 		}
 
 		// if publish has expiration set check if there time left to live
-		if !p.Expired(false) {
+		if _, _, expired := p.Expired(); !expired {
 			*retained = append(*retained, p)
 		} else {
 			// publish has expired, thus nobody should get it
@@ -305,7 +305,7 @@ func (sn *node) allRetained(retained *[]*packet.Publish) {
 	}
 }
 
-func (sn *node) overlappingSubscribers(publishID uintptr, p *publishEntries) {
+func (sn *node) overlappingSubscribers(publishID uintptr, p *publishes) {
 	for id, sub := range sn.subs {
 		if s, ok := (*p)[id]; ok {
 			if sub.p.ID > 0 {
@@ -324,14 +324,14 @@ func (sn *node) overlappingSubscribers(publishID uintptr, p *publishEntries) {
 	}
 }
 
-func (sn *node) nonOverlappingSubscribers(publishID uintptr, p *publishEntries) {
+func (sn *node) nonOverlappingSubscribers(publishID uintptr, p *publishes) {
 	for id, sub := range sn.subs {
 		if !sub.p.Ops.NL() || id != publishID {
 			pe := sub.acquire()
 			if _, ok := (*p)[id]; ok {
 				(*p)[id] = append((*p)[id], pe)
 			} else {
-				(*p)[id] = []*publishEntry{pe}
+				(*p)[id] = []*publish{pe}
 			}
 		}
 	}

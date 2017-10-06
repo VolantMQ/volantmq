@@ -21,75 +21,75 @@ import (
 )
 
 func TestMessageHeaderFields(t *testing.T) {
-	header := &header{}
+	hdr := &header{}
 
-	header.setRemainingLength(33) // nolint: errcheck
+	hdr.setRemainingLength(33) // nolint: errcheck
 
-	require.Equal(t, int32(33), header.RemainingLength())
+	require.Equal(t, int32(33), hdr.RemainingLength())
 
-	err := header.setRemainingLength(268435456)
-
-	require.Error(t, err)
-
-	err = header.setRemainingLength(-1)
+	err := hdr.setRemainingLength(268435456)
 
 	require.Error(t, err)
 
-	header.setType(PUBREL)
+	err = hdr.setRemainingLength(-1)
 
-	require.Equal(t, PUBREL, header.Type())
-	require.Equal(t, "PUBREL", header.Name())
-	require.Equal(t, 2, int(header.Flags()))
-	require.Equal(t, PUBREL.Desc(), header.Desc())
+	require.Error(t, err)
+
+	hdr.setType(PUBREL)
+
+	require.Equal(t, PUBREL, hdr.Type())
+	require.Equal(t, "PUBREL", hdr.Name())
+	require.Equal(t, 2, int(hdr.Flags()))
+	require.Equal(t, PUBREL.Desc(), hdr.Desc())
 }
 
 // Not enough bytes
 func TestMessageHeaderDecode(t *testing.T) {
 	buf := []byte{0x6f, 193, 2}
-	header := &header{}
+	hdr := &header{}
 
-	_, err := header.decode(buf)
+	_, err := hdr.decode(buf)
 	require.Error(t, err)
 }
 
 // Remaining length too big
 func TestMessageHeaderDecode2(t *testing.T) {
 	buf := []byte{0x62, 0xff, 0xff, 0xff, 0xff}
-	header := &header{}
+	hdr := &header{}
 
-	_, err := header.decode(buf)
+	_, err := hdr.decode(buf)
 	require.EqualError(t, err, ErrInsufficientDataSize.Error())
 }
 
 func TestMessageHeaderDecode3(t *testing.T) {
 	buf := []byte{0x62, 0xff}
-	header := &header{}
+	hdr := &header{}
 
-	_, err := header.decode(buf)
+	_, err := hdr.decode(buf)
 	require.Error(t, err)
 }
 
 func TestMessageHeaderDecode4(t *testing.T) {
 	buf := []byte{0x62, 0xff, 0xff, 0xff, 0x7f}
-	header := &header{
+	hdr := &header{
 		mType:  PUBREL,
 		mFlags: 2,
 	}
 
-	_, err := header.decode(buf)
+	_, err := hdr.decode(buf)
 
 	require.EqualError(t, ErrInsufficientDataSize, err.Error())
-	require.Equal(t, maxRemainingLength, header.RemainingLength())
+	require.Equal(t, maxRemainingLength, hdr.RemainingLength())
 }
 
 func TestMessageHeaderDecode5(t *testing.T) {
 	buf := []byte{0x62, 0xff, 0x7f}
-	header := &header{
+	hdr := &header{
 		mType:  PUBREL,
 		mFlags: 2,
 	}
 
-	_, err := header.decode(buf)
+	_, err := hdr.decode(buf)
 	require.Error(t, err)
 }
 
@@ -97,29 +97,29 @@ func TestMessageHeaderDecode6(t *testing.T) {
 	buf := []byte{byte(PUBLISH<<offsetPacketType | 3<<1), 0xff, 0x7f}
 
 	// PUBLISH with invalid QoS value
-	header := &header{
+	hdr := &header{
 		mType:  Type(buf[0] >> offsetPacketType),
 		mFlags: buf[0] | maskMessageFlags,
 	}
 
-	_, err := header.decode(buf)
+	_, err := hdr.decode(buf)
 	require.EqualError(t, err, CodeRefusedServerUnavailable.Error())
 }
 
 func TestMessageHeaderEncode1(t *testing.T) {
-	header := &header{}
+	hdr := &header{}
 	//headerBytes := []byte{0x62, 193, 2}
 
-	//header.setVT(ProtocolV311, PUBREL)
+	//hdr.setVT(ProtocolV311, PUBREL)
 
 	//require.NoError(t, err)
 
-	err := header.setRemainingLength(321)
+	err := hdr.setRemainingLength(321)
 
 	require.NoError(t, err)
 
 	//buf := make([]byte, 3)
-	//n, err := header.encode(buf)
+	//n, err := hdr.encode(buf)
 
 	//require.NoError(t, err)
 	//require.Equal(t, 3, n)
@@ -127,33 +127,33 @@ func TestMessageHeaderEncode1(t *testing.T) {
 }
 
 func TestMessageHeaderEncode2(t *testing.T) {
-	header := &header{}
+	hdr := &header{}
 
 	//header.setVT(ProtocolV311, PUBREL)
 	//require.NoError(t, err)
 
-	header.remLen = 268435456
+	hdr.remLen = 268435456
 
 	//buf := make([]byte, 5)
-	//_, err = header.encode(buf)
+	//_, err = hdr.encode(buf)
 	//
 	//require.Error(t, err)
 }
 
 func TestMessageHeaderEncode3(t *testing.T) {
-	header := &header{}
+	hdr := &header{}
 	//headerBytes := []byte{0x62, 0xff, 0xff, 0xff, 0x7f}
 
-	//header.setVT(ProtocolV311, PUBREL)
+	//hdr.setVT(ProtocolV311, PUBREL)
 
 	//require.NoError(t, err)
 
-	err := header.setRemainingLength(maxRemainingLength)
+	err := hdr.setRemainingLength(maxRemainingLength)
 
 	require.NoError(t, err)
 
 	//buf := make([]byte, 5)
-	//n, err := header.encode(buf)
+	//n, err := hdr.encode(buf)
 	//
 	//require.NoError(t, err)
 	//require.Equal(t, 5, n)

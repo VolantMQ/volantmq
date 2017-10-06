@@ -25,7 +25,7 @@ const (
 	ErrPropertyWrongType
 )
 
-// Error
+// Error description
 func (e PropertyError) Error() string {
 	switch e {
 	case ErrPropertyNotFound:
@@ -321,6 +321,11 @@ func (p PropertyID) IsValidPacketType(t Type) bool {
 	}
 
 	return true
+}
+
+func (p *property) reset() {
+	p.properties = make(map[PropertyID]interface{})
+	p.len = 0
 }
 
 // Len of the encoded property field. Does not include size property len prefix

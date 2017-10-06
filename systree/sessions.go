@@ -38,7 +38,7 @@ func newSessions(topicPrefix string, retained *[]types.RetainObject) sessions {
 	return c
 }
 
-// Connected add to statistic new client
+// Created add to statistic new client
 func (t *sessions) Created(id string, status *SessionCreatedStatus) {
 	newVal := atomic.AddUint64(&t.curr.val, 1)
 	if atomic.LoadUint64(&t.max.val) < newVal {
@@ -65,7 +65,7 @@ func (t *sessions) Created(id string, status *SessionCreatedStatus) {
 	}
 }
 
-// Disconnected remove client from statistic
+// Removed remove client from statistic
 func (t *sessions) Removed(id string, status *SessionDeletedStatus) {
 	atomic.AddUint64(&t.curr.val, ^uint64(0))
 	if t.topicsManager != nil {

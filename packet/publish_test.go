@@ -42,20 +42,26 @@ func TestPublishDecode1(t *testing.T) {
 }
 
 func TestPublishExpire(t *testing.T) {
-	p, err := New(ProtocolV50, PUBLISH)
-	require.NoError(t, err)
-	pkt, ok := p.(*Publish)
-	require.True(t, ok)
+	pkt := NewPublish(ProtocolV50)
+	require.NotNil(t, pkt)
 
-	require.False(t, pkt.Expired(false))
+	_, _, expired := pkt.Expired()
 
-	pkt.SetExpiry(time.Now().Add(2 * time.Second))
+	require.False(t, expired)
+	pkt.SetExpireAt(time.Now().Add(2 * time.Second))
 	time.Sleep(3 * time.Second)
 
-	require.True(t, pkt.Expired(false))
+	_, _, expired = pkt.Expired()
+	require.True(t, expired)
 
-	pkt.SetExpiry(time.Now().Add(3 * time.Second))
-	require.False(t, pkt.Expired(true))
+	pkt.SetExpireAt(time.Now().Add(3 * time.Second))
+
+	var expLeft uint32
+	_, expLeft, expired = pkt.Expired()
+	require.False(t, expired)
+
+	err := pkt.PropertySet(PropertyPublicationExpiry, expLeft)
+	require.NoError(t, err)
 
 	prop := pkt.PropertyGet(PropertyPublicationExpiry)
 	require.NotNil(t, prop)

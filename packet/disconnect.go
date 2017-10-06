@@ -28,6 +28,13 @@ func newDisconnect() *Disconnect {
 	return &Disconnect{}
 }
 
+// NewDisconnect creates a new DISCONNECT packet
+func NewDisconnect(v ProtocolVersion) *Disconnect {
+	p := newDisconnect()
+	p.init(DISCONNECT, v, p.size, p.encodeMessage, p.decodeMessage)
+	return p
+}
+
 // ReasonCode get disconnect reason
 func (msg *Disconnect) ReasonCode() ReasonCode {
 	return msg.reasonCode
@@ -85,10 +92,13 @@ func (msg *Disconnect) encodeMessage(to []byte) (int, error) {
 	var err error
 	if msg.version == ProtocolV50 {
 		pLen := msg.properties.FullLen()
+		// The Reason Code and Property Length can be omitted if the Reason Code is 0x00 (Normal disconnection)
+		// and there are no Properties. In this case the DISCONNECT has a Remaining Length of 0
 		if pLen > 1 || msg.reasonCode != CodeSuccess {
 			to[offset] = byte(msg.reasonCode)
 			offset++
 
+			// [MQTT-3.14.2.2.1]
 			if pLen > 1 {
 				var n int
 				n, err = msg.properties.encode(to[offset:])

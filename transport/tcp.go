@@ -87,10 +87,6 @@ func (l *tcp) Close() error {
 	return err
 }
 
-//func (l *tcp) Protocol() string {
-//	return "tcp"
-//}
-
 func (l *tcp) Serve() error {
 	var tempDelay time.Duration // how long to sleep on accept failure
 

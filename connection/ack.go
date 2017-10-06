@@ -22,7 +22,7 @@ func (a *ackQueue) release(pkt packet.Provider) {
 	id, _ := pkt.ID()
 
 	if value, ok := a.messages.Load(id); ok {
-		if orig, ok := value.(packet.Provider); ok && a.onRelease != nil {
+		if orig, k := value.(packet.Provider); k && a.onRelease != nil {
 			a.onRelease(orig, pkt)
 		}
 		a.messages.Delete(id)

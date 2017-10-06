@@ -1,6 +1,8 @@
 package systree
 
-import "github.com/VolantMQ/volantmq/types"
+import (
+	"github.com/VolantMQ/volantmq/types"
+)
 
 type impl struct {
 	server        server
@@ -13,8 +15,8 @@ type impl struct {
 
 // NewTree allocate systree provider
 func NewTree(base string) (Provider, []types.RetainObject, []DynamicValue, error) {
-	retains := []types.RetainObject{}
-	staticRetains := []types.RetainObject{}
+	var retains []types.RetainObject
+	var staticRetains []types.RetainObject
 
 	tr := &impl{
 		newServer(base, &retains, &staticRetains),
@@ -25,7 +27,7 @@ func NewTree(base string) (Provider, []types.RetainObject, []DynamicValue, error
 		newSessions(base, &retains),
 	}
 
-	dynUpdates := []DynamicValue{}
+	var dynUpdates []DynamicValue
 	for _, d := range retains {
 		v := d.(DynamicValue)
 		dynUpdates = append(dynUpdates, v)
@@ -35,6 +37,7 @@ func NewTree(base string) (Provider, []types.RetainObject, []DynamicValue, error
 	return tr, retains, dynUpdates, nil
 }
 
+// SetCallbacks
 func (t *impl) SetCallbacks(cb types.TopicMessenger) {
 	t.clients.topicsManager = cb
 	t.sessions.topicsManager = cb
@@ -45,7 +48,7 @@ func (t *impl) Sessions() Sessions {
 	return &t.sessions
 }
 
-// Session get session stat provider
+// Clients get clients stat provider
 func (t *impl) Clients() Clients {
 	return &t.clients
 }

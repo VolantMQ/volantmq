@@ -12,19 +12,12 @@ var (
 	errQuotaExceeded = errors.New("quota exceeded")
 )
 
-//type packetsFlowControl struct {
-//	counter uint64
-//	quit    chan struct{}
-//	inUse   sync.Map
-//	quota   int32
-//}
-
-func (s *Type) flowReAcquire(id packet.IDType) {
-	atomic.AddInt32(&s.SendQuota, -1)
+func (s *impl) flowReAcquire(id packet.IDType) {
+	atomic.AddInt32(&s.txQuota, -1)
 	s.flowInUse.Store(id, true)
 }
 
-func (s *Type) flowAcquire() (packet.IDType, error) {
+func (s *impl) flowAcquire() (packet.IDType, error) {
 	select {
 	case <-s.quit:
 		return 0, errExit
@@ -32,7 +25,7 @@ func (s *Type) flowAcquire() (packet.IDType, error) {
 	}
 
 	var err error
-	if atomic.AddInt32(&s.SendQuota, -1) == 0 {
+	if atomic.AddInt32(&s.txQuota, -1) == 0 {
 		err = errQuotaExceeded
 	}
 
@@ -49,8 +42,8 @@ func (s *Type) flowAcquire() (packet.IDType, error) {
 	return id, err
 }
 
-func (s *Type) flowRelease(id packet.IDType) bool {
+func (s *impl) flowRelease(id packet.IDType) bool {
 	s.flowInUse.Delete(id)
 
-	return atomic.AddInt32(&s.SendQuota, 1) == 1
+	return atomic.AddInt32(&s.txQuota, 1) == 1
 }

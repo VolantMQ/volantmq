@@ -1,9 +1,8 @@
 package types
 
 import (
-	"sync/atomic"
-
 	"sync"
+	"sync/atomic"
 
 	"go.uber.org/zap"
 )
@@ -17,7 +16,7 @@ type LogInterface struct {
 // Default configs
 const (
 	DefaultKeepAlive        = 60 // DefaultKeepAlive default keep
-	DefaultConnectTimeout   = 2  // DefaultConnectTimeout connect timeout
+	DefaultConnectTimeout   = 5  // DefaultConnectTimeout connect timeout
 	DefaultMaxPacketSize    = 268435455
 	DefaultReceiveMax       = 65535
 	DefaultAckTimeout       = 20 // DefaultAckTimeout ack timeout

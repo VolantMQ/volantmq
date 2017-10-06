@@ -29,6 +29,13 @@ func newPingReq() *PingReq {
 	return &PingReq{}
 }
 
+// NewPingReq creates a new PINGREQ packet
+func NewPingReq(v ProtocolVersion) *PingReq {
+	p := newPingReq()
+	p.init(PINGREQ, v, p.size, p.encodeMessage, p.decodeMessage)
+	return p
+}
+
 // decode message
 func (msg *PingReq) decodeMessage(src []byte) (int, error) {
 	return 0, nil

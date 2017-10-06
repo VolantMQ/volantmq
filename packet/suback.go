@@ -31,6 +31,13 @@ func newSubAck() *SubAck {
 	return &SubAck{}
 }
 
+// NewSubAck creates a new SUBACK packet
+func NewSubAck(v ProtocolVersion) *SubAck {
+	p := newSubAck()
+	p.init(SUBACK, v, p.size, p.encodeMessage, p.decodeMessage)
+	return p
+}
+
 // ReturnCodes returns the list of QoS returns from the subscriptions sent in the SUBSCRIBE message.
 func (msg *SubAck) ReturnCodes() []ReasonCode {
 	return msg.returnCodes

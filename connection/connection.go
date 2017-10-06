@@ -16,20 +16,33 @@ package connection
 
 import (
 	"container/list"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
+	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/VolantMQ/persistence"
-	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/packet"
-	"github.com/VolantMQ/volantmq/subscriber"
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/types"
 	"github.com/troian/easygo/netpoll"
 	"go.uber.org/zap"
+)
+
+type state int
+
+const (
+	stateConnecting state = iota
+	stateAuth
+	stateConnected
+	stateReAuth
+	stateDisconnected
+	stateConnectFailed
 )
 
 // nolint: golint
@@ -38,15 +51,66 @@ var (
 	ErrPersistence = errors.New("session: error during persistence restore")
 )
 
-// DisconnectParams session state when stopped
-type DisconnectParams struct {
-	ExpireAt *uint32
-	Desc     *netpoll.Desc
-	Reason   packet.ReasonCode
-	Will     bool
+var expectedPacketType = map[state]map[packet.Type]bool{
+	stateConnecting: {packet.CONNECT: true},
+	stateAuth: {
+		packet.AUTH:       true,
+		packet.DISCONNECT: true,
+	},
+	stateConnected: {
+		packet.PUBLISH:     true,
+		packet.PUBACK:      true,
+		packet.PUBREC:      true,
+		packet.PUBREL:      true,
+		packet.PUBCOMP:     true,
+		packet.SUBSCRIBE:   true,
+		packet.SUBACK:      true,
+		packet.UNSUBSCRIBE: true,
+		packet.UNSUBACK:    true,
+		packet.PINGREQ:     true,
+		packet.AUTH:        true,
+		packet.DISCONNECT:  true,
+	},
+	stateReAuth: {
+		packet.PUBLISH:     true,
+		packet.PUBACK:      true,
+		packet.PUBREC:      true,
+		packet.PUBREL:      true,
+		packet.PUBCOMP:     true,
+		packet.SUBSCRIBE:   true,
+		packet.SUBACK:      true,
+		packet.UNSUBSCRIBE: true,
+		packet.UNSUBACK:    true,
+		packet.PINGREQ:     true,
+		packet.AUTH:        true,
+		packet.DISCONNECT:  true,
+	},
 }
 
-type onDisconnect func(*DisconnectParams)
+func (s state) desc() string {
+	switch s {
+	case stateConnecting:
+		return "CONNECTING"
+	case stateAuth:
+		return "AUTH"
+	case stateConnected:
+		return "CONNECTED"
+	case stateReAuth:
+		return "RE-AUTH"
+	case stateDisconnected:
+		return "DISCONNECTED"
+	default:
+		return "CONNECT_FAILED"
+	}
+}
+
+// DisconnectParams session state when stopped
+type DisconnectParams struct {
+	Reason  packet.ReasonCode
+	Packets []persistence.PersistedPacket
+}
+
+//type onDisconnect func(*DisconnectParams)
 
 // Callbacks provided by sessions manager to signal session state
 type Callbacks struct {
@@ -62,80 +126,105 @@ type WillConfig struct {
 	QoS     packet.QosType
 }
 
-// PreConfig used by session manager to when configuring session
-// a bit of ugly
-// TODO(troian): try rid it off
-type PreConfig struct {
-	EventPoll       netpoll.EventPoll
-	Username        string
-	AuthMethod      string
-	AuthData        []byte
-	State           persistence.Packets
-	Metric          systree.Metric
-	Conn            net.Conn
-	Auth            auth.SessionPermissions
-	Desc            *netpoll.Desc
-	MaxRxPacketSize uint32
+type AuthParams struct {
+	AuthMethod string
+	AuthData   []byte
+	Reason     packet.ReasonCode
+}
+
+type ConnectParams struct {
+	AuthParams
+	ID              string
+	Error           error
+	ExpireIn        *uint32
+	Will            *packet.Publish
+	Username        []byte
+	Password        []byte
+	WillDelay       uint32
 	MaxTxPacketSize uint32
-	SendQuota       int32
-	MaxTxTopicAlias uint16
-	MaxRxTopicAlias uint16
+	SendQuota       uint16
 	KeepAlive       uint16
+	IDGen           bool
+	CleanStart      bool
+	Durable         bool
 	Version         packet.ProtocolVersion
-	RetainAvailable bool
-	PreserveOrder   bool
-	OfflineQoS0     bool
 }
 
-// Config is system wide configuration parameters for every session
-type Config struct {
-	*PreConfig
-	ID               string
-	Subscriber       subscriber.ConnectionProvider
-	Messenger        types.TopicMessenger
-	OnDisconnect     onDisconnect
-	ExpireIn         *uint32
-	WillDelay        uint32
-	KillOnDisconnect bool
+type SessionCallbacks interface {
+	SignalPublish(*packet.Publish) error
+	SignalSubscribe(*packet.Subscribe) (packet.Provider, error)
+	SignalUnSubscribe(*packet.UnSubscribe) (packet.Provider, error)
+	SignalDisconnect(*packet.Disconnect) (packet.Provider, error)
+	SignalOffline()
+	SignalConnectionClose(DisconnectParams)
 }
 
-// Type connection
-type Type struct {
-	*Config
-	preProcessPublish  func(*packet.Publish) error
-	postProcessPublish func(*packet.Publish) error
-	pubIn              ackQueue
-	pubOut             ackQueue
-	quit               chan struct{}
-	onStart            types.Once
-	onConnDisconnect   types.Once
-	started            sync.WaitGroup
-	txWg               sync.WaitGroup
-	rxWg               sync.WaitGroup
-	txTopicAlias       map[string]uint16
-	rxTopicAlias       map[uint16]string
-	txTimer            *time.Timer
-	log                *zap.Logger
-	keepAliveTimer     *time.Timer
-	txGMessages        list.List
-	txQMessages        list.List
-	txGLock            sync.Mutex
-	txQLock            sync.Mutex
-	keepAlive          time.Duration
-	txAvailable        chan int
-	rxRecv             []byte
-	retained           struct {
-		lock sync.Mutex
-		list []*packet.Publish
-	}
-	flowInUse         sync.Map
-	flowCounter       uint64
-	rxRemaining       int
-	txRunning         uint32
-	rxRunning         uint32
+type ackQueues struct {
+	pubIn  ackQueue
+	pubOut ackQueue
+}
+
+type flow struct {
+	flowInUse   sync.Map
+	flowCounter uint32
+}
+
+type tx struct {
+	txGMessages     list.List
+	txQMessages     list.List
+	txGLock         sync.Mutex
+	txQLock         sync.Mutex
+	txTopicAlias    map[string]uint16
+	txWg            sync.WaitGroup
+	txTimer         *time.Timer
+	txRunning       uint32
+	txAvailable     chan int
+	txQuotaExceeded bool
+}
+
+type rx struct {
+	desc           *netpoll.Desc
+	rxWg           sync.WaitGroup
+	rxTopicAlias   map[uint16]string
+	rxRecv         []byte
+	keepAlive      time.Duration
+	keepAliveTimer *time.Timer
+	rxRunning      uint32
+	rxRemaining    int
+}
+
+// impl of the connection
+type impl struct {
+	SessionCallbacks
+	id         string
+	metric     systree.PacketsMetric
+	conn       net.Conn
+	ePoll      netpoll.EventPoll
+	signalAuth OnAuthCb
+	ackQueues
+	tx
+	rx
+	flow
+	quit              chan struct{}
+	connect           chan interface{}
+	onStart           types.Once
+	onConnDisconnect  types.OnceWait
+	started           sync.WaitGroup
+	log               *zap.Logger
+	keepAlive         time.Duration
+	authMethod        string
+	connectProcessed  uint32
+	maxRxPacketSize   uint32
+	maxTxPacketSize   uint32
+	txQuota           int32
+	rxQuota           int32
+	state             state
 	topicAliasCurrMax uint16
-	txQuotaExceeded   bool
-	will              bool
+	maxTxTopicAlias   uint16
+	maxRxTopicAlias   uint16
+	version           packet.ProtocolVersion
+	retainAvailable   bool
+	offlineQoS0       bool
 }
 
 type unacknowledged struct {
@@ -150,132 +239,396 @@ type sizeAble interface {
 	Size() (int, error)
 }
 
+type baseAPI interface {
+	Stop(error) bool
+}
+
+type Initial interface {
+	baseAPI
+	Accept() (chan interface{}, error)
+	Send(packet.Provider)
+	Acknowledge(p *packet.ConnAck, opts ...Option) bool
+	Session() Session
+}
+
+type Session interface {
+	baseAPI
+	persistence.PacketLoader
+	Publish(string, *packet.Publish)
+	LoadRemaining(g, q *list.List)
+	SetOptions(opts ...Option) error
+}
+
+var _ Initial = (*impl)(nil)
+var _ Session = (*impl)(nil)
+
 // New allocate new connection object
-func New(c *Config) (s *Type, err error) {
-	s = &Type{
-		Config:       c,
-		quit:         make(chan struct{}),
-		txAvailable:  make(chan int, 1),
-		txTopicAlias: make(map[string]uint16),
-		rxTopicAlias: make(map[uint16]string),
-		txTimer:      time.NewTimer(1 * time.Second),
-		will:         true,
+func New(opts ...Option) Initial {
+	s := &impl{
+		state: stateConnecting,
+		quit:  make(chan struct{}),
 	}
 
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	s.txAvailable = make(chan int, 1)
+	s.txTopicAlias = make(map[string]uint16)
+	s.rxTopicAlias = make(map[uint16]string)
+	s.txTimer = time.NewTimer(1 * time.Second)
 	s.txTimer.Stop()
 
 	s.started.Add(1)
 	s.pubIn.onRelease = s.onReleaseIn
 	s.pubOut.onRelease = s.onReleaseOut
 
-	s.log = configuration.GetLogger().Named("connection." + s.ID)
+	s.log = configuration.GetLogger().Named("connection")
 
-	if s.Version >= packet.ProtocolV50 {
-		s.preProcessPublish = s.preProcessPublishV50
-		s.postProcessPublish = s.postProcessPublishV50
+	return s
+}
+
+// Accept start handling incoming connection
+func (s *impl) Accept() (chan interface{}, error) {
+	s.connect = make(chan interface{})
+
+	s.desc = netpoll.Must(netpoll.HandleReadOnce(s.conn))
+	s.keepAliveTimer = time.AfterFunc(time.Duration(s.keepAlive), s.keepAliveFired)
+	return s.connect, s.ePoll.Start(s.desc, s.rxConnection)
+}
+
+// Session
+func (s *impl) Session() Session {
+	return s
+}
+
+// Send
+func (s *impl) Send(pkt packet.Provider) {
+	if pkt.Type() == packet.AUTH {
+		s.state = stateAuth
+	}
+
+	s.runKeepAlive()
+	s.gPush(pkt)
+
+	s.ePoll.Resume(s.desc)
+}
+
+func (s *impl) Acknowledge(p *packet.ConnAck, opts ...Option) bool {
+	ack := true
+	s.ePoll.Stop(s.desc)
+
+	close(s.connect)
+
+	if p.ReturnCode() == packet.CodeSuccess {
+		s.state = stateConnected
+
+		for _, opt := range opts {
+			opt(s)
+		}
+
+		s.runKeepAlive()
+		if err := s.ePoll.Start(s.desc, s.rxRun); err != nil {
+			s.log.Error("Cannot start receiver", zap.String("ClientID", s.id), zap.Error(err))
+			s.state = stateConnectFailed
+			ack = false
+		}
 	} else {
-		s.preProcessPublish = func(*packet.Publish) error { return nil }
-		s.postProcessPublish = func(*packet.Publish) error { return nil }
+		s.state = stateConnectFailed
+		ack = false
 	}
 
-	if c.KeepAlive > 0 {
-		s.keepAlive = time.Second * time.Duration(c.KeepAlive)
-		s.keepAlive = s.keepAlive + (s.keepAlive / 2)
-		s.keepAliveTimer = time.AfterFunc(s.keepAlive, s.keepAliveExpired)
+	s.gPushFront(p)
+
+	if !ack {
+		s.Stop(nil)
 	}
 
-	gList := list.New()
-	qList := list.New()
+	return ack
+}
 
-	subscribedPublish := func(p *packet.Publish) {
-		if p.QoS() == packet.QoS0 {
-			gList.PushBack(p)
-		} else {
-			qList.PushBack(p)
+// Stop connection. Function assumed to be invoked once server about to either shutdown, disconnect
+// or session is being replaced
+// Effective only first invoke
+func (s *impl) Stop(reason error) bool {
+	return s.onConnectionClose(reason)
+}
+
+func (s *impl) LoadRemaining(g, q *list.List) {
+	select {
+	case <-s.quit:
+		return
+	default:
+	}
+	s.gLoadList(g)
+	s.qLoadList(q)
+}
+
+func (s *impl) LoadPersistedPacket(entry persistence.PersistedPacket) error {
+	var err error
+	var pkt packet.Provider
+	if pkt, _, err = packet.Decode(s.version, entry.Data); err != nil {
+		s.log.Error("Couldn't decode persisted message", zap.Error(err))
+		return ErrPersistence
+	}
+
+	if entry.UnAck {
+		switch p := pkt.(type) {
+		case *packet.Publish:
+			id, _ := p.ID()
+			s.flowReAcquire(id)
+		case *packet.Ack:
+			id, _ := p.ID()
+			s.flowReAcquire(id)
+		}
+
+		s.qLoad(&unacknowledged{packet: pkt})
+	} else {
+		if p, ok := pkt.(*packet.Publish); ok {
+			if len(entry.ExpireAt) > 0 {
+				if tm, err := time.Parse(time.RFC3339, entry.ExpireAt); err == nil {
+					p.SetExpireAt(tm)
+				} else {
+					s.log.Error("Parse publish expiry", zap.String("ClientID", s.id), zap.Error(err))
+				}
+			}
+
+			if p.QoS() == packet.QoS0 {
+				s.gLoad(pkt)
+			} else {
+				s.qLoad(pkt)
+			}
 		}
 	}
 
-	// transmitter queue is ready, assign to subscriber new online callback
-	// and signal it to forward messages to online callback by creating channel
-	s.Subscriber.Online(subscribedPublish)
+	return nil
+}
 
-	// restore persisted state of the session if any
-	if err = s.loadPersistence(); err != nil {
+func (s *impl) Publish(id string, pkt *packet.Publish) {
+	if pkt.QoS() == packet.QoS0 {
+		s.gPush(pkt)
+	} else {
+		s.qPush(pkt)
+	}
+}
+
+func genClientID() string {
+	b := make([]byte, 15)
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		return ""
+	}
+
+	return base64.URLEncoding.EncodeToString(b)
+}
+
+func (s *impl) getWill(pkt *packet.Connect) *packet.Publish {
+	var p *packet.Publish
+
+	if willTopic, willPayload, willQoS, willRetain, will := pkt.Will(); will {
+		p = packet.NewPublish(pkt.Version())
+		if err := p.Set(willTopic, willPayload, willQoS, willRetain, false); err != nil {
+			s.log.Error("Configure will packet", zap.String("ClientID", s.id), zap.Error(err))
+			p = nil
+		}
+	}
+
+	return p
+}
+
+func (s *impl) onConnect(pkt *packet.Connect) (packet.Provider, error) {
+	if atomic.CompareAndSwapUint32(&s.connectProcessed, 0, 1) {
+		id := string(pkt.ClientID())
+		idGen := false
+		if len(id) == 0 {
+			idGen = true
+			id = genClientID()
+		}
+
+		s.id = id
+
+		params := &ConnectParams{
+			ID:         id,
+			IDGen:      idGen,
+			Will:       s.getWill(pkt),
+			KeepAlive:  pkt.KeepAlive(),
+			Version:    pkt.Version(),
+			CleanStart: pkt.IsClean(),
+			Durable:    true,
+		}
+
+		s.version = params.Version
+
+		s.readConnProperties(pkt, params)
+
+		// MQTT v5 has different meaning of clean comparing to MQTT v3
+		//  - v3: if session is clean it is clean start and session lasts when Network connection closed
+		//  - v5: clean only means "clean start" and sessions lasts on connection close on if expire propery
+		//          exists and set to 0
+		if (params.Version <= packet.ProtocolV311 && params.CleanStart) ||
+			(params.Version >= packet.ProtocolV50 && params.ExpireIn != nil && *params.ExpireIn == 0) {
+			params.Durable = false
+		}
+
+		s.connect <- params
+		return nil, nil
+	}
+
+	// It's protocol error to send CONNECT packet more than once
+	return nil, packet.CodeProtocolError
+}
+
+func (s *impl) onAuth(pkt *packet.Auth) (packet.Provider, error) {
+	// AUTH packets are allowed for v5.0 only
+	if s.version < packet.ProtocolV50 {
+		return nil, packet.CodeRefusedServerUnavailable
+	}
+
+	reason := pkt.ReasonCode()
+
+	// Client must not send AUTH packets before server has requested it
+	// during auth or re-auth Client must respond only AUTH with CodeContinueAuthentication
+	// if connection is being established Client must send AUTH only with CodeReAuthenticate
+	if (s.state == stateConnecting) ||
+		((s.state == stateAuth || s.state == stateReAuth) && (reason != packet.CodeContinueAuthentication)) ||
+		((s.state == stateConnected) && reason != (packet.CodeReAuthenticate)) {
+		return nil, packet.CodeProtocolError
+	}
+
+	params := AuthParams{
+		Reason: reason,
+	}
+
+	// [MQTT-3.15.2.2.2]
+	if prop := pkt.PropertyGet(packet.PropertyAuthMethod); prop != nil {
+		if val, e := prop.AsString(); e == nil {
+			params.AuthMethod = val
+		}
+	}
+
+	// AUTH packet must provide AuthMethod property
+	if len(params.AuthMethod) == 0 {
+		return nil, packet.CodeProtocolError
+	}
+
+	// [MQTT-4.12.0-7] - If the Client does not include an Authentication Method in the CONNECT,
+	//                   the Client MUST NOT send an AUTH packet to the Server
+	// [MQTT-4.12.1-1] - The Client MUST set the Authentication Method to the same value as
+	//                   the Authentication Method originally used to authenticate the Network Connection
+	if len(s.authMethod) == 0 || s.authMethod != params.AuthMethod {
+		return nil, packet.CodeProtocolError
+	}
+
+	// [MQTT-3.15.2.2.3]
+	if prop := pkt.PropertyGet(packet.PropertyAuthData); prop != nil {
+		if val, e := prop.AsBinary(); e == nil {
+			params.AuthData = val
+		}
+	}
+
+	if s.state == stateConnecting || s.state == stateAuth {
+		s.connect <- params
+		return nil, nil
+	}
+
+	return s.signalAuth(s.id, &params)
+}
+
+func (s *impl) readConnProperties(req *packet.Connect, params *ConnectParams) {
+	if s.version < packet.ProtocolV50 {
 		return
 	}
 
-	s.Subscriber.OnlineRedirect(s.onSubscribedPublish)
+	// [MQTT-3.1.2.11.2]
+	if prop := req.PropertyGet(packet.PropertySessionExpiryInterval); prop != nil {
+		if val, e := prop.AsInt(); e == nil {
+			params.ExpireIn = &val
+		}
+	}
 
-	s.gLoadList(gList)
-	s.qLoadList(qList)
+	// [MQTT-3.1.2.11.3]
+	if prop := req.PropertyGet(packet.PropertyWillDelayInterval); prop != nil {
+		if val, e := prop.AsInt(); e == nil {
+			params.WillDelay = val
+		}
+	}
+
+	// [MQTT-3.1.2.11.4]
+	if prop := req.PropertyGet(packet.PropertyReceiveMaximum); prop != nil {
+		if val, e := prop.AsShort(); e == nil {
+			s.txQuota = int32(val)
+			params.SendQuota = val
+		}
+	}
+
+	// [MQTT-3.1.2.11.5]
+	if prop := req.PropertyGet(packet.PropertyMaximumPacketSize); prop != nil {
+		if val, e := prop.AsInt(); e == nil {
+			s.maxTxPacketSize = val
+		}
+	}
+
+	// [MQTT-3.1.2.11.6]
+	if prop := req.PropertyGet(packet.PropertyTopicAliasMaximum); prop != nil {
+		if val, e := prop.AsShort(); e == nil {
+			s.maxTxTopicAlias = val
+		}
+	}
+
+	// [MQTT-3.1.2.11.10]
+	if prop := req.PropertyGet(packet.PropertyAuthMethod); prop != nil {
+		if val, e := prop.AsString(); e == nil {
+			params.AuthMethod = val
+			s.authMethod = val
+		}
+	}
+
+	// [MQTT-3.1.2.11.11]
+	if prop := req.PropertyGet(packet.PropertyAuthData); prop != nil {
+		if len(params.AuthMethod) == 0 {
+			params.Error = packet.CodeProtocolError
+			return
+		}
+		if val, e := prop.AsBinary(); e == nil {
+			params.AuthData = val
+		}
+	}
 
 	return
 }
 
-// Start run connection
-func (s *Type) Start() {
-	s.onStart.Do(func() {
-		s.txRun()
-		s.EventPoll.Start(s.Desc, s.rxRun) // nolint: errcheck
-		s.started.Done()
-	})
-}
-
-// Stop session. Function assumed to be invoked once server about to either shutdown, disconnect
-// or session is being replaced
-// Effective only first invoke
-func (s *Type) Stop(reason packet.ReasonCode) {
-	s.onConnectionClose(true, reason)
-}
-
-func (s *Type) processIncoming(p packet.Provider) error {
+func (s *impl) processIncoming(p packet.Provider) error {
 	var err error
 	var resp packet.Provider
 
+	// [MQTT-3.1.2-33] - If a Client sets an Authentication Method in the CONNECT,
+	//                   the Client MUST NOT send any packets other than AUTH or DISCONNECT packets
+	//                   until it has received a CONNACK packet
+	if _, ok := expectedPacketType[s.state][p.Type()]; !ok {
+		s.log.Info("Unexpected packet for current state",
+			zap.String("ClientID", s.id),
+			zap.String("state", s.state.desc()),
+			zap.String("packet", p.Type().Name()))
+		return packet.CodeProtocolError
+	}
+
 	switch pkt := p.(type) {
+	case *packet.Connect:
+		resp, err = s.onConnect(pkt)
+	case *packet.Auth:
+		resp, err = s.onAuth(pkt)
 	case *packet.Publish:
 		resp, err = s.onPublish(pkt)
 	case *packet.Ack:
-		resp = s.onAck(pkt)
+		resp, err = s.onAck(pkt)
 	case *packet.Subscribe:
-		resp = s.onSubscribe(pkt)
+		resp, err = s.SignalSubscribe(pkt)
 	case *packet.UnSubscribe:
-		resp = s.onUnSubscribe(pkt)
+		resp, err = s.SignalUnSubscribe(pkt)
 	case *packet.PingReq:
 		// For PINGREQ message, we should send back PINGRESP
-		mR, _ := packet.New(s.Version, packet.PINGRESP)
-		resp, _ = mR.(*packet.PingResp)
+		resp = packet.NewPingResp(s.version)
 	case *packet.Disconnect:
-		// For DISCONNECT message, we should quit without sending Will
-		s.will = false
-
-		if s.Version == packet.ProtocolV50 {
-			// FIXME: CodeRefusedBadUsernameOrPassword has same id as CodeDisconnectWithWill
-			if pkt.ReasonCode() == packet.CodeRefusedBadUsernameOrPassword {
-				s.will = true
-			}
-
-			err = errors.New("disconnect")
-
-			if prop := pkt.PropertyGet(packet.PropertySessionExpiryInterval); prop != nil {
-				if val, ok := prop.AsInt(); ok == nil {
-					// If the Session Expiry Interval in the CONNECT packet was zero, then it is a Protocol Error to set a non-
-					// zero Session Expiry Interval in the DISCONNECT packet sent by the Client. If such a non-zero Session
-					// Expiry Interval is received by the Server, it does not treat it as a valid DISCONNECT packet. The Server
-					// uses DISCONNECT with Reason Code 0x82 (Protocol Error) as described in section 4.13.
-					if (s.ExpireIn != nil && *s.ExpireIn == 0) && val != 0 {
-						err = packet.CodeProtocolError
-					} else {
-						s.ExpireIn = &val
-					}
-				}
-			}
-		}
-	default:
-		s.log.Error("Unsupported incoming message type",
-			zap.String("ClientID", s.ID),
-			zap.String("type", p.Type().Name()))
-		return nil
+		resp, err = s.SignalDisconnect(pkt)
 	}
 
 	if resp != nil {
@@ -285,53 +638,7 @@ func (s *Type) processIncoming(p packet.Provider) error {
 	return err
 }
 
-func (s *Type) loadPersistence() error {
-	if s.State == nil {
-		return nil
-	}
-
-	return s.State.PacketsForEach([]byte(s.ID), func(entry persistence.PersistedPacket) error {
-		var err error
-		var pkt packet.Provider
-		if pkt, _, err = packet.Decode(s.Version, entry.Data); err != nil {
-			s.log.Error("Couldn't decode persisted message", zap.Error(err))
-			return ErrPersistence
-		}
-
-		if entry.UnAck {
-			switch p := pkt.(type) {
-			case *packet.Publish:
-				id, _ := p.ID()
-				s.flowReAcquire(id)
-			case *packet.Ack:
-				id, _ := p.ID()
-				s.flowReAcquire(id)
-			}
-
-			s.qLoad(&unacknowledged{packet: pkt})
-		} else {
-			if p, ok := pkt.(*packet.Publish); ok {
-				if len(entry.ExpireAt) > 0 {
-					if tm, err := time.Parse(time.RFC3339, entry.ExpireAt); err == nil {
-						p.SetExpiry(tm)
-					} else {
-						s.log.Error("Parse publish expiry", zap.String("ClientID", s.ID), zap.Error(err))
-					}
-				}
-
-				if p.QoS() == packet.QoS0 {
-					s.gLoad(pkt)
-				} else {
-					s.qLoad(pkt)
-				}
-			}
-		}
-
-		return nil
-	})
-}
-
-func (s *Type) persist() {
+func (s *impl) getToPersist() []persistence.PersistedPacket {
 	var packets []persistence.PersistedPacket
 
 	persistAppend := func(p interface{}) {
@@ -340,9 +647,9 @@ func (s *Type) persist() {
 
 		switch tp := p.(type) {
 		case *packet.Publish:
-			if (s.OfflineQoS0 || tp.QoS() != packet.QoS0) && !tp.Expired(false) {
-				if tm := tp.GetExpiry(); !tm.IsZero() {
-					pPkt.ExpireAt = tm.Format(time.RFC3339)
+			if expireAt, _, expired := tp.Expired(); expired && (s.offlineQoS0 || tp.QoS() != packet.QoS0) {
+				if !expireAt.IsZero() {
+					pPkt.ExpireAt = expireAt.Format(time.RFC3339)
 				}
 
 				if tp.QoS() != packet.QoS0 {
@@ -361,18 +668,19 @@ func (s *Type) persist() {
 			pPkt.UnAck = true
 		}
 
-		var err error
-		if pPkt.Data, err = packet.Encode(pkt); err != nil {
-			s.log.Error("Couldn't encode message for persistence", zap.Error(err))
-		} else {
-			packets = append(packets, pPkt)
+		if pkt != nil {
+			var err error
+			if pPkt.Data, err = packet.Encode(pkt); err != nil {
+				s.log.Error("Couldn't encode message for persistence", zap.Error(err))
+			} else {
+				packets = append(packets, pPkt)
+			}
 		}
 	}
 
 	var next *list.Element
 	for elem := s.txQMessages.Front(); elem != nil; elem = next {
 		next = elem.Next()
-
 		persistAppend(s.txQMessages.Remove(elem))
 	}
 
@@ -391,71 +699,61 @@ func (s *Type) persist() {
 		return true
 	})
 
-	if err := s.State.PacketsStore([]byte(s.ID), packets); err != nil {
-		s.log.Error("Persist packets", zap.String("ClientID", s.ID), zap.Error(err))
-	}
-}
-
-// onSubscribedPublish is the method that gets added to the topic subscribers list by the
-// processSubscribe() method. When the server finishes the ack cycle for a
-// PUBLISH message, it will call the subscriber, which is this method.
-//
-// For the server, when this method is called, it means there's a message that
-// should be published to the client on the other end of this connection. So we
-// will call publish() to send the message.
-func (s *Type) onSubscribedPublish(p *packet.Publish) {
-	if p.QoS() == packet.QoS0 {
-		s.gPush(p)
-	} else {
-		s.qPush(p)
-	}
+	return packets
 }
 
 // forward PUBLISH message to topics manager which takes care about subscribers
-func (s *Type) publishToTopic(p *packet.Publish) error {
-	if err := s.postProcessPublish(p); err != nil {
-		return err
-	}
-
-	p.SetPublishID(s.Subscriber.Hash())
-
-	// [MQTT-3.3.1.3]
-	if p.Retain() {
-		if err := s.Messenger.Retain(p); err != nil {
-			s.log.Error("Error retaining message", zap.String("ClientID", s.ID), zap.Error(err))
+func (s *impl) publishToTopic(p *packet.Publish) error {
+	// v5.0
+	// If the Server included Retain Available in its CONNACK response to a Client with its value set to 0 and it
+	// receives a PUBLISH packet with the RETAIN flag is set to 1, then it uses the DISCONNECT Reason
+	// Code of 0x9A (Retain not supported) as described in section 4.13.
+	if s.version >= packet.ProtocolV50 {
+		// [MQTT-3.3.2.3.4]
+		if prop := p.PropertyGet(packet.PropertyTopicAlias); prop != nil {
+			if val, err := prop.AsShort(); err == nil {
+				if len(p.Topic()) != 0 {
+					// renew alias with new topic
+					s.rxTopicAlias[val] = p.Topic()
+				} else {
+					if topic, kk := s.rxTopicAlias[val]; kk {
+						// do not check for error as topic has been validated when arrived
+						p.SetTopic(topic) // nolint: errcheck
+					} else {
+						return packet.CodeInvalidTopicAlias
+					}
+				}
+			} else {
+				return packet.CodeInvalidTopicAlias
+			}
 		}
 
-		// [MQTT-3.3.1-7]
-		if p.QoS() == packet.QoS0 {
-			_m, _ := packet.New(s.Version, packet.PUBLISH)
-			m := _m.(*packet.Publish)
-			m.SetQoS(p.QoS())     // nolint: errcheck
-			m.SetTopic(p.Topic()) // nolint: errcheck
-			s.retained.lock.Lock()
-			s.retained.list = append(s.retained.list, m)
-			s.retained.lock.Unlock()
+		// [MQTT-3.3.2.3.3]
+		if prop := p.PropertyGet(packet.PropertyPublicationExpiry); prop != nil {
+			if val, err := prop.AsInt(); err == nil {
+				s.log.Warn("Set pub expiration", zap.String("ClientID", s.id), zap.Duration("val", time.Duration(val)*time.Second))
+				p.SetExpireAt(time.Now().Add(time.Duration(val) * time.Second))
+			} else {
+				return err
+			}
 		}
 	}
 
-	if err := s.Messenger.Publish(p); err != nil {
-		s.log.Error("Couldn't publish", zap.String("ClientID", s.ID), zap.Error(err))
-	}
-
-	return nil
+	return s.SignalPublish(p)
 }
 
 // onReleaseIn ack process for incoming messages
-func (s *Type) onReleaseIn(o, n packet.Provider) {
+func (s *impl) onReleaseIn(o, n packet.Provider) {
 	switch p := o.(type) {
 	case *packet.Publish:
-		s.publishToTopic(p) // nolint: errcheck
+		s.SignalPublish(p)
 	}
 }
 
 // onReleaseOut process messages that required ack cycle
 // onAckTimeout if publish message has not been acknowledged withing specified ackTimeout
 // server should mark it as a dup and send again
-func (s *Type) onReleaseOut(o, n packet.Provider) {
+func (s *impl) onReleaseOut(o, n packet.Provider) {
 	switch n.Type() {
 	case packet.PUBACK:
 		fallthrough
@@ -465,54 +763,4 @@ func (s *Type) onReleaseOut(o, n packet.Provider) {
 			s.signalQuota()
 		}
 	}
-}
-
-func (s *Type) preProcessPublishV50(p *packet.Publish) error {
-	// v5.0
-	// If the Server included Retain Available in its CONNACK response to a Client with its value set to 0 and it
-	// receives a PUBLISH packet with the RETAIN flag is set to 1, then it uses the DISCONNECT Reason
-	// Code of 0x9A (Retain not supported) as described in section 4.13.
-	if s.Version >= packet.ProtocolV50 && !s.RetainAvailable && p.Retain() {
-		return packet.CodeRetainNotSupported
-	}
-
-	if prop := p.PropertyGet(packet.PropertyTopicAlias); prop != nil {
-		if val, ok := prop.AsShort(); ok == nil && (val == 0 || val > s.MaxRxTopicAlias) {
-			return packet.CodeInvalidTopicAlias
-		}
-	}
-
-	return nil
-}
-
-func (s *Type) postProcessPublishV50(p *packet.Publish) error {
-	// [MQTT-3.3.2.3.4]
-	if prop := p.PropertyGet(packet.PropertyTopicAlias); prop != nil {
-		if val, err := prop.AsShort(); err == nil {
-			if len(p.Topic()) != 0 {
-				// renew alias with new topic
-				s.rxTopicAlias[val] = p.Topic()
-			} else {
-				if topic, kk := s.rxTopicAlias[val]; kk {
-					// do not check for error as topic has been validated when arrived
-					p.SetTopic(topic) // nolint: errcheck
-				} else {
-					return packet.CodeInvalidTopicAlias
-				}
-			}
-		} else {
-			return packet.CodeInvalidTopicAlias
-		}
-	}
-
-	// [MQTT-3.3.2.3.3]
-	if prop := p.PropertyGet(packet.PropertyPublicationExpiry); prop != nil {
-		if val, err := prop.AsInt(); err == nil {
-			p.SetExpiry(time.Now().Add(time.Duration(val) * time.Second))
-		} else {
-			return err
-		}
-	}
-
-	return nil
 }

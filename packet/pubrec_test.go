@@ -34,18 +34,18 @@ func TestPubRecMessageFields(t *testing.T) {
 }
 
 func TestPubRecMessageDecode(t *testing.T) {
-	msgBytes := []byte{
+	buf := []byte{
 		byte(PUBREC << 4),
 		2,
 		0, // packet ID MSB (0)
 		7, // packet ID LSB (7)
 	}
 
-	m, n, err := Decode(ProtocolV311, msgBytes)
+	m, n, err := Decode(ProtocolV311, buf)
 	msg, ok := m.(*Ack)
 	require.Equal(t, true, ok, "Invalid message type")
 	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n, "Error decoding message.")
+	require.Equal(t, len(buf), n, "Error decoding message.")
 	require.Equal(t, PUBREC, msg.Type(), "Error decoding message.")
 
 	id, _ := msg.ID()
@@ -54,19 +54,19 @@ func TestPubRecMessageDecode(t *testing.T) {
 
 // test insufficient bytes
 func TestPubRecMessageDecode2(t *testing.T) {
-	msgBytes := []byte{
+	buf := []byte{
 		byte(PUBREC << 4),
 		2,
 		7, // packet ID LSB (7)
 	}
 
-	_, _, err := Decode(ProtocolV311, msgBytes)
+	_, _, err := Decode(ProtocolV311, buf)
 
 	require.Error(t, err)
 }
 
 func TestPubRecMessageEncode(t *testing.T) {
-	msgBytes := []byte{
+	buf := []byte{
 		byte(PUBREC << 4),
 		2,
 		0, // packet ID MSB (0)
@@ -85,36 +85,36 @@ func TestPubRecMessageEncode(t *testing.T) {
 	n, err := msg.Encode(dst)
 
 	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n, "Error decoding message.")
-	require.Equal(t, msgBytes, dst[:n], "Error decoding message.")
+	require.Equal(t, len(buf), n, "Error decoding message.")
+	require.Equal(t, buf, dst[:n], "Error decoding message.")
 }
 
 // test to ensure encoding and decoding are the same
 // decode, encode, and decode again
 func TestPubRecDecodeEncodeEquiv(t *testing.T) {
-	msgBytes := []byte{
+	buf := []byte{
 		byte(PUBREC << 4),
 		2,
 		0, // packet ID MSB (0)
 		7, // packet ID LSB (7)
 	}
 
-	m, n, err := Decode(ProtocolV311, msgBytes)
+	m, n, err := Decode(ProtocolV311, buf)
 	msg, ok := m.(*Ack)
 	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n, "Error decoding message.")
+	require.Equal(t, len(buf), n, "Error decoding message.")
 
 	dst := make([]byte, 100)
 	n2, err := msg.Encode(dst)
 
 	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n2, "Error decoding message.")
-	require.Equal(t, msgBytes, dst[:n2], "Error decoding message.")
+	require.Equal(t, len(buf), n2, "Error decoding message.")
+	require.Equal(t, buf, dst[:n2], "Error decoding message.")
 
 	_, n3, err := Decode(ProtocolV311, dst)
 
 	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n3, "Error decoding message.")
+	require.Equal(t, len(buf), n3, "Error decoding message.")
 }

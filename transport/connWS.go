@@ -1,10 +1,9 @@
 package transport
 
 import (
+	"io"
 	"net"
 	"time"
-
-	"io"
 
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/gorilla/websocket"

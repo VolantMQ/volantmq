@@ -32,6 +32,8 @@ var (
 	ErrInvalidNodeName = errors.New("node name is invalid")
 )
 
+type option func(*Server)
+
 // ServerConfig configuration of the MQTT server
 type ServerConfig struct {
 	// Configuration of persistence provider
@@ -244,6 +246,7 @@ func NewServer(config *ServerConfig) (Server, error) {
 	}
 
 	mConfig := &clients.Config{
+		AllowedVersions:               s.AllowedVersions,
 		TopicsMgr:                     s.topicsMgr,
 		ConnectTimeout:                s.ConnectTimeout,
 		Persist:                       s.Persistence,
@@ -274,11 +277,11 @@ func (s *server) ListenAndServe(config interface{}) error {
 	var err error
 
 	internalConfig := transport.InternalConfig{
-		Metric:          s.sysTree.Metric(),
-		Sessions:        s.sessionsMgr,
-		ConnectTimeout:  s.ConnectTimeout,
-		KeepAlive:       s.KeepAlive,
-		AllowedVersions: s.AllowedVersions,
+		Metric:         s.sysTree.Metric(),
+		Sessions:       s.sessionsMgr,
+		ConnectTimeout: s.ConnectTimeout,
+		KeepAlive:      s.KeepAlive,
+		//AllowedVersions: s.AllowedVersions,
 	}
 
 	switch c := config.(type) {
@@ -364,15 +367,14 @@ func (s *server) Close() error {
 }
 
 func (s *server) systreeUpdater() {
-	for _, m := range s.systree.publishes {
-		_m := m.Publish()
-		_msg, _ := packet.New(packet.ProtocolV311, packet.PUBLISH)
-		msg, _ := _msg.(*packet.Publish)
+	for _, val := range s.systree.publishes {
+		p := val.Publish()
+		pkt := packet.NewPublish(packet.ProtocolV311)
 
-		msg.SetPayload(_m.Payload())
-		msg.SetTopic(_m.Topic()) // nolint: errcheck
-		msg.SetQoS(_m.QoS())     // nolint: errcheck
-		s.topicsMgr.Publish(msg) // nolint: errcheck
+		pkt.SetPayload(p.Payload())
+		pkt.SetTopic(p.Topic())  // nolint: errcheck
+		pkt.SetQoS(p.QoS())      // nolint: errcheck
+		s.topicsMgr.Publish(pkt) // nolint: errcheck
 	}
 
 	s.systree.timer.Reset(s.SystreeUpdateInterval * time.Second)

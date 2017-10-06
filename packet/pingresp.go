@@ -22,8 +22,15 @@ type PingResp struct {
 
 var _ Provider = (*PingResp)(nil)
 
-func newPingResp() Provider {
+func newPingResp() *PingResp {
 	return &PingResp{}
+}
+
+// NewPingResp creates a new PINGRESP packet
+func NewPingResp(v ProtocolVersion) *PingResp {
+	p := newPingResp()
+	p.init(PINGRESP, v, p.size, p.encodeMessage, p.decodeMessage)
+	return p
 }
 
 // decode message
