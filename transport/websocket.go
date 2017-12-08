@@ -1,11 +1,9 @@
 package transport
 
 import (
-	"net/http"
-
-	"crypto/tls"
-
 	"context"
+	"crypto/tls"
+	"net/http"
 	"time"
 
 	"github.com/VolantMQ/volantmq/auth"

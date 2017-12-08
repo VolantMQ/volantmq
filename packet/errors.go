@@ -9,8 +9,8 @@ const (
 	ErrInvalidUnSubscribe Error = iota
 	// ErrInvalidUnSubAck Invalid UNSUBACK message
 	ErrInvalidUnSubAck
-	// ErrPackedIDNotMatched Packet ID does not match
 	ErrDupViolation
+	// ErrPackedIDNotMatched Packet ID does not match
 	ErrPackedIDNotMatched
 	ErrInvalid
 	// ErrPackedIDZero cannot be 0

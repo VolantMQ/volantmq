@@ -28,11 +28,17 @@ type Auth struct {
 
 var _ Provider = (*Auth)(nil)
 
-// newAuth creates a new AUTH message
+// newAuth creates a new AUTH packet
 func newAuth() *Auth {
-	msg := &Auth{}
+	return &Auth{}
+}
 
-	return msg
+// NewAuth creates a new AUTH packet
+func NewAuth(v ProtocolVersion) *Auth {
+	p := newAuth()
+	p.init(AUTH, v, p.size, p.encodeMessage, p.decodeMessage)
+
+	return p
 }
 
 // ReasonCode get authentication reason

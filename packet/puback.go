@@ -29,16 +29,32 @@ func newPubAck() *Ack {
 	return &Ack{}
 }
 
-func newPubRec() *Ack {
-	return &Ack{}
+// NewPubAck creates a new PUBACK packet
+func NewPubAck(v ProtocolVersion) *Ack {
+	p := newPubAck()
+	p.init(PUBACK, v, p.size, p.encodeMessage, p.decodeMessage)
+	return p
 }
 
-func newPubRel() *Ack {
-	return &Ack{}
+// NewPubRec creates a new PUBREC packet
+func NewPubRec(v ProtocolVersion) *Ack {
+	p := newPubAck()
+	p.init(PUBREC, v, p.size, p.encodeMessage, p.decodeMessage)
+	return p
 }
 
-func newPubComp() *Ack {
-	return &Ack{}
+// NewPubRel creates a new PUBREL packet
+func NewPubRel(v ProtocolVersion) *Ack {
+	p := newPubAck()
+	p.init(PUBREL, v, p.size, p.encodeMessage, p.decodeMessage)
+	return p
+}
+
+// NewPubComp creates a new PUBCOMP packet
+func NewPubComp(v ProtocolVersion) *Ack {
+	p := newPubAck()
+	p.init(PUBCOMP, v, p.size, p.encodeMessage, p.decodeMessage)
+	return p
 }
 
 // SetPacketID sets the ID of the packet.

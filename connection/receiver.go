@@ -3,79 +3,90 @@ package connection
 import (
 	"bufio"
 	"encoding/binary"
-	"sync/atomic"
-
 	"errors"
+	"sync/atomic"
 
 	"github.com/VolantMQ/volantmq/packet"
 	"github.com/troian/easygo/netpoll"
 )
 
-func (s *Type) keepAliveExpired() {
-	s.onConnectionClose(true, nil)
-}
-
-func (s *Type) rxRun(event netpoll.Event) {
-	select {
-	case <-s.quit:
-		return
-	default:
-	}
-
+func (s *impl) rxRun(event netpoll.Event) {
 	if atomic.CompareAndSwapUint32(&s.rxRunning, 0, 1) {
-		s.rxWg.Wait()
-		s.rxWg.Add(1)
-
-		exit := false
-		if event&(netpoll.EventReadHup|netpoll.EventWriteHup|netpoll.EventHup|netpoll.EventErr) != 0 {
-			exit = true
+		mask := netpoll.EventHup | netpoll.EventReadHup | netpoll.EventWriteHup | netpoll.EventErr | netpoll.EventPollClosed
+		if (event & mask) != 0 {
+			go s.onConnectionClose(nil)
+		} else {
+			go func() {
+				s.rxWg.Wait()
+				s.rxWg.Add(1)
+				s.rxRoutine()
+			}()
 		}
-
-		go s.rxRoutine(exit)
 	}
 }
 
-func (s *Type) rxRoutine(exit bool) {
+func (s *impl) rxConnection(event netpoll.Event) {
+	mask := netpoll.EventHup | netpoll.EventReadHup | netpoll.EventWriteHup | netpoll.EventErr | netpoll.EventPollClosed
+	if (event & mask) != 0 {
+		go func() {
+			s.connect <- errors.New("disconnected")
+		}()
+	} else {
+		go func() {
+			s.connectionRoutine()
+		}()
+	}
+}
+
+func (s *impl) rxRoutine() {
 	var err error
 
 	defer func() {
 		s.rxWg.Done()
-
 		if err != nil {
-			if _, ok := err.(packet.ReasonCode); !ok {
-				err = nil
-			}
-			s.onConnectionClose(s.will, err)
+			s.onConnectionClose(err)
 		}
 	}()
 
-	if exit {
-		err = errors.New("disconnect")
-		return
-	}
-
-	buf := bufio.NewReader(s.Conn)
+	buf := bufio.NewReader(s.conn)
 
 	for atomic.LoadUint32(&s.rxRunning) == 1 {
-		if s.keepAlive > 0 {
-			s.keepAliveTimer.Reset(s.keepAlive)
-		}
+		s.runKeepAlive()
+
 		var pkt packet.Provider
 		if pkt, err = s.readPacket(buf); err == nil {
+			s.metric.Received(pkt.Type())
 			err = s.processIncoming(pkt)
 		}
 
 		if err != nil {
 			atomic.StoreUint32(&s.rxRunning, 0)
+			break
 		}
 	}
 
-	if _, ok := err.(packet.ReasonCode); !ok {
-		err = s.EventPoll.Resume(s.Desc)
+	if _, ok := err.(packet.ReasonCode); ok {
+		return
+	}
+
+	err = s.ePoll.Resume(s.desc)
+}
+
+func (s *impl) connectionRoutine() {
+	buf := bufio.NewReader(s.conn)
+
+	pkt, err := s.readPacket(buf)
+
+	s.keepAliveTimer.Stop()
+	if err == nil {
+		s.metric.Received(pkt.Type())
+		err = s.processIncoming(pkt)
+	} else {
+		s.connect <- err
 	}
 }
 
-func (s *Type) readPacket(buf *bufio.Reader) (packet.Provider, error) {
+func (s *impl) readPacket(buf *bufio.Reader) (packet.Provider, error) {
 	var err error
 
 	if len(s.rxRecv) == 0 {
@@ -91,11 +102,6 @@ func (s *Type) readPacket(buf *bufio.Reader) (packet.Provider, error) {
 
 			if header, err = buf.Peek(peekCount); err != nil {
 				return nil, err
-			}
-
-			// If not enough bytes are returned, then continue until there's enough.
-			if len(header) < peekCount {
-				continue
 			}
 
 			// If we got enough bytes, then check the last byte to see if the continuation
@@ -114,7 +120,7 @@ func (s *Type) readPacket(buf *bufio.Reader) (packet.Provider, error) {
 		s.rxRecv = make([]byte, s.rxRemaining)
 	}
 
-	if s.rxRemaining > int(s.MaxRxPacketSize) {
+	if s.rxRemaining > int(s.maxRxPacketSize) {
 		return nil, packet.CodePacketTooLarge
 	}
 
@@ -122,14 +128,17 @@ func (s *Type) readPacket(buf *bufio.Reader) (packet.Provider, error) {
 
 	for offset != s.rxRemaining {
 		var n int
-		if n, err = buf.Read(s.rxRecv[offset:]); err != nil {
+
+		n, err = buf.Read(s.rxRecv[offset:])
+		offset += n
+		if err != nil {
+			s.rxRemaining -= offset
 			return nil, err
 		}
-		offset += n
 	}
 
 	var pkt packet.Provider
-	pkt, _, err = packet.Decode(s.Version, s.rxRecv)
+	pkt, _, err = packet.Decode(s.version, s.rxRecv)
 
 	s.rxRecv = []byte{}
 	s.rxRemaining = 0

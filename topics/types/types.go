@@ -2,7 +2,6 @@ package topicsTypes
 
 import (
 	"errors"
-
 	"regexp"
 
 	"github.com/VolantMQ/volantmq/packet"

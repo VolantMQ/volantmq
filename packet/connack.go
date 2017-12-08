@@ -29,9 +29,18 @@ type ConnAck struct {
 
 var _ Provider = (*ConnAck)(nil)
 
-// newConnAck creates a new CONNACK message
+// newConnAck creates a new CONNACK packet
 func newConnAck() *ConnAck {
 	return &ConnAck{}
+}
+
+// NewConnAck creates a new CONNACK packet
+func NewConnAck(v ProtocolVersion) *ConnAck {
+	p := newConnAck()
+
+	p.init(CONNACK, v, p.size, p.encodeMessage, p.decodeMessage)
+
+	return p
 }
 
 // SessionPresent returns the session present flag value

@@ -36,6 +36,13 @@ func newSubscribe() *Subscribe {
 	return &Subscribe{}
 }
 
+// NewSubscribe creates a new SUBSCRIBE packet
+func NewSubscribe(v ProtocolVersion) *Subscribe {
+	p := newSubscribe()
+	p.init(SUBSCRIBE, v, p.size, p.encodeMessage, p.decodeMessage)
+	return p
+}
+
 // RangeTopics loop through list of topics
 func (msg *Subscribe) RangeTopics(fn func(string, SubscriptionOptions)) {
 	for i, t := range msg.topics {

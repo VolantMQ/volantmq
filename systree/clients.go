@@ -1,10 +1,9 @@
 package systree
 
 import (
+	"encoding/json"
 	"sync/atomic"
 	"time"
-
-	"encoding/json"
 
 	"github.com/VolantMQ/volantmq/packet"
 	"github.com/VolantMQ/volantmq/types"
@@ -20,7 +19,7 @@ type ClientConnectStatus struct {
 	KeepAlive         uint16
 	GeneratedID       bool
 	CleanSession      bool
-	KillOnDisconnect  bool
+	Durable           bool
 	SessionPresent    bool
 	PreserveOrder     bool
 	MaximumQoS        packet.QosType

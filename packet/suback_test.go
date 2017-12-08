@@ -39,7 +39,7 @@ func TestSubAckMessageFields(t *testing.T) {
 }
 
 func TestSubAckMessageDecode(t *testing.T) {
-	msgBytes := []byte{
+	buf := []byte{
 		byte(SUBACK << 4),
 		6,
 		0,    // packet ID MSB (0)
@@ -50,7 +50,7 @@ func TestSubAckMessageDecode(t *testing.T) {
 		0x80, // return code 4
 	}
 
-	m, n, err := Decode(ProtocolV311, msgBytes)
+	m, n, err := Decode(ProtocolV311, buf)
 	msg, ok := m.(*SubAck)
 	require.Equal(t, true, ok, "Invalid message type")
 
@@ -58,14 +58,14 @@ func TestSubAckMessageDecode(t *testing.T) {
 		t.Log(err)
 	}
 	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n, "Error decoding message.")
+	require.Equal(t, len(buf), n, "Error decoding message.")
 	require.Equal(t, SUBACK, msg.Type(), "Error decoding message.")
 	require.Equal(t, 4, len(msg.ReturnCodes()), "Error adding return code.")
 }
 
 // test with wrong return code
 func TestSubAckMessageDecode2(t *testing.T) {
-	msgBytes := []byte{
+	buf := []byte{
 		byte(SUBACK << 4),
 		6,
 		0,    // packet ID MSB (0)
@@ -76,12 +76,12 @@ func TestSubAckMessageDecode2(t *testing.T) {
 		0x81, // return code 4
 	}
 
-	_, _, err := Decode(ProtocolV311, msgBytes)
+	_, _, err := Decode(ProtocolV311, buf)
 	require.Error(t, err)
 }
 
 func TestSubAckMessageEncode(t *testing.T) {
-	msgBytes := []byte{
+	buf := []byte{
 		byte(SUBACK << 4),
 		6,
 		0,    // packet ID MSB (0)
@@ -108,14 +108,14 @@ func TestSubAckMessageEncode(t *testing.T) {
 	n, err := msg.Encode(dst)
 
 	require.NoError(t, err, "Error encoding message.")
-	require.Equal(t, len(msgBytes), n, "Encoded length does not match")
-	require.Equal(t, msgBytes, dst[:n], "Raw message does not match")
+	require.Equal(t, len(buf), n, "Encoded length does not match")
+	require.Equal(t, buf, dst[:n], "Raw message does not match")
 }
 
 // test to ensure encoding and decoding are the same
 // decode, encode, and decode again
 func TestSubAckDecodeEncodeEquiv(t *testing.T) {
-	msgBytes := []byte{
+	buf := []byte{
 		byte(SUBACK << 4),
 		6,
 		0,    // packet ID MSB (0)
@@ -126,22 +126,22 @@ func TestSubAckDecodeEncodeEquiv(t *testing.T) {
 		0x80, // return code 4
 	}
 
-	m, n, err := Decode(ProtocolV311, msgBytes)
+	m, n, err := Decode(ProtocolV311, buf)
 	msg, ok := m.(*SubAck)
 	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n, "Error decoding message.")
+	require.Equal(t, len(buf), n, "Error decoding message.")
 
 	dst := make([]byte, 100)
 	n2, err := msg.Encode(dst)
 
 	require.NoError(t, err, "Error encoding message.")
-	require.Equal(t, len(msgBytes), n2, "Error encoding message.")
-	require.Equal(t, msgBytes, dst[:n2], "Error encoding message.")
+	require.Equal(t, len(buf), n2, "Error encoding message.")
+	require.Equal(t, buf, dst[:n2], "Error encoding message.")
 
 	_, n3, err := Decode(ProtocolV311, dst)
 
 	require.NoError(t, err, "Error decoding message")
-	require.Equal(t, len(msgBytes), n3, "Error decoding message")
+	require.Equal(t, len(buf), n3, "Error decoding message")
 }

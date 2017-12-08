@@ -16,11 +16,11 @@ var providers = make(map[string]Provider)
 // Register auth provider
 func Register(name string, provider Provider) error {
 	if name == "" && provider == nil {
-		return errors.New("Invalid args")
+		return errors.New("invalid args")
 	}
 
 	if _, dup := providers[name]; dup {
-		return errors.New("Already exists")
+		return errors.New("already exists")
 	}
 
 	providers[name] = provider

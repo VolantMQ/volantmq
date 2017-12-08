@@ -41,7 +41,7 @@ func TestSubscribeMessageFields(t *testing.T) {
 }
 
 func TestSubscribeMessageDecode(t *testing.T) {
-	msgBytes := []byte{
+	buf := []byte{
 		byte(SUBSCRIBE<<4) | 2,
 		37,
 		0, // packet ID MSB (0)
@@ -61,32 +61,32 @@ func TestSubscribeMessageDecode(t *testing.T) {
 	}
 
 	//msg := NewSubscribeMessage()
-	m, n, err := Decode(ProtocolV311, msgBytes)
+	m, n, err := Decode(ProtocolV311, buf)
 	msg, ok := m.(*Subscribe)
 	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n, "Error decoding message.")
+	require.Equal(t, len(buf), n, "Error decoding message.")
 	require.Equal(t, SUBSCRIBE, msg.Type(), "Error decoding message.")
 	require.Equal(t, 3, len(msg.topics), "Error decoding topics.")
 }
 
 // test empty topic list
 func TestSubscribeMessageDecode2(t *testing.T) {
-	msgBytes := []byte{
+	buf := []byte{
 		byte(SUBSCRIBE<<4) | 2,
 		2,
 		0, // packet ID MSB (0)
 		7, // packet ID LSB (7)
 	}
 
-	_, _, err := Decode(ProtocolV311, msgBytes)
+	_, _, err := Decode(ProtocolV311, buf)
 
 	require.Error(t, err)
 }
 
 func TestSubscribeMessageEncode(t *testing.T) {
-	msgBytes := []byte{
+	buf := []byte{
 		byte(SUBSCRIBE<<4) | 2,
 		36,
 		0, // packet ID MSB (0)
@@ -119,7 +119,7 @@ func TestSubscribeMessageEncode(t *testing.T) {
 	dst := make([]byte, 100)
 	n, err := msg.Encode(dst)
 	require.NoError(t, err, "Error encoding message.")
-	require.Equal(t, len(msgBytes), n, "Error encoding message.")
+	require.Equal(t, len(buf), n, "Error encoding message.")
 
 	//msg1 := NewSubscribeMessage()
 	var m1 Provider
@@ -128,14 +128,14 @@ func TestSubscribeMessageEncode(t *testing.T) {
 	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n, "Error decoding message.")
+	require.Equal(t, len(buf), n, "Error decoding message.")
 	require.Equal(t, 3, len(msg1.topics), "Error decoding message.")
 }
 
 // test to ensure encoding and decoding are the same
 // decode, encode, and decode again
 func TestSubscribeDecodeEncodeEquiv(t *testing.T) {
-	msgBytes := []byte{
+	buf := []byte{
 		byte(SUBSCRIBE<<4) | 2,
 		37,
 		0, // packet ID MSB (0)
@@ -155,28 +155,28 @@ func TestSubscribeDecodeEncodeEquiv(t *testing.T) {
 	}
 
 	//msg := NewSubscribeMessage()
-	m, n, err := Decode(ProtocolV311, msgBytes)
+	m, n, err := Decode(ProtocolV311, buf)
 	msg, ok := m.(*Subscribe)
 	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message")
-	require.Equal(t, len(msgBytes), n, "Raw message length does not match")
+	require.Equal(t, len(buf), n, "Raw message length does not match")
 
 	dst := make([]byte, 100)
 	n2, err := msg.Encode(dst)
 
 	require.NoError(t, err, "Error encoding message")
-	require.Equal(t, len(msgBytes), n2, "Raw message length does not match")
+	require.Equal(t, len(buf), n2, "Raw message length does not match")
 
 	_, n3, err := Decode(ProtocolV311, dst)
 	require.NoError(t, err, "Error decoding message")
-	require.Equal(t, len(msgBytes), n3, "Raw message length does not match")
+	require.Equal(t, len(buf), n3, "Raw message length does not match")
 }
 
 // test to ensure encoding and decoding are the same
 // decode, encode, and decode again
 func TestSubscribeDecodeOrder(t *testing.T) {
-	msgBytes := []byte{
+	buf := []byte{
 		byte(SUBSCRIBE<<4) | 2,
 		37,
 		0, // packet ID MSB (0)
@@ -195,11 +195,11 @@ func TestSubscribeDecodeOrder(t *testing.T) {
 		2, // QoS
 	}
 
-	m, n, err := Decode(ProtocolV311, msgBytes)
+	m, n, err := Decode(ProtocolV311, buf)
 	msg, ok := m.(*Subscribe)
 	require.Equal(t, true, ok, "Invalid message type")
 	require.NoError(t, err, "Error decoding message")
-	require.Equal(t, len(msgBytes), n, "Raw message length does not match")
+	require.Equal(t, len(buf), n, "Raw message length does not match")
 
 	i := 0
 	msg.RangeTopics(func(topic string, ops SubscriptionOptions) {
@@ -214,7 +214,7 @@ func TestSubscribeDecodeOrder(t *testing.T) {
 			require.Equal(t, "/a/b/#/cdd", topic)
 			require.Equal(t, SubscriptionOptions(QoS2), ops)
 		default:
-			assert.Error(t, errors.New("Invalid topics count"))
+			assert.Error(t, errors.New("invalid topics count"))
 		}
 		i++
 	})

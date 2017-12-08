@@ -42,7 +42,7 @@ func TestMatch1(t *testing.T) {
 	}
 	prov.Subscribe("sport/tennis/player1/#", sub, p) // nolint: errcheck
 
-	subscribers := publishEntries{}
+	subscribers := publishes{}
 
 	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers))
@@ -58,7 +58,7 @@ func TestMatch2(t *testing.T) {
 	}
 	prov.Subscribe("sport/tennis/player1/#", sub, p) // nolint: errcheck
 
-	subscribers := publishEntries{}
+	subscribers := publishes{}
 
 	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers))
@@ -75,7 +75,7 @@ func TestSNodeMatch3(t *testing.T) {
 
 	prov.Subscribe("sport/tennis/#", sub, p) // nolint: errcheck
 
-	subscribers := publishEntries{}
+	subscribers := publishes{}
 	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers))
 }
@@ -89,29 +89,29 @@ func TestMatch4(t *testing.T) {
 	}
 	prov.Subscribe("#", sub, p) // nolint: errcheck
 
-	subscribers := publishEntries{}
+	subscribers := publishes{}
 
 	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers), "should return subscribers")
 
-	subscribers = publishEntries{}
+	subscribers = publishes{}
 	prov.subscriptionSearch("/sport/tennis/player1/anzel", 0, &subscribers)
 	require.Equal(t, 0, len(subscribers), "should not return subscribers")
 
 	err := prov.subscriptionRemove("#", sub)
 	require.NoError(t, err)
 
-	subscribers = publishEntries{}
+	subscribers = publishes{}
 	prov.subscriptionSearch("#", 0, &subscribers)
 	require.Equal(t, 0, len(subscribers), "should not return subscribers")
 
 	prov.subscriptionInsert("/#", sub, p)
 
-	subscribers = publishEntries{}
+	subscribers = publishes{}
 	prov.subscriptionSearch("bla", 0, &subscribers)
 	require.Equal(t, 0, len(subscribers), "should not return subscribers")
 
-	subscribers = publishEntries{}
+	subscribers = publishes{}
 	prov.subscriptionSearch("/bla", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers), "should return subscribers")
 
@@ -120,19 +120,19 @@ func TestMatch4(t *testing.T) {
 
 	prov.subscriptionInsert("bla/bla/#", sub, p)
 
-	subscribers = publishEntries{}
+	subscribers = publishes{}
 	prov.subscriptionSearch("bla", 0, &subscribers)
 	require.Equal(t, 0, len(subscribers), "should not return subscribers")
 
-	subscribers = publishEntries{}
+	subscribers = publishes{}
 	prov.subscriptionSearch("bla/bla", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers), "should return subscribers")
 
-	subscribers = publishEntries{}
+	subscribers = publishes{}
 	prov.subscriptionSearch("bla/bla/bla", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers), "should return subscribers")
 
-	subscribers = publishEntries{}
+	subscribers = publishes{}
 	prov.subscriptionSearch("bla/bla/bla/bla", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers), "should return subscribers")
 }
@@ -149,7 +149,7 @@ func TestMatch5(t *testing.T) {
 	prov.subscriptionInsert("sport/tennis/+/+/#", sub1, p)
 	prov.subscriptionInsert("sport/tennis/player1/anzel", sub2, p)
 
-	subscribers := publishEntries{}
+	subscribers := publishes{}
 	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subscribers)
 
 	require.Equal(t, 2, len(subscribers))
@@ -166,7 +166,7 @@ func TestMatch6(t *testing.T) {
 	prov.subscriptionInsert("sport/tennis/+/+/+/+/#", sub1, p)
 	prov.subscriptionInsert("sport/tennis/player1/anzel", sub2, p)
 
-	subscribers := publishEntries{}
+	subscribers := publishes{}
 	prov.subscriptionSearch("sport/tennis/player1/anzel/bla/bla", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers))
 }
@@ -186,7 +186,7 @@ func TestMatch7(t *testing.T) {
 
 	prov.subscriptionInsert("sport/tennis", sub2, p)
 
-	subscribers := publishEntries{}
+	subscribers := publishes{}
 	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers))
 	require.Equal(t, sub1, subscribers[sub1.Hash()][0].s)
@@ -202,7 +202,7 @@ func TestMatch8(t *testing.T) {
 
 	prov.subscriptionInsert("+/+", sub, p)
 
-	subscribers := publishEntries{}
+	subscribers := publishes{}
 
 	prov.subscriptionSearch("/finance", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers))
@@ -218,7 +218,7 @@ func TestMatch9(t *testing.T) {
 
 	prov.subscriptionInsert("/+", sub1, p)
 
-	subscribers := publishEntries{}
+	subscribers := publishes{}
 
 	prov.subscriptionSearch("/finance", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers))
@@ -234,7 +234,7 @@ func TestMatch10(t *testing.T) {
 
 	prov.subscriptionInsert("+", sub1, p)
 
-	subscribers := publishEntries{}
+	subscribers := publishes{}
 
 	prov.subscriptionSearch("/finance", 0, &subscribers)
 	require.Equal(t, 0, len(subscribers))
@@ -249,28 +249,28 @@ func TestInsertRemove(t *testing.T) {
 
 	prov.subscriptionInsert("#", sub, p)
 
-	subscribers := publishEntries{}
+	subscribers := publishes{}
 	prov.subscriptionSearch("bla", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers))
 
-	subscribers = publishEntries{}
+	subscribers = publishes{}
 	prov.subscriptionSearch("/bla", 0, &subscribers)
 	require.Equal(t, 0, len(subscribers))
 
 	err := prov.subscriptionRemove("#", sub)
 	require.NoError(t, err)
 
-	subscribers = publishEntries{}
+	subscribers = publishes{}
 	prov.subscriptionSearch("#", 0, &subscribers)
 	require.Equal(t, 0, len(subscribers))
 
 	prov.subscriptionInsert("/#", sub, p)
 
-	subscribers = publishEntries{}
+	subscribers = publishes{}
 	prov.subscriptionSearch("bla", 0, &subscribers)
 	require.Equal(t, 0, len(subscribers))
 
-	subscribers = publishEntries{}
+	subscribers = publishes{}
 	prov.subscriptionSearch("/bla", 0, &subscribers)
 	require.Equal(t, 1, len(subscribers))
 
@@ -317,7 +317,7 @@ func TestInsert1(t *testing.T) {
 	require.Equal(t, 0, len(level5.children))
 	require.Equal(t, 1, len(level5.subs))
 
-	var e *subscribedEntry
+	var e *subscriber
 
 	e, ok = level5.subs[sub1.Hash()]
 	require.Equal(t, true, ok)
@@ -343,7 +343,7 @@ func TestSNodeInsert2(t *testing.T) {
 	require.Equal(t, 0, len(n2.children))
 	require.Equal(t, 1, len(n2.subs))
 
-	var e *subscribedEntry
+	var e *subscriber
 
 	e, ok = n2.subs[sub1.Hash()]
 	require.Equal(t, true, ok)
@@ -381,7 +381,7 @@ func TestSNodeInsert3(t *testing.T) {
 	require.Equal(t, 0, len(n4.children))
 	require.Equal(t, 1, len(n4.subs))
 
-	var e *subscribedEntry
+	var e *subscriber
 
 	e, ok = n4.subs[sub1.Hash()]
 	require.Equal(t, true, ok)
@@ -413,7 +413,7 @@ func TestSNodeInsert4(t *testing.T) {
 	require.Equal(t, 0, len(n3.children))
 	require.Equal(t, 1, len(n3.subs))
 
-	var e *subscribedEntry
+	var e *subscriber
 
 	e, ok = n3.subs[sub1.Hash()]
 	require.Equal(t, true, ok)
@@ -447,7 +447,7 @@ func TestSNodeInsertDup(t *testing.T) {
 	require.Equal(t, 0, len(n3.children))
 	require.Equal(t, 1, len(n3.subs))
 
-	var e *subscribedEntry
+	var e *subscriber
 
 	e, ok = n3.subs[sub1.Hash()]
 	require.Equal(t, true, ok)

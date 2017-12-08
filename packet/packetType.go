@@ -16,7 +16,7 @@ const (
 	//      Dir: Client to Server
 	CONNECT
 
-	// CONNACK Connect acknowledgement
+	// CONNACK Accept acknowledgement
 	// version: v3.1, v3.1.1, v5.0
 	//      Dir: Server to Client
 	CONNACK
@@ -87,7 +87,7 @@ var typeName = [AUTH + 1]string{
 var typeDescription = [AUTH + 1]string{
 	"Reserved",
 	"Client request to connect to Server",
-	"Connect acknowledgement",
+	"Accept acknowledgement",
 	"Publish message",
 	"Publish acknowledgement",
 	"Publish received (assured delivery part 1)",
