@@ -291,22 +291,22 @@ func (m *Manager) newConnectionPreConfig(config *StartConfig) *connection.PreCon
 	username, _ := config.Req.Credentials()
 
 	return &connection.PreConfig{
-		Username:        string(username),
-		Auth:            config.Auth,
-		Conn:            config.Conn,
-		KeepAlive:       config.Req.KeepAlive(),
-		Version:         config.Req.Version(),
-		Desc:            netpoll.Must(netpoll.HandleReadOnce(config.Conn)),
-		MaxTxPacketSize: types.DefaultMaxPacketSize,
-		SendQuota:       types.DefaultReceiveMax,
-		State:           m.persistence,
-		EventPoll:       m.poll,
-		Metric:          m.Systree.Metric(),
-		RetainAvailable: m.AvailableRetain,
-		OfflineQoS0:     m.OfflineQoS0,
-		MaxRxPacketSize: m.MaxPacketSize,
-		MaxRxTopicAlias: m.TopicAliasMaximum,
-		MaxTxTopicAlias: 0,
+		Username:        	string(username),
+		Auth:            	config.Auth,
+		Conn:            	config.Conn,
+		KeepAlive:       	config.Req.KeepAlive(),
+		Version:         	config.Req.Version(),
+		Desc:            	netpoll.Must(netpoll.HandleReadOnce(config.Conn)),
+		MaxTxPacketSize: 	types.DefaultMaxPacketSize,
+		SendQuota:       	types.DefaultReceiveMax,
+		PersistedSession:   m.persistence,
+		EventPoll:       	m.poll,
+		Metric:          	m.Systree.Metric(),
+		RetainAvailable: 	m.AvailableRetain,
+		OfflineQoS0:     	m.OfflineQoS0,
+		MaxRxPacketSize: 	m.MaxPacketSize,
+		MaxRxTopicAlias: 	m.TopicAliasMaximum,
+		MaxTxTopicAlias: 	0,
 	}
 }
 
@@ -351,7 +351,7 @@ func (m *Manager) configureSession(config *StartConfig, ses *session, id string,
 	var status *systree.ClientConnectStatus
 
 	if err := ses.allocConnection(cConfig); err == nil {
-		if !config.Req.IsClean() {
+		if config.Req.IsClean() {
 			m.persistence.Delete([]byte(id)) // nolint: errcheck
 		}
 
@@ -545,6 +545,21 @@ func (m *Manager) onSessionClose(id string, reason exitReason) {
 		}
 
 		m.Systree.Sessions().Removed(id, state)
+	} else if s, ok := m.sessions.Load(id); ok{
+		sub := s.(*sessionWrap).s.subscriber
+		if sub != nil && sub.HasSubscriptions(){
+			m.log.Debug("Persisting session state...", zap.String("ClientId", id))
+			err := m.persistence.StateStore([]byte(id), s.(*sessionWrap).s.getRuntimeState())
+			if err != nil {
+				m.log.Warn("Session state persisting failed on close.", zap.String("ClientId", id), zap.Error(err))
+			}
+		} else {
+			m.log.Debug("Deleting persisted session on close...", zap.String("ClientId", id))
+			err := m.persistence.Delete([]byte(id))
+			if err != nil {
+				m.log.Warn("Failed to delete persisted session on close.", zap.String("ClientId", id), zap.Error(err))
+			}
+		}
 	}
 
 	m.log.Debug("Session close", zap.String("ClientID", id))
@@ -560,14 +575,17 @@ func (m *Manager) loadSessions() error {
 
 	err := m.persistence.LoadForEach(func(id []byte, state *persistence.SessionState) error {
 		sID := string(id)
-
 		if len(state.Errors) != 0 {
 			m.log.Error("Session load", zap.String("ClientID", sID), zap.Errors("errors", state.Errors))
-			if err := m.persistence.SubscriptionsDelete(id); err != nil && err != persistence.ErrNotFound {
-				m.log.Error("Persisted subscriber delete", zap.Error(err))
-			}
+			// in separate routine for avoiding persistence dead lock.
+			go func(){
+			if err := m.persistence.SubscriptionsDelete(id); err != nil && err != persistence.ErrNotFound{
+				m.log.Error("Persisted subscriber delete", zap.String("session_id", sID), zap.Error(err))
+			} else {
+				m.log.Debug("Persisted subscriber deleted", zap.String("session_id", sID))
+			}}()
+			return nil
 		}
-
 		if state.Expire != nil {
 			since, err := time.Parse(time.RFC3339, state.Expire.Since)
 			if err != nil {
@@ -679,7 +697,6 @@ func (m *Manager) loadSessions() error {
 				m.log.Error("Couldn't subscribe", zap.Error(err))
 			}
 		}
-
 		m.subscribers.Store(id, sub)
 	}
 
@@ -793,7 +810,7 @@ func (m *Manager) onPublish(id string, p *packet.Publish) {
 		m.log.Error("Couldn't encode packet", zap.String("ClientID", id), zap.Error(err))
 		return
 	}
-
+	m.log.Debug("Persisting message packet:", zap.String("ClientID", id), zap.Int64("MessageID", p.GetCreateTimeStamp()))
 	if err = m.persistence.PacketStore([]byte(id), pkt); err != nil {
 		m.log.Error("Couldn't persist message", zap.String("ClientID", id), zap.Error(err))
 	}

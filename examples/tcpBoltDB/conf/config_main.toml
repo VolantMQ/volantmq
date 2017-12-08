@@ -1,0 +1,15 @@
+[mqtt.tcp]
+host="0.0.0.0"
+port=1883
+ssl_enable=true
+ssl_cert_file="conf/cert.pem"
+ssl_cert_key_file="conf/cert.key"
+
+
+[[mqtt.auth.internal]]
+user="testuser"
+password="testpassword"
+
+[[mqtt.auth.internal]]
+user="testuser1"
+password="testpassword1"

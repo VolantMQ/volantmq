@@ -66,9 +66,14 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 			return nil, err
 		}
 
+		var ver packet.ProtocolVersion
 		for _, d := range entries {
-			v := packet.ProtocolVersion(d.Data[0])
-			pkt, _, err := packet.Decode(v, d.Data[1:])
+			if d.Version == 0 {
+				ver = packet.ProtocolV311 // TODO: may not be compatible.
+			} else {
+				ver = packet.ProtocolVersion(d.Version)
+			}
+			pkt, _, err := packet.Decode(ver, d.Data)
 			if err != nil {
 				p.log.Error("Couldn't decode retained message", zap.Error(err))
 			} else {
@@ -80,6 +85,10 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 							p.log.Error("Decode publish expire at", zap.Error(err))
 						}
 					}
+					p.log.Debug("restoring persisted retained message:", zap.String("topic", m.Topic()),
+						zap.Any("version", m.Version()),
+							zap.String("payload", string(m.Payload())),
+						)
 					p.Retain(m) // nolint: errcheck
 				} else {
 					p.log.Warn("Unsupported retained message type", zap.String("type", m.Type().Name()))
@@ -115,7 +124,6 @@ func (mT *provider) Subscribe(filter string, s topicsTypes.Subscriber, p *topics
 	if (rh == packet.RetainHandlingRetain) || ((rh == packet.RetainHandlingIfNotExists) && !exists) {
 		mT.retainSearch(filter, &r)
 	}
-
 	return p.Granted, r, nil
 }
 
@@ -181,6 +189,7 @@ func (mT *provider) Close() error {
 				} else {
 					entry := persistence.PersistedPacket{
 						Data: buf,
+						Version: persistence.ProtocolVersion(pkt.Version()),
 					}
 					if tm := pkt.GetExpiry(); !tm.IsZero() {
 						entry.ExpireAt = tm.Format(time.RFC3339)

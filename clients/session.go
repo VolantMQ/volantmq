@@ -147,7 +147,6 @@ func (s *session) stop(reason packet.ReasonCode) *persistence.SessionState {
 	s.connStop.Do(func() {
 		if s.conn != nil {
 			s.conn.Stop(reason)
-			s.conn = nil
 		}
 	})
 
@@ -163,6 +162,10 @@ func (s *session) stop(reason packet.ReasonCode) *persistence.SessionState {
 		s.finalized = true
 	}
 
+	return s.getRuntimeState()
+}
+
+func (s *session) getRuntimeState()*persistence.SessionState{
 	state := &persistence.SessionState{
 		Timestamp: s.createdAt.Format(time.RFC3339),
 	}
@@ -190,6 +193,10 @@ func (s *session) stop(reason packet.ReasonCode) *persistence.SessionState {
 		}
 	}
 
+	if s.subscriber != nil {
+		state.Version = byte(s.subscriber.Version())
+		state.LastCompletedSubscribedMessageUniqueIds = s.conn.GetLastCompletedSubscribedMessageUniqueTopicIds()
+	}
 	return state
 }
 
@@ -267,10 +274,6 @@ func (s *session) onDisconnect(p *connection.DisconnectParams) {
 			s.signalClose(s.id, err)
 			s.finalized = true
 		}
-
-		s.connStop.Do(func() {
-			s.conn = nil
-		})
 
 		if p.ExpireAt != nil {
 			s.expireIn = p.ExpireAt

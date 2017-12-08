@@ -66,25 +66,26 @@ type WillConfig struct {
 // a bit of ugly
 // TODO(troian): try rid it off
 type PreConfig struct {
-	EventPoll       netpoll.EventPoll
-	Username        string
-	AuthMethod      string
-	AuthData        []byte
-	State           persistence.Packets
-	Metric          systree.Metric
-	Conn            net.Conn
-	Auth            auth.SessionPermissions
-	Desc            *netpoll.Desc
-	MaxRxPacketSize uint32
-	MaxTxPacketSize uint32
-	SendQuota       int32
-	MaxTxTopicAlias uint16
-	MaxRxTopicAlias uint16
-	KeepAlive       uint16
-	Version         packet.ProtocolVersion
-	RetainAvailable bool
-	PreserveOrder   bool
-	OfflineQoS0     bool
+	EventPoll        netpoll.EventPoll
+	Username         string
+	AuthMethod       string
+	AuthData         []byte
+	PersistedSession persistence.Sessions
+	WasPersisted     bool
+	Metric           systree.Metric
+	Conn             net.Conn
+	Auth             auth.SessionPermissions
+	Desc             *netpoll.Desc
+	MaxRxPacketSize  uint32
+	MaxTxPacketSize  uint32
+	SendQuota        int32
+	MaxTxTopicAlias  uint16
+	MaxRxTopicAlias  uint16
+	KeepAlive        uint16
+	Version          packet.ProtocolVersion
+	RetainAvailable  bool
+	PreserveOrder    bool
+	OfflineQoS0      bool
 }
 
 // Config is system wide configuration parameters for every session
@@ -136,6 +137,36 @@ type Type struct {
 	topicAliasCurrMax uint16
 	txQuotaExceeded   bool
 	will              bool
+	// the unique message IDs(createAt field of the PUBLISH packet) of the
+	// lasted completed message(PUBLISH packet with QoS1 or QoS2) by the remote subscribers.
+	// map[topic name]map[message createdAt]true
+	lastCompletedSubscribedMessageUniqueIds *LastCompletedSubscribedMessageUniqueIds
+}
+
+type LastCompletedSubscribedMessageUniqueIds struct{
+	lock sync.RWMutex
+	// the subscribed topics and the last retained message IDs(createAt field of the PUBLISH packet)
+	topics *map[string]int64
+}
+
+func (lids *LastCompletedSubscribedMessageUniqueIds)Store(p *packet.Publish){
+	lids.lock.Lock()
+	topic := p.Topic()
+	(*lids.topics)[topic] = p.GetCreateTimeStamp()
+	lids.lock.Unlock()
+}
+
+func(lids *LastCompletedSubscribedMessageUniqueIds)Exists(p *packet.Publish)bool{
+	lids.lock.RLock()
+	defer lids.lock.RUnlock()
+	if id, ok := (*lids.topics)[p.Topic()]; ok && p.GetCreateTimeStamp() == id {
+		return true
+	}
+	return false
+}
+
+func(lids *LastCompletedSubscribedMessageUniqueIds) TopicMessageIDs()*map[string]int64{
+	return lids.topics
 }
 
 type unacknowledged struct {
@@ -160,6 +191,9 @@ func New(c *Config) (s *Type, err error) {
 		rxTopicAlias: make(map[uint16]string),
 		txTimer:      time.NewTimer(1 * time.Second),
 		will:         true,
+		lastCompletedSubscribedMessageUniqueIds: &LastCompletedSubscribedMessageUniqueIds{
+			topics:&map[string]int64{},
+		},
 	}
 
 	s.txTimer.Stop()
@@ -286,11 +320,11 @@ func (s *Type) processIncoming(p packet.Provider) error {
 }
 
 func (s *Type) loadPersistence() error {
-	if s.State == nil {
+	if s.PersistedSession == nil {
 		return nil
 	}
-
-	return s.State.PacketsForEach([]byte(s.ID), func(entry persistence.PersistedPacket) error {
+	var err error
+	err = s.PersistedSession.PacketsForEach([]byte(s.ID), func(entry persistence.PersistedPacket) error {
 		var err error
 		var pkt packet.Provider
 		if pkt, _, err = packet.Decode(s.Version, entry.Data); err != nil {
@@ -318,7 +352,6 @@ func (s *Type) loadPersistence() error {
 						s.log.Error("Parse publish expiry", zap.String("ClientID", s.ID), zap.Error(err))
 					}
 				}
-
 				if p.QoS() == packet.QoS0 {
 					s.gLoad(pkt)
 				} else {
@@ -329,9 +362,31 @@ func (s *Type) loadPersistence() error {
 
 		return nil
 	})
+
+	if err != nil {
+		return err
+	} else {
+		s.log.Debug("Deleting loaded persisted packets...", zap.String("ClientID", s.ID))
+		err = s.PersistedSession.PacketsDelete([]byte(s.ID))
+		if err != nil {
+			return err
+		}
+	}
+
+
+	// load session state.
+	if state, _:= s.PersistedSession.StateGet([]byte(s.ID)); state != nil {
+		s.WasPersisted = true
+		s.SetLastCompletedSubscribedMessageUniqueTopicIds(state.LastCompletedSubscribedMessageUniqueIds)
+		s.log.Debug("Persisted session state loaded:", zap.String("ClientID", s.ID), zap.Any("state", *state))
+	}
+	return nil
 }
 
 func (s *Type) persist() {
+	if s.PersistedSession == nil {
+		return
+	}
 	var packets []persistence.PersistedPacket
 
 	persistAppend := func(p interface{}) {
@@ -391,7 +446,7 @@ func (s *Type) persist() {
 		return true
 	})
 
-	if err := s.State.PacketsStore([]byte(s.ID), packets); err != nil {
+	if err := s.PersistedSession.PacketsStore([]byte(s.ID), packets); err != nil {
 		s.log.Error("Persist packets", zap.String("ClientID", s.ID), zap.Error(err))
 	}
 }
@@ -465,6 +520,9 @@ func (s *Type) onReleaseOut(o, n packet.Provider) {
 			s.signalQuota()
 		}
 	}
+	if p, ok := o.(*packet.Publish); ok {
+		s.StoreLastCompletedSubscribedMessageUniqueId(p)
+	}
 }
 
 func (s *Type) preProcessPublishV50(p *packet.Publish) error {
@@ -515,4 +573,22 @@ func (s *Type) postProcessPublishV50(p *packet.Publish) error {
 	}
 
 	return nil
+}
+
+func (s *Type) StoreLastCompletedSubscribedMessageUniqueId(p *packet.Publish){
+	s.lastCompletedSubscribedMessageUniqueIds.Store(p)
+}
+
+// SubscribedMessageCompleted checks it the PUBLISH packet has been completed by the remove subscriber ever before.
+// this is to insure QoS1 or QoS 2
+func (s *Type) SubscribedMessageCompleted(p *packet.Publish)bool{
+	return s.lastCompletedSubscribedMessageUniqueIds.Exists(p)
+}
+
+func (s *Type) GetLastCompletedSubscribedMessageUniqueTopicIds()*map[string]int64{
+	return s.lastCompletedSubscribedMessageUniqueIds.topics
+}
+
+func (s *Type) SetLastCompletedSubscribedMessageUniqueTopicIds(topicIds *map[string]int64){
+	s.lastCompletedSubscribedMessageUniqueIds.topics = topicIds
 }

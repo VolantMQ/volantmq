@@ -46,9 +46,9 @@ func main() {
 
 	logger.Info("Starting application")
 	logger.Info("Allocated cores", zap.Int("GOMAXPROCS", runtime.GOMAXPROCS(0)))
-	viper.SetConfigName("config")
+	viper.SetConfigName("config_main")
 	viper.AddConfigPath("conf")
-	viper.SetConfigType("json")
+	viper.SetConfigType("toml")
 
 	go func() {
 		http.ListenAndServe("localhost:6061", nil) // nolint: errcheck
@@ -92,8 +92,9 @@ func main() {
 	serverConfig := volantmq.NewServerConfig()
 	serverConfig.OfflineQoS0 = true
 	serverConfig.TransportStatus = listenerStatus
-	serverConfig.AllowDuplicates = true
+	serverConfig.AllowDuplicates = false
 	serverConfig.Authenticators = "internal"
+	serverConfig.AllowOverlappingSubscriptions = true
 
 	serverConfig.Persistence, err = boltdb.New(&boltdb.Config{
 		File: "./persist.db",
@@ -118,26 +119,48 @@ func main() {
 		return
 	}
 
-	config := transport.NewConfigTCP(
-		&transport.Config{
-			Port:        "1883",
-			AuthManager: authMng,
-		})
+
+	transportConfig := &transport.Config{
+		Port:        viper.GetString("mqtt.tcp.port"),
+		AuthManager: authMng,
+	}
+	if transportConfig.Port == "" {
+		transportConfig.Port = "1883"
+	}
+	config := transport.NewConfigTCP(transportConfig)
+
+
+	var tcpSSLEnabled = viper.GetBool("mqtt.tcp.ssl_enable")
+	if tcpSSLEnabled {
+		config.CertFile = viper.GetString("mqtt.tcp.ssl_cert_file")
+		config.KeyFile = viper.GetString("mqtt.tcp.ssl_cert_key_file")
+		if config.CertFile == "" {
+			logger.Error("tcp ssl enabled, but ssl cert file is not set !")
+			return
+		}
+
+		if config.KeyFile == "" {
+			logger.Error("tcp ssl enabled, but ssl cert key file is not set !")
+			return
+		}
+	}
 
 	if err = srv.ListenAndServe(config); err != nil {
 		logger.Error("Couldn't start listener", zap.Error(err))
+		return
 	}
-
-	go http.ListenAndServe(":6061", nil) // nolint: errcheck
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-ch
-	logger.Info("Received signal", zap.String("signal", sig.String()))
-
+	logger.Info("Received signal...starting shutdown...", zap.String("signal", sig.String()))
 	if err = srv.Close(); err != nil {
 		logger.Error("Couldn't shutdown server", zap.Error(err))
+	} else {
+		logger.Info("Server shut down.")
 	}
 
-	os.Remove("./persist.db") // nolint: errcheck
+
+
+	//os.Remove("./persist.db") // nolint: errcheck
 }
