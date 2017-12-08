@@ -66,9 +66,11 @@ func (c *connTCP) SetWriteDeadline(t time.Time) error {
 }
 
 func (c *connTCP) File() (*os.File, error) {
-	if conn, ok := c.conn.(*net.TCPConn); ok {
-		return conn.File()
+	switch c.conn.(type) {
+	case *net.TCPConn:
+		return c.conn.(*net.TCPConn).File()
+	case *TLSConnection:
+		return c.conn.(*TLSConnection).File()
 	}
-
 	return nil, errors.New("not implemented")
 }

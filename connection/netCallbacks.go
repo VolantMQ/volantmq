@@ -271,11 +271,23 @@ func (s *Type) onSubscribe(msg *packet.Subscribe) packet.Provider {
 		return nil
 	}
 
+	// if the session has been persisted before, then all subscribed messages, including the retained,
+	// should also have been put into its persisted message packets which will be loaded to the queues
+	// when loadSession.
+	if s.WasPersisted {
+		s.log.Debug("Persisted session state loaded, skip re-push retained messages which will be pushed from the persisted packets:", zap.String("ClientID", s.ID))
+		return resp
+	}
 	// Now put retained messages into publish queue
 	for _, rp := range retainedPublishes {
+		if s.SubscribedMessageCompleted(rp){
+			s.log.Debug("Skip completed retained message:", zap.String("ClientID", s.ID), zap.Int64("MessageID", rp.GetCreateTimeStamp()))
+			continue
+		}
 		if pkt, err := rp.Clone(s.Version); err == nil {
 			pkt.SetRetain(true)
 			s.onSubscribedPublish(pkt)
+			s.log.Debug("Pushed retained message:", zap.String("ClientID", s.ID), zap.Int64("MessageID", rp.GetCreateTimeStamp()))
 		} else {
 			s.log.Error("Couldn't clone PUBLISH message", zap.String("ClientID", s.ID), zap.Error(err))
 		}
