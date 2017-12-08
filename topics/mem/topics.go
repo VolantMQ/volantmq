@@ -71,7 +71,7 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 			if d.Version == 0 {
 				ver = packet.ProtocolV311 // TODO: may not be compatible.
 			} else {
-				ver = d.Version
+				ver = packet.ProtocolVersion(d.Version)
 			}
 			pkt, _, err := packet.Decode(ver, d.Data)
 			if err != nil {
@@ -189,7 +189,7 @@ func (mT *provider) Close() error {
 				} else {
 					entry := persistence.PersistedPacket{
 						Data: buf,
-						Version: pkt.Version(),
+						Version: persistence.ProtocolVersion(pkt.Version()),
 					}
 					if tm := pkt.GetExpiry(); !tm.IsZero() {
 						entry.ExpireAt = tm.Format(time.RFC3339)
