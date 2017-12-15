@@ -29,16 +29,32 @@ func newPubAck() *Ack {
 	return &Ack{}
 }
 
-func newPubRec() *Ack {
-	return &Ack{}
+// NewPubAck creates a new PUBACK packet
+func NewPubAck(v ProtocolVersion) *Ack {
+	p := newPubAck()
+	p.init(PUBACK, v, p.size, p.encodeMessage, p.decodeMessage)
+	return p
 }
 
-func newPubRel() *Ack {
-	return &Ack{}
+// NewPubRec creates a new PUBREC packet
+func NewPubRec(v ProtocolVersion) *Ack {
+	p := newPubAck()
+	p.init(PUBREC, v, p.size, p.encodeMessage, p.decodeMessage)
+	return p
 }
 
-func newPubComp() *Ack {
-	return &Ack{}
+// NewPubRel creates a new PUBREL packet
+func NewPubRel(v ProtocolVersion) *Ack {
+	p := newPubAck()
+	p.init(PUBREL, v, p.size, p.encodeMessage, p.decodeMessage)
+	return p
+}
+
+// NewPubComp creates a new PUBCOMP packet
+func NewPubComp(v ProtocolVersion) *Ack {
+	p := newPubAck()
+	p.init(PUBCOMP, v, p.size, p.encodeMessage, p.decodeMessage)
+	return p
 }
 
 // SetPacketID sets the ID of the packet.
@@ -78,12 +94,11 @@ func (msg *Ack) decodeMessage(from []byte) (int, error) {
 
 		if len(from[offset:]) > 0 {
 			// v5 [MQTT-3.1.2.11] specifies properties in variable header
-			var err error
-			var n int
-			if msg.properties, n, err = decodeProperties(msg.mType, from[offset:]); err != nil {
-				return offset + n, err
-			}
+			n, err := msg.properties.decode(msg.Type(), from[offset:])
 			offset += n
+			if err != nil {
+				return offset, err
+			}
 		}
 	}
 
@@ -107,7 +122,7 @@ func (msg *Ack) encodeMessage(to []byte) (int, error) {
 
 			if pLen > 1 {
 				var n int
-				n, err = encodeProperties(msg.properties, to[offset:])
+				n, err = msg.properties.encode(to[offset:])
 				offset += n
 			}
 		}

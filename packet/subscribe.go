@@ -16,8 +16,6 @@ package packet
 
 import (
 	"unicode/utf8"
-
-	"github.com/troian/omap"
 )
 
 // Subscribe The SUBSCRIBE Packet is sent from the Client to the Server to create one or more
@@ -28,23 +26,28 @@ import (
 // which the Server can send Application Messages to the Client.
 type Subscribe struct {
 	header
-
-	topics omap.Map
+	topics []string
+	ops    []SubscriptionOptions
 }
 
 var _ Provider = (*Subscribe)(nil)
 
 func newSubscribe() *Subscribe {
-	msg := &Subscribe{
-		topics: omap.New(),
-	}
-
-	return msg
+	return &Subscribe{}
 }
 
-// Topics returns a list of topics sent by the Client.
-func (msg *Subscribe) Topics() omap.Map {
-	return msg.topics
+// NewSubscribe creates a new SUBSCRIBE packet
+func NewSubscribe(v ProtocolVersion) *Subscribe {
+	p := newSubscribe()
+	p.init(SUBSCRIBE, v, p.size, p.encodeMessage, p.decodeMessage)
+	return p
+}
+
+// RangeTopics loop through list of topics
+func (msg *Subscribe) RangeTopics(fn func(string, SubscriptionOptions)) {
+	for i, t := range msg.topics {
+		fn(t, msg.ops[i])
+	}
 }
 
 // AddTopic adds a single topic to the message, along with the corresponding QoS.
@@ -65,15 +68,10 @@ func (msg *Subscribe) AddTopic(topic string, ops SubscriptionOptions) error {
 		return ErrMalformedTopic
 	}
 
-	msg.topics.Set(topic, ops)
+	msg.topics = append(msg.topics, topic)
+	msg.ops = append(msg.ops, ops)
 
 	return nil
-}
-
-// RemoveTopic removes a single topic from the list of existing ones in the message.
-// If topic does not exist it just does nothing.
-func (msg *Subscribe) RemoveTopic(topic string) {
-	msg.topics.Delete(topic)
 }
 
 // SetPacketID sets the ID of the packet.
@@ -82,28 +80,24 @@ func (msg *Subscribe) SetPacketID(v IDType) {
 }
 
 // decode message
-func (msg *Subscribe) decodeMessage(src []byte) (int, error) {
-	total := 0
-
-	total += msg.decodePacketID(src[total:])
+func (msg *Subscribe) decodeMessage(from []byte) (int, error) {
+	offset := msg.decodePacketID(from)
 
 	// v5 [MQTT-3.1.2.11] specifies properties in variable header
 	if msg.version == ProtocolV50 {
-		var n int
-		var err error
-
-		if msg.properties, n, err = decodeProperties(msg.mType, src[total:]); err != nil {
-			return total + n, err
+		n, err := msg.properties.decode(msg.Type(), from[offset:])
+		offset += n
+		if err != nil {
+			return offset, err
 		}
-		total += n
 	}
 
-	remLen := int(msg.remLen) - total
+	remLen := int(msg.remLen) - offset
 	for remLen > 0 {
-		t, n, err := ReadLPBytes(src[total:])
-		total += n
+		t, n, err := ReadLPBytes(from[offset:])
+		offset += n
 		if err != nil {
-			return total, err
+			return offset, err
 		}
 
 		// [MQTT-3.8.3-1]
@@ -115,10 +109,11 @@ func (msg *Subscribe) decodeMessage(src []byte) (int, error) {
 			return 0, rejectReason
 		}
 
-		subsOptions := SubscriptionOptions(src[total])
+		subsOptions := SubscriptionOptions(from[offset])
+		offset++
 
 		if msg.version == ProtocolV50 && (byte(subsOptions)&maskSubscriptionReserved) != 0 {
-			return total, CodeProtocolError
+			return offset, CodeProtocolError
 		}
 
 		// [MQTT-3-8.3-4]
@@ -127,17 +122,17 @@ func (msg *Subscribe) decodeMessage(src []byte) (int, error) {
 			if msg.version <= ProtocolV50 {
 				rejectReason = CodeRefusedServerUnavailable
 			}
-			return 0, rejectReason
+			return offset, rejectReason
 		}
 
-		msg.topics.Set(string(t), subsOptions)
-		total++
+		msg.topics = append(msg.topics, string(t))
+		msg.ops = append(msg.ops, subsOptions)
 
 		remLen = remLen - n - 1
 	}
 
 	// [MQTT-3.8.3-3]
-	if msg.topics.Len() == 0 {
+	if len(msg.topics) == 0 {
 		rejectReason := CodeProtocolError
 		if msg.version <= ProtocolV50 {
 			rejectReason = CodeRefusedServerUnavailable
@@ -145,44 +140,38 @@ func (msg *Subscribe) decodeMessage(src []byte) (int, error) {
 		return 0, rejectReason
 	}
 
-	return total, nil
+	return offset, nil
 }
 
-func (msg *Subscribe) encodeMessage(dst []byte) (int, error) {
+func (msg *Subscribe) encodeMessage(to []byte) (int, error) {
 	// [MQTT-2.3.1]
 	if len(msg.packetID) == 0 {
 		return 0, ErrPackedIDZero
 	}
 
-	var err error
-	total := 0
-
-	var n int
-
-	total += msg.encodePacketID(dst[total:])
+	offset := msg.encodePacketID(to)
 
 	// V5.0   [MQTT-3.1.2.11]
 	if msg.version == ProtocolV50 {
-		if n, err = encodeProperties(msg.properties, dst[total:]); err != nil {
-			return total + n, err
-		}
-
-		total += n
-	}
-
-	iter := msg.topics.Iterator()
-	for kv, ok := iter(); ok; kv, ok = iter() {
-		n, err = WriteLPBytes(dst[total:], []byte(kv.Key.(string)))
-		total += n
+		n, err := msg.properties.encode(to[offset:])
+		offset += n
 		if err != nil {
-			return total, err
+			return offset, err
 		}
-
-		dst[total] = byte(kv.Value.(SubscriptionOptions))
-		total++
 	}
 
-	return total, err
+	for i, t := range msg.topics {
+		n, err := WriteLPBytes(to[offset:], []byte(t))
+		offset += n
+		if err != nil {
+			return offset, err
+		}
+
+		to[offset] = byte(msg.ops[i])
+		offset++
+	}
+
+	return offset, nil
 }
 
 func (msg *Subscribe) size() int {
@@ -191,13 +180,11 @@ func (msg *Subscribe) size() int {
 
 	// v5.0 [MQTT-3.1.2.11]
 	if msg.version == ProtocolV50 {
-		pLen, _ := encodeProperties(msg.properties, []byte{})
-		total += pLen
+		total += int(msg.properties.FullLen())
 	}
 
-	iter := msg.topics.Iterator()
-	for kv, ok := iter(); ok; kv, ok = iter() {
-		total += 2 + len(kv.Key.(string)) + 1
+	for _, t := range msg.topics {
+		total += 2 + len(t) + 1
 	}
 
 	return total

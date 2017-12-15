@@ -119,7 +119,7 @@ func TestConnectMessageFields(t *testing.T) {
 }
 
 func TestConnectMessageDecodeV3(t *testing.T) {
-	msgBytes := []byte{
+	buf := []byte{
 		byte(CONNECT << 4),
 		62,
 		0, // Length MSB (0)
@@ -146,13 +146,13 @@ func TestConnectMessageDecodeV3(t *testing.T) {
 		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e', 't',
 	}
 
-	m, n, err := Decode(ProtocolV311, msgBytes)
+	m, n, err := Decode(ProtocolV311, buf)
 	require.NoError(t, err, "Error decoding message")
 	msg, ok := m.(*Connect)
 	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n, "Error decoding message.")
+	require.Equal(t, len(buf), n, "Error decoding message.")
 	require.Equal(t, 206, int(msg.connectFlags), "Incorrect flag value.")
 	require.Equal(t, 10, int(msg.KeepAlive()), "Incorrect KeepAlive value.")
 	require.Equal(t, "volantmq", string(msg.ClientID()), "Incorrect client ID value.")
@@ -169,13 +169,13 @@ func TestConnectMessageDecodeV3(t *testing.T) {
 	require.Equal(t, "volantmq", string(username), "Incorrect username value.")
 	require.Equal(t, "verysecret", string(password), "Incorrect password value.")
 
-	_, _, err = Decode(ProtocolV50, msgBytes)
+	_, _, err = Decode(ProtocolV50, buf)
 	require.NoError(t, err)
 }
 
 func TestConnectMessageDecode2(t *testing.T) {
 	// missing last byte 't'
-	msgBytes := []byte{
+	buf := []byte{
 		byte(CONNECT << 4),
 		60,
 		0, // Length MSB (0)
@@ -202,14 +202,14 @@ func TestConnectMessageDecode2(t *testing.T) {
 		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e',
 	}
 
-	_, _, err := Decode(ProtocolV311, msgBytes)
+	_, _, err := Decode(ProtocolV311, buf)
 	require.EqualError(t, err, ErrInsufficientDataSize.Error())
 
-	_, _, err = Decode(ProtocolV50, msgBytes)
+	_, _, err = Decode(ProtocolV50, buf)
 	require.EqualError(t, err, ErrInsufficientDataSize.Error())
 
 	// missing last byte 't'
-	msgBytes = []byte{
+	buf = []byte{
 		byte(CONNECT << 4),
 		60,
 		0, // Length MSB (0)
@@ -237,13 +237,13 @@ func TestConnectMessageDecode2(t *testing.T) {
 		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e', 't',
 	}
 
-	_, _, err = Decode(ProtocolV50, msgBytes)
+	_, _, err = Decode(ProtocolV50, buf)
 	require.Error(t, err)
 }
 
 func TestConnectMessageDecode3(t *testing.T) {
 	// missing last byte 't'
-	msgBytes := []byte{
+	buf := []byte{
 		byte(CONNECT << 4),
 		60,
 		0, // Length MSB (0)
@@ -271,16 +271,16 @@ func TestConnectMessageDecode3(t *testing.T) {
 		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e', 't',
 	}
 
-	_, _, err := Decode(ProtocolV311, msgBytes)
+	_, _, err := Decode(ProtocolV311, buf)
 	require.EqualError(t, err, ErrInsufficientDataSize.Error())
 
-	_, _, err = Decode(ProtocolV50, msgBytes)
+	_, _, err = Decode(ProtocolV50, buf)
 	require.EqualError(t, err, ErrInsufficientDataSize.Error())
 }
 
 func TestConnectMessageDecode4(t *testing.T) {
 	// extra bytes
-	msgBytes := []byte{
+	buf := []byte{
 		byte(CONNECT << 4),
 		60,
 		0, // Length MSB (0)
@@ -308,13 +308,13 @@ func TestConnectMessageDecode4(t *testing.T) {
 		'e', 'x', 't', 'r', 'a',
 	}
 
-	_, n, err := Decode(ProtocolV311, msgBytes)
+	_, n, err := Decode(ProtocolV311, buf)
 
 	require.NoError(t, err)
 	require.Equal(t, 62, n)
 
 	// extra bytes
-	msgBytes = []byte{
+	buf = []byte{
 		byte(CONNECT << 4),
 		60,
 		0, // Length MSB (0)
@@ -342,12 +342,12 @@ func TestConnectMessageDecode4(t *testing.T) {
 		'e', 'x', 't', 'r', 'a',
 	}
 
-	_, _, err = Decode(ProtocolV311, msgBytes)
+	_, _, err = Decode(ProtocolV311, buf)
 
 	require.Error(t, err)
 
 	// extra bytes
-	msgBytes = []byte{
+	buf = []byte{
 		byte(CONNECT << 4),
 		60,
 		0, // Length MSB (0)
@@ -376,14 +376,14 @@ func TestConnectMessageDecode4(t *testing.T) {
 		'e', 'x', 't', 'r', 'a',
 	}
 
-	_, n, err = Decode(ProtocolV311, msgBytes)
+	_, n, err = Decode(ProtocolV311, buf)
 	require.NoError(t, err)
 	require.Equal(t, 63, n)
 }
 
 func TestConnectMessageDecode5(t *testing.T) {
 	// missing client Id, clean session == 0
-	msgBytes := []byte{
+	buf := []byte{
 		byte(CONNECT << 4),
 		53,
 		0, // Length MSB (0)
@@ -409,13 +409,13 @@ func TestConnectMessageDecode5(t *testing.T) {
 		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e', 't',
 	}
 
-	_, _, err := Decode(ProtocolV311, msgBytes)
+	_, _, err := Decode(ProtocolV311, buf)
 
 	require.Error(t, err)
 }
 
 func TestConnectMessageEncode(t *testing.T) {
-	msgBytes := []byte{
+	buf := []byte{
 		byte(CONNECT << 4),
 		62,
 		0, // Length MSB (0)
@@ -460,14 +460,14 @@ func TestConnectMessageEncode(t *testing.T) {
 	n, err := msg.Encode(dst)
 
 	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n, "Error decoding message.")
-	require.Equal(t, msgBytes, dst[:n], "Error decoding message.")
+	require.Equal(t, len(buf), n, "Error decoding message.")
+	require.Equal(t, buf, dst[:n], "Error decoding message.")
 	require.Equal(t, ProtocolV311, msg.Version())
 
 	// V5.0
-	msgBytes = []byte{
+	buf = []byte{
 		byte(CONNECT << 4),
-		62,
+		63,
 		0, // Length MSB (0)
 		4, // Length LSB (4)
 		'M', 'Q', 'T', 'T',
@@ -475,9 +475,9 @@ func TestConnectMessageEncode(t *testing.T) {
 		206, // connect flags 11001110, will QoS = 01
 		0,   // Keep Alive MSB (0)
 		10,  // Keep Alive LSB (10)
-		0,
-		0, // Client ID MSB (0)
-		8, // Client ID LSB (8)
+		0,   // Property length
+		0,   // Client ID MSB (0)
+		8,   // Client ID LSB (8)
 		'v', 'o', 'l', 'a', 'n', 't', 'm', 'q',
 		0, // Will Topic MSB (0)
 		4, // Will Topic LSB (4)
@@ -512,14 +512,14 @@ func TestConnectMessageEncode(t *testing.T) {
 
 	require.NoError(t, err, "Error decoding message")
 	require.Equal(t, ProtocolV50, msg.Version())
-	require.Equal(t, len(msgBytes), n, "Error decoding message")
-	require.Equal(t, msgBytes, dst[:n], "Error decoding message")
+	require.Equal(t, len(buf), n, "Error decoding message")
+	require.Equal(t, buf, dst[:n], "Error decoding message")
 }
 
 // test to ensure encoding and decoding are the same
 // decode, encode, and decode again
 func TestConnectDecodeEncodeEquiv(t *testing.T) {
-	msgBytes := []byte{
+	buf := []byte{
 		byte(CONNECT << 4),
 		60,
 		0, // Length MSB (0)
@@ -546,22 +546,22 @@ func TestConnectDecodeEncodeEquiv(t *testing.T) {
 		'v', 'e', 'r', 'y', 's', 'e', 'c', 'r', 'e', 't',
 	}
 
-	m, n, err := Decode(ProtocolV50, msgBytes)
+	m, n, err := Decode(ProtocolV50, buf)
 	msg, ok := m.(*Connect)
 	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n, "Error decoding message.")
+	require.Equal(t, len(buf), n, "Error decoding message.")
 
 	dst := make([]byte, 100)
 	n2, err := msg.Encode(dst)
 
 	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n2, "Error decoding message.")
-	require.Equal(t, msgBytes, dst[:n2], "Error decoding message.")
+	require.Equal(t, len(buf), n2, "Error decoding message.")
+	require.Equal(t, buf, dst[:n2], "Error decoding message.")
 
 	_, n3, err := Decode(ProtocolV50, dst)
 
 	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n3, "Error decoding message.")
+	require.Equal(t, len(buf), n3, "Error decoding message.")
 }

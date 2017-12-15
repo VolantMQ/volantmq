@@ -1,6 +1,7 @@
 package packet
 
 import (
+	"fmt"
 	"strings"
 	"unicode/utf8"
 )
@@ -99,6 +100,8 @@ type Provider interface {
 	// Version get protocol version used by message
 	Version() ProtocolVersion
 
+	PropertiesDiscard()
+
 	PropertyGet(PropertyID) PropertyToType
 
 	PropertySet(PropertyID, interface{}) error
@@ -136,15 +139,7 @@ type Provider interface {
 // one of the New*Message functions. If an error is returned then the message type
 // is invalid.
 func New(v ProtocolVersion, t Type) (Provider, error) {
-	m, err := newMessage(v, t)
-	if err == nil {
-		h := m.getHeader()
-		if v == ProtocolV50 && (t != PINGREQ && t != PINGRESP) {
-			h.properties = newProperty()
-		}
-	}
-
-	return m, err
+	return newMessage(v, t)
 }
 
 func newMessage(v ProtocolVersion, t Type) (Provider, error) {
@@ -152,50 +147,54 @@ func newMessage(v ProtocolVersion, t Type) (Provider, error) {
 
 	switch t {
 	case CONNECT:
-		m = newConnect()
+		m = NewConnect(v)
 	case CONNACK:
-		m = newConnAck()
+		m = NewConnAck(v)
 	case PUBLISH:
-		m = newPublish()
+		m = NewPublish(v)
 	case PUBACK:
-		m = newPubAck()
+		m = NewPubAck(v)
 	case PUBREC:
-		m = newPubRec()
+		m = NewPubRec(v)
 	case PUBREL:
-		m = newPubRel()
+		m = NewPubRel(v)
 	case PUBCOMP:
-		m = newPubComp()
+		m = NewPubComp(v)
 	case SUBSCRIBE:
-		m = newSubscribe()
+		m = NewSubscribe(v)
 	case SUBACK:
-		m = newSubAck()
+		m = NewSubAck(v)
 	case UNSUBSCRIBE:
-		m = newUnSubscribe()
+		m = NewUnSubscribe(v)
 	case UNSUBACK:
-		m = newUnSubAck()
+		m = NewUnSubAck(v)
 	case PINGREQ:
-		m = newPingReq()
+		m = NewPingReq(v)
 	case PINGRESP:
-		m = newPingResp()
+		m = NewPingResp(v)
 	case DISCONNECT:
-		m = newDisconnect()
+		m = NewDisconnect(v)
 	case AUTH:
-		if v != ProtocolV50 {
+		if v < ProtocolV50 {
 			return nil, ErrInvalidMessageType
 		}
-		m = newAuth()
+		m = NewAuth(v)
 	default:
 		return nil, ErrInvalidMessageType
 	}
 
 	m.setType(t)
 
-	h := m.getHeader()
-
-	h.version = v
-	h.cb.encode = m.encodeMessage
-	h.cb.decode = m.decodeMessage
-	h.cb.size = m.size
+	//h := m.getHeader()
+	//
+	//h.version = v
+	//h.cb.encode = m.encodeMessage
+	//h.cb.decode = m.decodeMessage
+	//h.cb.size = m.size
+	//
+	//if v >= ProtocolV50 {
+	//	h.properties.properties = make(map[PropertyID]interface{})
+	//}
 
 	return m, nil
 }
@@ -217,7 +216,7 @@ func Encode(p Provider) ([]byte, error) {
 // Decode buf into message and return Provider type
 func Decode(v ProtocolVersion, buf []byte) (msg Provider, total int, err error) {
 	defer func() {
-		// TODO: this case might be improved
+		// TODO(troian): this case might be improved
 		// Panic might be provided during message decode with malformed len
 		// For example on length-prefixed payloads/topics or properties:
 
@@ -231,6 +230,7 @@ func Decode(v ProtocolVersion, buf []byte) (msg Provider, total int, err error) 
 		// but it might be worth doing such checks (there might be many for each message) on each decode
 		// as it is abnormal and server must close connection
 		if r := recover(); r != nil {
+			fmt.Println(r)
 			msg = nil
 			total = 0
 			err = ErrPanicDetected

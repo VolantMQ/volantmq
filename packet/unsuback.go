@@ -30,6 +30,13 @@ func newUnSubAck() *UnSubAck {
 	return msg
 }
 
+// NewUnSubAck creates a new UNSUBACK packet
+func NewUnSubAck(v ProtocolVersion) *UnSubAck {
+	p := newUnSubAck()
+	p.init(UNSUBACK, v, p.size, p.encodeMessage, p.decodeMessage)
+	return p
+}
+
 // SetPacketID sets the ID of the packet.
 func (msg *UnSubAck) SetPacketID(v IDType) {
 	msg.setPacketID(v)
@@ -66,13 +73,15 @@ func (msg *UnSubAck) decodeMessage(from []byte) (int, error) {
 	offset := msg.decodePacketID(from)
 
 	if msg.version == ProtocolV50 && (int(msg.remLen)-offset) > 0 {
-		var n int
-		var err error
-		if msg.properties, n, err = decodeProperties(msg.Type(), from[offset:]); err != nil {
-			return offset + n, err
+		n, err := msg.properties.decode(msg.Type(), from[offset:])
+		offset += n
+		if err != nil {
+			return offset, err
 		}
 
-		offset += n
+		for _, c := range from[offset:msg.remLen] {
+			msg.returnCodes = append(msg.returnCodes, ReasonCode(c))
+		}
 	}
 
 	return offset, nil
@@ -89,9 +98,13 @@ func (msg *UnSubAck) encodeMessage(to []byte) (int, error) {
 	var err error
 	if msg.version == ProtocolV50 {
 		var n int
-
-		n, err = encodeProperties(msg.properties, to[offset:])
+		n, err = msg.properties.encode(to[offset:])
 		offset += n
+
+		for _, c := range msg.returnCodes {
+			to[offset] = byte(c)
+			offset++
+		}
 	}
 
 	return offset, err
@@ -103,9 +116,7 @@ func (msg *UnSubAck) size() int {
 
 	if msg.version == ProtocolV50 {
 		total += int(msg.properties.FullLen())
-		//if pLen := msg.properties.FullLen(); pLen > 1 {
-		//	total += int(pLen)
-		//}
+		total += len(msg.returnCodes)
 	}
 
 	return total

@@ -21,35 +21,35 @@ import (
 )
 
 func TestDisconnectMessageDecode(t *testing.T) {
-	msgBytes := []byte{
+	buf := []byte{
 		byte(DISCONNECT << 4),
 		0,
 	}
 
-	m, n, err := Decode(ProtocolV311, msgBytes)
+	m, n, err := Decode(ProtocolV311, buf)
 	msg, ok := m.(*Disconnect)
 	require.NoError(t, err, "Error decoding message.")
 
 	require.Equal(t, true, ok, "Invalid message type")
 
-	require.Equal(t, len(msgBytes), n, "Error decoding message.")
+	require.Equal(t, len(buf), n, "Error decoding message.")
 	require.Equal(t, DISCONNECT, msg.Type(), "Error decoding message.")
 
-	msgBytes = []byte{
+	buf = []byte{
 		byte(DISCONNECT << 4),
 		1,
 		0,
 	}
 
-	_, _, err = Decode(ProtocolV50, msgBytes)
+	_, _, err = Decode(ProtocolV50, buf)
 	require.EqualError(t, CodeMalformedPacket, err.Error())
 
-	_, _, err = Decode(ProtocolV311, msgBytes)
+	_, _, err = Decode(ProtocolV311, buf)
 	require.EqualError(t, CodeRefusedServerUnavailable, err.Error())
 }
 
 func TestDisconnectMessageEncode(t *testing.T) {
-	msgBytes := []byte{
+	buf := []byte{
 		byte(DISCONNECT << 4),
 		0,
 	}
@@ -62,34 +62,34 @@ func TestDisconnectMessageEncode(t *testing.T) {
 	n, err := msg.Encode(dst)
 
 	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n, "Error decoding message.")
-	require.Equal(t, msgBytes, dst[:n], "Error decoding message.")
+	require.Equal(t, len(buf), n, "Error decoding message.")
+	require.Equal(t, buf, dst[:n], "Error decoding message.")
 }
 
 // test to ensure encoding and decoding are the same
 // decode, encode, and decode again
 func TestDisconnectDecodeEncodeEquiv(t *testing.T) {
-	msgBytes := []byte{
+	buf := []byte{
 		byte(DISCONNECT << 4),
 		0,
 	}
 
-	m, n, err := Decode(ProtocolV311, msgBytes)
+	m, n, err := Decode(ProtocolV311, buf)
 	msg, ok := m.(*Disconnect)
 	require.Equal(t, true, ok, "Invalid message type")
 
 	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n, "Error decoding message.")
+	require.Equal(t, len(buf), n, "Error decoding message.")
 
 	dst := make([]byte, 100)
 	n2, err := msg.Encode(dst)
 
 	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n2, "Error decoding message.")
-	require.Equal(t, msgBytes, dst[:n2], "Error decoding message.")
+	require.Equal(t, len(buf), n2, "Error decoding message.")
+	require.Equal(t, buf, dst[:n2], "Error decoding message.")
 
 	_, n3, err := Decode(ProtocolV311, dst)
 
 	require.NoError(t, err, "Error decoding message.")
-	require.Equal(t, len(msgBytes), n3, "Error decoding message.")
+	require.Equal(t, len(buf), n3, "Error decoding message.")
 }

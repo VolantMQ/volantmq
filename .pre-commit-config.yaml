@@ -1,7 +1,6 @@
 -   repo: https://github.com/troian/pre-commit-golang
     sha: c43dbbf0704e4c722e2b64672aaee689145e17a6
     hooks:
-    -   id: go-imports
     -   id: go-build
     -   id: go-metalinter
         args:
@@ -11,3 +10,5 @@
         - --dupl-threshold=100
         - --disable=gotype
         - --disable=govendor
+        - --vendor
+        - --enable=goimports

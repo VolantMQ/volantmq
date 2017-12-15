@@ -1,73 +1,102 @@
 package connection
 
 import (
-	"github.com/VolantMQ/volantmq/auth"
+	"sync/atomic"
+
 	"github.com/VolantMQ/volantmq/packet"
-	"github.com/VolantMQ/volantmq/topics/types"
 	"go.uber.org/zap"
 )
 
-func (s *Type) onConnectionClose(will bool, err error) {
-	s.onConnDisconnect.Do(func() {
-		// make sure connection has been started before proceeding to any shutdown procedures
-		s.started.Wait()
+func (s *impl) txShutdown() {
+	atomic.StoreUint32(&s.txRunning, 2)
+	s.txTimer.Stop()
+	s.txWg.Wait()
 
-		// shutdown quit channel tells all routines finita la commedia
+	select {
+	case <-s.txAvailable:
+	default:
+		close(s.txAvailable)
+	}
+}
+
+func (s *impl) rxShutdown() {
+	atomic.StoreUint32(&s.rxRunning, 0)
+	s.rxWg.Wait()
+}
+
+func (s *impl) onConnectionClose(status error) bool {
+	return s.onConnDisconnect.Do(func() {
+		s.keepAliveTimer.Stop()
 		close(s.quit)
-		s.StopReceiving(s.Desc) // nolint: errcheck
-		s.rx.shutdown()
-		// clean up transmitter to allow send disconnect command to client if needed
-		s.tx.shutdown()
 
-		// put subscriber in offline mode
-		s.Subscriber.Offline(s.KillOnDisconnect)
+		var err error
+		// shutdown quit channel tells all routines finita la commedia
+		s.ePoll.Stop(s.desc)
 
-		if err != nil && s.Version >= packet.ProtocolV50 {
-			// server wants to tell client disconnect reason
-			reason, _ := err.(packet.ReasonCode)
-			p, _ := packet.New(s.Version, packet.DISCONNECT)
-			pkt, _ := p.(*packet.Disconnect)
-			pkt.SetReasonCode(reason)
-
-			sz, _ := pkt.Size()
-			buf := make([]byte, sz)
-			pkt.Encode(buf) // nolint: errcheck
-
-			if _, err = s.Conn.Write(buf); err != nil {
-				s.log.Info("Couldn't write disconnect message", zap.String("ClientID", s.ID), zap.Error(err))
+		if s.state != stateConnecting && s.state != stateAuth && s.state != stateConnectFailed {
+			s.SignalOffline()
+		} else if s.state == stateConnecting || s.state == stateAuth {
+			select {
+			case <-s.connect:
+			default:
+				close(s.connect)
 			}
 		}
 
-		if err = s.Conn.Close(); err != nil {
-			s.log.Error("close connection", zap.String("ClientID", s.ID), zap.Error(err))
+		// clean up transmitter to allow send disconnect command to client if needed
+		s.txShutdown()
+
+		if reason, ok := status.(packet.ReasonCode); ok &&
+			reason != packet.CodeSuccess && s.version >= packet.ProtocolV50 &&
+			s.state != stateConnecting && s.state != stateAuth && s.state != stateConnectFailed {
+			// server wants to tell client disconnect reason
+			pkt := packet.NewDisconnect(s.version)
+			pkt.SetReasonCode(reason)
+
+			var buf []byte
+			if buf, err = packet.Encode(pkt); err != nil {
+				s.log.Error("encode disconnect packet", zap.String("ClientID", s.id), zap.Error(err))
+			} else {
+				var written int
+				if written, err = s.conn.Write(buf); written != len(buf) {
+					s.log.Error("Couldn't write disconnect message",
+						zap.String("ClientID", s.id),
+						zap.Int("packet size", len(buf)),
+						zap.Int("written", written))
+				} else if err != nil {
+					s.log.Debug("Couldn't write disconnect message",
+						zap.String("ClientID", s.id),
+						zap.Error(err))
+				}
+			}
 		}
 
-		// [MQTT-3.3.1-7]
-		// Discard retained messages with QoS 0
-		s.retained.lock.Lock()
-		//for _, m := range s.retained.list {
-		//	s.topics.Retain(m) // nolint: errcheck
-		//}
-		s.retained.list = []*packet.Publish{}
-		s.retained.lock.Unlock()
-		s.Conn = nil
-
-		params := &DisconnectParams{
-			Will:     will,
-			ExpireAt: s.ExpireIn,
-			Desc:     s.Desc,
-			Reason:   packet.CodeSuccess,
+		if err = s.desc.Close(); err != nil {
+			s.log.Error("Close polling descriptor", zap.String("ClientID", s.id), zap.Error(err))
 		}
 
-		if rc, ok := err.(packet.ReasonCode); ok {
-			params.Reason = rc
+		if err = s.conn.Close(); err != nil {
+			s.log.Error("close connection", zap.String("ClientID", s.id), zap.Error(err))
 		}
 
-		if !s.KillOnDisconnect {
-			s.persist()
+		s.rxShutdown()
+
+		s.conn = nil
+
+		if s.state != stateConnecting && s.state != stateAuth && s.state != stateConnectFailed {
+			params := DisconnectParams{
+				Packets: s.getToPersist(),
+				Reason:  packet.CodeSuccess,
+			}
+
+			if rc, ok := err.(packet.ReasonCode); ok {
+				params.Reason = rc
+			}
+
+			s.SignalConnectionClose(params)
 		}
 
-		s.onDisconnect(params)
+		s.state = stateDisconnected
 	})
 }
 
@@ -75,13 +104,21 @@ func (s *Type) onConnectionClose(will bool, err error) {
 // On QoS == 0, we should just take the next step, no ack required
 // On QoS == 1, send back PUBACK, then take the next step
 // On QoS == 2, we need to put it in the ack queue, send back PUBREC
-func (s *Type) onPublish(pkt *packet.Publish) (packet.Provider, error) {
+func (s *impl) onPublish(pkt *packet.Publish) (packet.Provider, error) {
 	// check for topic access
 	var err error
 	reason := packet.CodeSuccess
 
-	if err = s.preProcessPublish(pkt); err != nil {
-		return nil, err
+	if s.version >= packet.ProtocolV50 {
+		if !s.retainAvailable && pkt.Retain() {
+			return nil, packet.CodeRetainNotSupported
+		}
+
+		if prop := pkt.PropertyGet(packet.PropertyTopicAlias); prop != nil {
+			if val, ok := prop.AsShort(); ok == nil && (val == 0 || val > s.maxRxTopicAlias) {
+				return nil, packet.CodeInvalidTopicAlias
+			}
+		}
 	}
 
 	var resp packet.Provider
@@ -89,27 +126,32 @@ func (s *Type) onPublish(pkt *packet.Publish) (packet.Provider, error) {
 	// To deal with V3.1.1 two ways left:
 	//   - ignore the message but send acks
 	//   - return error which leads to disconnect
-	if status := s.Auth.ACL(s.ID, s.Username, pkt.Topic(), auth.AccessTypeWrite); status == auth.StatusDeny {
-		reason = packet.CodeAdministrativeAction
-	}
+	//if status := s.ACL(s.ID, pkt.Topic(), auth.AccessTypeWrite); status == auth.StatusDeny {
+	//	reason = packet.CodeAdministrativeAction
+	//}
 
 	switch pkt.QoS() {
 	case packet.QoS2:
-		resp, _ = packet.New(s.Version, packet.PUBREC)
-		r, _ := resp.(*packet.Ack)
-		id, _ := pkt.ID()
+		if s.rxQuota == 0 {
+			reason = packet.CodeReceiveMaximumExceeded
+		} else {
+			s.rxQuota--
+			resp, _ = packet.New(s.version, packet.PUBREC)
+			r, _ := resp.(*packet.Ack)
+			id, _ := pkt.ID()
 
-		r.SetPacketID(id)
-		r.SetReason(reason)
+			r.SetPacketID(id)
+			r.SetReason(reason)
 
-		// [MQTT-4.3.3-9]
-		// store incoming QoS 2 message before sending PUBREC as theoretically PUBREL
-		// might come before store in case message store done after write PUBREC
-		if reason < packet.CodeUnspecifiedError {
-			s.pubIn.store(pkt)
+			// [MQTT-4.3.3-9]
+			// store incoming QoS 2 message before sending PUBREC as theoretically PUBREL
+			// might come before store in case message store done after write PUBREC
+			if reason < packet.CodeUnspecifiedError {
+				s.pubIn.store(pkt)
+			}
 		}
 	case packet.QoS1:
-		resp, _ = packet.New(s.Version, packet.PUBACK)
+		resp, _ = packet.New(s.version, packet.PUBACK)
 		r, _ := resp.(*packet.Ack)
 
 		id, _ := pkt.ID()
@@ -123,7 +165,7 @@ func (s *Type) onPublish(pkt *packet.Publish) (packet.Provider, error) {
 		if reason < packet.CodeUnspecifiedError {
 			if err = s.publishToTopic(pkt); err != nil {
 				s.log.Error("Couldn't publish message",
-					zap.String("ClientID", s.ID),
+					zap.String("ClientID", s.id),
 					zap.Uint8("QoS", uint8(pkt.QoS())),
 					zap.Error(err))
 			}
@@ -134,7 +176,7 @@ func (s *Type) onPublish(pkt *packet.Publish) (packet.Provider, error) {
 }
 
 // onAck handle ack acknowledgment received from remote
-func (s *Type) onAck(msg packet.Provider) packet.Provider {
+func (s *impl) onAck(msg packet.Provider) (packet.Provider, error) {
 	var resp packet.Provider
 	switch mIn := msg.(type) {
 	case *packet.Ack:
@@ -150,18 +192,17 @@ func (s *Type) onAck(msg packet.Provider) packet.Provider {
 
 			id, _ := msg.ID()
 
-			if s.Version == packet.ProtocolV50 && mIn.Reason() >= packet.CodeUnspecifiedError {
+			if s.version == packet.ProtocolV50 && mIn.Reason() >= packet.CodeUnspecifiedError {
 				// v5.9 [MQTT-4.9]
-				//atomic.AddInt32(&s.SendQuota, 1)
-				if s.flowControl.release(id) {
-					s.tx.signalQuota()
+				if s.flowRelease(id) {
+					s.signalQuota()
 				}
 
 				discard = true
 			}
 
 			if !discard {
-				resp, _ = packet.New(s.Version, packet.PUBREL)
+				resp, _ = packet.New(s.version, packet.PUBREL)
 				r, _ := resp.(*packet.Ack)
 
 				r.SetPacketID(id)
@@ -173,124 +214,23 @@ func (s *Type) onAck(msg packet.Provider) packet.Provider {
 			}
 		case packet.PUBREL:
 			// Remote has released PUBLISH
-			resp, _ = packet.New(s.Version, packet.PUBCOMP)
+			resp, _ = packet.New(s.version, packet.PUBCOMP)
 			r, _ := resp.(*packet.Ack)
 
 			id, _ := msg.ID()
 			r.SetPacketID(id)
 
+			s.rxQuota++
 			s.pubIn.release(msg)
 		case packet.PUBCOMP:
 			// PUBREL message has been acknowledged, release from queue
 			s.pubOut.release(msg)
 		default:
 			s.log.Error("Unsupported ack message type",
-				zap.String("ClientID", s.ID),
+				zap.String("ClientID", s.id),
 				zap.String("type", msg.Type().Name()))
 		}
-	default:
-		//return err
 	}
 
-	return resp
-}
-
-func (s *Type) onSubscribe(msg *packet.Subscribe) packet.Provider {
-	m, _ := packet.New(s.Version, packet.SUBACK)
-	resp, _ := m.(*packet.SubAck)
-
-	id, _ := msg.ID()
-	resp.SetPacketID(id)
-
-	var retCodes []packet.ReasonCode
-	var retainedPublishes []*packet.Publish
-
-	iter := msg.Topics().Iterator()
-	for kv, ok := iter(); ok; kv, ok = iter() {
-		t := kv.Key.(string)
-		ops := kv.Value.(packet.SubscriptionOptions)
-
-		reason := packet.CodeSuccess // nolint: ineffassign
-		//authorized := true
-		// TODO: check permissions here
-
-		//if authorized {
-		subsID := uint32(0)
-
-		// V5.0 [MQTT-3.8.2.1.2]
-		if prop := msg.PropertyGet(packet.PropertySubscriptionIdentifier); prop != nil {
-			if v, e := prop.AsInt(); e == nil {
-				subsID = v
-			}
-		}
-
-		subsParams := topicsTypes.SubscriptionParams{
-			ID:  subsID,
-			Ops: ops,
-		}
-
-		if grantedQoS, retained, err := s.Subscriber.Subscribe(t, &subsParams); err != nil {
-			// [MQTT-3.9.3]
-			if s.Version == packet.ProtocolV50 {
-				reason = packet.CodeUnspecifiedError
-			} else {
-				reason = packet.QosFailure
-			}
-		} else {
-			reason = packet.ReasonCode(grantedQoS)
-			retainedPublishes = append(retainedPublishes, retained...)
-		}
-
-		retCodes = append(retCodes, reason)
-	}
-
-	if err := resp.AddReturnCodes(retCodes); err != nil {
-		return nil
-	}
-
-	// Now put retained messages into publish queue
-	for _, rp := range retainedPublishes {
-		if pkt, err := rp.Clone(s.Version); err == nil {
-			pkt.SetRetain(true)
-			s.onSubscribedPublish(pkt)
-		} else {
-			s.log.Error("Couldn't clone PUBLISH message", zap.String("ClientID", s.ID), zap.Error(err))
-		}
-	}
-
-	return resp
-}
-
-func (s *Type) onUnSubscribe(msg *packet.UnSubscribe) packet.Provider {
-	iter := msg.Topics().Iterator()
-
-	var retCodes []packet.ReasonCode
-
-	for kv, ok := iter(); ok; kv, ok = iter() {
-		t := kv.Key.(string)
-		// TODO: check permissions here
-		authorized := true
-		reason := packet.CodeSuccess
-
-		if authorized {
-			if err := s.Subscriber.UnSubscribe(t); err != nil {
-				s.log.Error("Couldn't unsubscribe from topic", zap.Error(err))
-			} else {
-				reason = packet.CodeNoSubscriptionExisted
-			}
-		} else {
-			reason = packet.CodeNotAuthorized
-		}
-
-		retCodes = append(retCodes, reason)
-	}
-
-	m, _ := packet.New(s.Version, packet.UNSUBACK)
-	resp, _ := m.(*packet.UnSubAck)
-
-	id, _ := msg.ID()
-	resp.SetPacketID(id)
-	resp.AddReturnCodes(retCodes) // nolint: errcheck
-
-	return resp
+	return resp, nil
 }

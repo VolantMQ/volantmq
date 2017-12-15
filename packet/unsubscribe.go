@@ -16,29 +16,30 @@ package packet
 
 import (
 	"unicode/utf8"
-
-	"github.com/troian/omap"
 )
 
 // UnSubscribe An UNSUBSCRIBE Packet is sent by the Client to the Server, to unsubscribe from topics.
 type UnSubscribe struct {
 	header
 
-	topics omap.Map
+	topics []string
 }
 
 var _ Provider = (*UnSubscribe)(nil)
 
 func newUnSubscribe() *UnSubscribe {
-	msg := &UnSubscribe{
-		topics: omap.New(),
-	}
+	return &UnSubscribe{}
+}
 
-	return msg
+// NewUnSubscribe creates a new UNSUBSCRIBE packet
+func NewUnSubscribe(v ProtocolVersion) *UnSubscribe {
+	p := newUnSubscribe()
+	p.init(UNSUBSCRIBE, v, p.size, p.encodeMessage, p.decodeMessage)
+	return p
 }
 
 // Topics returns a list of topics sent by the Client.
-func (msg *UnSubscribe) Topics() omap.Map {
+func (msg *UnSubscribe) Topics() []string {
 	return msg.topics
 }
 
@@ -49,15 +50,9 @@ func (msg *UnSubscribe) AddTopic(topic string) error {
 		return ErrMalformedTopic
 	}
 
-	msg.topics.Set(topic, QoS0)
+	msg.topics = append(msg.topics, topic)
 
 	return nil
-}
-
-// RemoveTopic removes a single topic from the list of existing ones in the message.
-// If topic does not exist it just does nothing.
-func (msg *UnSubscribe) RemoveTopic(topic string) {
-	msg.topics.Delete(topic)
 }
 
 // SetPacketID sets the ID of the packet.
@@ -84,13 +79,13 @@ func (msg *UnSubscribe) decodeMessage(src []byte) (int, error) {
 			return total, ErrMalformedTopic
 		}
 
-		msg.topics.Set(string(t), QoS0)
+		msg.topics = append(msg.topics, string(t))
 
 		remLen = remLen - n - 1
 	}
 
 	// [MQTT-3.10.3-2]
-	if msg.topics.Len() == 0 {
+	if len(msg.topics) == 0 {
 		rejectReason := CodeProtocolError
 		if msg.version <= ProtocolV50 {
 			rejectReason = CodeRefusedServerUnavailable
@@ -107,7 +102,7 @@ func (msg *UnSubscribe) encodeMessage(dst []byte) (int, error) {
 		return 0, ErrPackedIDZero
 	}
 
-	if msg.topics.Len() == 0 {
+	if len(msg.topics) == 0 {
 		return 0, ErrInvalidLength
 	}
 
@@ -116,9 +111,8 @@ func (msg *UnSubscribe) encodeMessage(dst []byte) (int, error) {
 
 	total := msg.encodePacketID(dst)
 
-	iter := msg.topics.Iterator()
-	for kv, ok := iter(); ok; kv, ok = iter() {
-		n, err = WriteLPBytes(dst[total:], []byte(kv.Key.(string)))
+	for _, t := range msg.topics {
+		n, err = WriteLPBytes(dst[total:], []byte(t))
 		total += n
 		if err != nil {
 			return total, err
@@ -138,9 +132,8 @@ func (msg *UnSubscribe) size() int {
 	// packet ID
 	total := 2
 
-	iter := msg.topics.Iterator()
-	for kv, ok := iter(); ok; kv, ok = iter() {
-		total += 2 + len(kv.Key.(string))
+	for _, t := range msg.topics {
+		total += 2 + len(t)
 	}
 
 	return total

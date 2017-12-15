@@ -1,351 +1,330 @@
 package clients
 
 import (
+	"container/list"
 	"sync"
 	"time"
 
-	"strconv"
-
+	"github.com/VolantMQ/persistence"
 	"github.com/VolantMQ/volantmq/connection"
 	"github.com/VolantMQ/volantmq/packet"
-	"github.com/VolantMQ/volantmq/persistence"
 	"github.com/VolantMQ/volantmq/subscriber"
+	"github.com/VolantMQ/volantmq/topics/types"
 	"github.com/VolantMQ/volantmq/types"
+	"go.uber.org/zap"
 )
 
-type exitReason int
-
-const (
-	exitReasonClean exitReason = iota
-	exitReasonShutdown
-	exitReasonExpired
-)
-
-type switchStatus int
-
-const (
-	swStatusSwitched switchStatus = iota
-	swStatusIsOnline
-	swStatusFinalized
-)
-
-type onSessionClose func(string, exitReason)
-type onDisconnect func(string, packet.ReasonCode, bool)
-type onSubscriberShutdown func(subscriber.ConnectionProvider)
-
-type sessionEvents struct {
-	signalClose        onSessionClose
-	signalDisconnected onDisconnect
-	shutdownSubscriber onSubscriberShutdown
+type sessionEvents interface {
+	sessionOffline(string, bool, *expiry)
+	connectionClosed(string, packet.ReasonCode, bool)
+	subscriberShutdown(string, subscriber.SessionProvider)
 }
 
 type sessionPreConfig struct {
-	sessionEvents
-	id        string
-	createdAt time.Time
-	messenger types.TopicMessenger
+	id          string
+	createdAt   time.Time
+	messenger   types.TopicMessenger
+	conn        connection.Session
+	persistence persistence.Packets
 }
 
-type sessionReConfig struct {
-	subscriber       subscriber.ConnectionProvider
-	will             *packet.Publish
-	expireIn         *uint32
-	willDelay        uint32
-	killOnDisconnect bool
+type sessionConfig struct {
+	sessionEvents
+	subscriber subscriber.SessionProvider
+	will       *packet.Publish
+	expireIn   *uint32
+	willDelay  uint32
+	durable    bool
+	version    packet.ProtocolVersion
 }
 
 type session struct {
-	sessionEvents
-	*sessionReConfig
-	id             string
-	idLock         *sync.Mutex
-	messenger      types.TopicMessenger
-	createdAt      time.Time
-	expiringSince  time.Time
-	lock           sync.Mutex
-	connStop       *types.Once
-	disconnectOnce *types.OnceWait
-	wgDisconnected sync.WaitGroup
-	conn           *connection.Type
-	timer          *time.Timer
-	timerLock      sync.Mutex
-	finalized      bool
-	isOnline       chan struct{}
+	sessionPreConfig
+	log      *zap.Logger
+	idLock   *sync.Mutex
+	lock     sync.Mutex
+	connStop types.Once
+	sessionConfig
 }
 
-type sessionWrap struct {
-	s    *session
-	lock sync.Mutex
+type temporaryPublish struct {
+	gList *list.List
+	qList *list.List
 }
 
-func (s *sessionWrap) acquire() {
-	s.lock.Lock()
+func newTmpPublish() *temporaryPublish {
+	return &temporaryPublish{
+		gList: list.New(),
+		qList: list.New(),
+	}
 }
 
-func (s *sessionWrap) release() {
-	s.lock.Unlock()
+func (t *temporaryPublish) Publish(id string, p *packet.Publish) {
+	if p.QoS() == packet.QoS0 {
+		t.gList.PushBack(p)
+	} else {
+		t.qList.PushBack(p)
+	}
 }
 
-func (s *sessionWrap) swap(w *sessionWrap) *session {
-	s.s = w.s
-	s.s.idLock = &s.lock
-	return s.s
-}
-
-func newSession(c *sessionPreConfig) *session {
+func newSession(c sessionPreConfig) *session {
 	s := &session{
-		sessionEvents: c.sessionEvents,
-		id:            c.id,
-		createdAt:     c.createdAt,
-		messenger:     c.messenger,
-		isOnline:      make(chan struct{}),
+		sessionPreConfig: c,
 	}
 
-	s.timer = time.AfterFunc(10*time.Second, s.timerCallback)
-	s.timer.Stop()
-
-	close(s.isOnline)
 	return s
 }
 
-func (s *session) reconfigure(c *sessionReConfig, runExpiry bool) {
-	s.sessionReConfig = c
-	s.finalized = false
-	if runExpiry {
-		s.runExpiry(true)
+func (s *session) configure(c sessionConfig, clean bool) {
+	s.sessionConfig = c
+
+	s.conn.SetOptions(connection.AttachSession(s))
+
+	if !clean {
+		tmp := newTmpPublish()
+		s.subscriber.Online(tmp)
+		s.persistence.PacketsForEach([]byte(s.id), s.conn)
+		s.subscriber.Online(s.conn)
+		s.conn.LoadRemaining(tmp.gList, tmp.qList)
+	} else {
+		s.subscriber.Online(s.conn)
 	}
-}
-
-func (s *session) allocConnection(c *connection.PreConfig) error {
-	cfg := &connection.Config{
-		PreConfig:        c,
-		ID:               s.id,
-		OnDisconnect:     s.onDisconnect,
-		Subscriber:       s.subscriber,
-		Messenger:        s.messenger,
-		KillOnDisconnect: s.killOnDisconnect,
-		ExpireIn:         s.expireIn,
-	}
-
-	s.disconnectOnce = &types.OnceWait{}
-	s.connStop = &types.Once{}
-
-	var err error
-	s.conn, err = connection.New(cfg)
-
-	return err
 }
 
 func (s *session) start() {
-	s.isOnline = make(chan struct{})
-	s.wgDisconnected.Add(1)
-	s.conn.Start()
 	s.idLock.Unlock()
 }
 
 func (s *session) stop(reason packet.ReasonCode) *persistence.SessionState {
-	s.connStop.Do(func() {
-		if s.conn != nil {
-			s.conn.Stop(reason)
-			s.conn = nil
-		}
-	})
+	s.conn.Stop(reason)
 
-	s.wgDisconnected.Wait()
-
-	if !s.timer.Stop() {
-		s.timerLock.Lock()
-		s.timerLock.Unlock() // nolint: megacheck
-	}
-
-	if !s.finalized {
-		s.signalClose(s.id, exitReasonShutdown)
-		s.finalized = true
-	}
+	//s.wgDisconnected.Wait()
 
 	state := &persistence.SessionState{
 		Timestamp: s.createdAt.Format(time.RFC3339),
 	}
 
-	if s.expireIn != nil || (s.willDelay > 0 && s.will != nil) {
-		state.Expire = &persistence.SessionDelays{
-			Since: s.expiringSince.Format(time.RFC3339),
-		}
-
-		elapsed := uint32(time.Since(s.expiringSince) / time.Second)
-
-		if (s.willDelay > 0 && s.will != nil) && (s.willDelay-elapsed) > 0 {
-			s.willDelay = s.willDelay - elapsed
-			s.will.SetPacketID(0)
-			if buf, err := packet.Encode(s.will); err != nil {
-
-			} else {
-				state.Expire.WillIn = strconv.Itoa(int(s.willDelay))
-				state.Expire.WillData = buf
-			}
-		}
-
-		if s.expireIn != nil && *s.expireIn > 0 && (*s.expireIn-elapsed) > 0 {
-			*s.expireIn = *s.expireIn - elapsed
-		}
-	}
+	//if s.expireIn != nil || (s.willDelay > 0 && s.will != nil) {
+	//	state.Expire = &persistence.SessionDelays{
+	//		Since: s.expiringSince.Format(time.RFC3339),
+	//	}
+	//
+	//	elapsed := uint32(time.Since(s.expiringSince) / time.Second)
+	//
+	//	if (s.willDelay > 0 && s.will != nil) && (s.willDelay-elapsed) > 0 {
+	//		s.willDelay = s.willDelay - elapsed
+	//		s.will.SetPacketID(0)
+	//		if buf, err := packet.Encode(s.will); err != nil {
+	//
+	//		} else {
+	//			state.Expire.WillIn = strconv.Itoa(int(s.willDelay))
+	//			state.Expire.WillData = buf
+	//		}
+	//	}
+	//
+	//	if s.expireIn != nil && *s.expireIn > 0 && (*s.expireIn-elapsed) > 0 {
+	//		*s.expireIn = *s.expireIn - elapsed
+	//	}
+	//}
 
 	return state
 }
 
-// setOnline try switch session state from offline to online. This is necessary when
-// when previous network connection has set session expiry or will delay or both
-// if switch is successful then swStatusSwitched returned.
-// if session has active network connection then returned value is swStatusIsOnline
-// if connection has been closed and must not be used anymore then it returns swStatusFinalized
-func (s *session) setOnline() switchStatus {
-	isOnline := false
-	// check session online status
-	s.lock.Lock()
-	select {
-	case <-s.isOnline:
-	default:
-		isOnline = true
-	}
-	s.lock.Unlock()
+func (s *session) SignalPublish(pkt *packet.Publish) error {
+	pkt.SetPublishID(s.subscriber.Hash())
 
-	status := swStatusSwitched
-	if !isOnline {
-		// session is offline. before making any further step wait disconnect procedure is done
-		s.wgDisconnected.Wait()
-
-		// if stop returns false timer has been fired and there is goroutine might be running
-		if !s.timer.Stop() {
-			s.timerLock.Lock()
-			s.timerLock.Unlock() // nolint: megacheck
+	// [MQTT-3.3.1.3]
+	if pkt.Retain() {
+		if err := s.messenger.Retain(pkt); err != nil {
+			s.log.Error("Error retaining message", zap.String("ClientID", s.id), zap.Error(err))
 		}
 
-		if s.finalized {
-			status = swStatusFinalized
+		// [MQTT-3.3.1-7]
+		if pkt.QoS() == packet.QoS0 {
+			retained := packet.NewPublish(s.version)
+			retained.SetQoS(pkt.QoS())     // nolint: errcheck
+			retained.SetTopic(pkt.Topic()) // nolint: errcheck
+			//s.retained.list = append(s.retained.list, m)
 		}
-	} else {
-		status = swStatusIsOnline
 	}
 
-	return status
+	if err := s.messenger.Publish(pkt); err != nil {
+		s.log.Error("Couldn't publish", zap.String("ClientID", s.id), zap.Error(err))
+	}
+
+	return nil
 }
 
-func (s *session) runExpiry(will bool) {
-	var timerPeriod uint32
+func (s *session) SignalSubscribe(pkt *packet.Subscribe) (packet.Provider, error) {
+	m, _ := packet.New(s.version, packet.SUBACK)
+	resp, _ := m.(*packet.SubAck)
 
-	// if meet will requirements point that
-	if will && s.will != nil && s.willDelay > 0 {
-		timerPeriod = s.willDelay
-	} else {
-		s.will = nil
-	}
+	id, _ := pkt.ID()
+	resp.SetPacketID(id)
 
-	if s.expireIn != nil {
-		// if will delay is set before and value less than expiration
-		// then timer should fire 2 times
-		if (timerPeriod > 0) && (timerPeriod < *s.expireIn) {
-			*s.expireIn = *s.expireIn - timerPeriod
+	var retCodes []packet.ReasonCode
+	var retainedPublishes []*packet.Publish
+
+	pkt.RangeTopics(func(t string, ops packet.SubscriptionOptions) {
+		reason := packet.CodeSuccess // nolint: ineffassign
+		//authorized := true
+		// TODO: check permissions here
+
+		//if authorized {
+		subsID := uint32(0)
+
+		// V5.0 [MQTT-3.8.2.1.2]
+		if prop := pkt.PropertyGet(packet.PropertySubscriptionIdentifier); prop != nil {
+			if v, e := prop.AsInt(); e == nil {
+				subsID = v
+			}
+		}
+
+		subsParams := topicsTypes.SubscriptionParams{
+			ID:  subsID,
+			Ops: ops,
+		}
+
+		if grantedQoS, retained, err := s.subscriber.Subscribe(t, &subsParams); err != nil {
+			// [MQTT-3.9.3]
+			if s.version == packet.ProtocolV50 {
+				reason = packet.CodeUnspecifiedError
+			} else {
+				reason = packet.QosFailure
+			}
 		} else {
-			timerPeriod = *s.expireIn
-			*s.expireIn = 0
+			reason = packet.ReasonCode(grantedQoS)
+			retainedPublishes = append(retainedPublishes, retained...)
+		}
+
+		retCodes = append(retCodes, reason)
+	})
+
+	if err := resp.AddReturnCodes(retCodes); err != nil {
+		return nil, err
+	}
+
+	// Now put retained messages into publish queue
+	for _, rp := range retainedPublishes {
+		if pkt, err := rp.Clone(s.version); err == nil {
+			pkt.SetRetain(true)
+			s.conn.Publish(s.id, pkt)
+		} else {
+			s.log.Error("Couldn't clone PUBLISH message", zap.String("ClientID", s.id), zap.Error(err))
 		}
 	}
 
-	s.expiringSince = time.Now()
-	s.timer.Reset(time.Duration(timerPeriod) * time.Second)
+	return resp, nil
 }
 
-func (s *session) onDisconnect(p *connection.DisconnectParams) {
-	s.disconnectOnce.Do(func() {
-		defer s.wgDisconnected.Done()
+func (s *session) SignalUnSubscribe(pkt *packet.UnSubscribe) (packet.Provider, error) {
+	var retCodes []packet.ReasonCode
 
-		s.lock.Lock()
-		close(s.isOnline)
-		s.lock.Unlock()
+	for _, t := range pkt.Topics() {
+		// TODO: check permissions here
+		authorized := true
+		reason := packet.CodeSuccess
 
-		finalize := func(err exitReason) {
-			s.signalClose(s.id, err)
-			s.finalized = true
+		if authorized {
+			if err := s.subscriber.UnSubscribe(t); err != nil {
+				s.log.Error("Couldn't unsubscribe from topic", zap.Error(err))
+				reason = packet.CodeNoSubscriptionExisted
+			}
+		} else {
+			reason = packet.CodeNotAuthorized
 		}
 
-		s.connStop.Do(func() {
-			s.conn = nil
-		})
+		retCodes = append(retCodes, reason)
+	}
 
-		if p.ExpireAt != nil {
-			s.expireIn = p.ExpireAt
-		}
+	m, _ := packet.New(s.version, packet.UNSUBACK)
+	resp, _ := m.(*packet.UnSubAck)
 
-		// If session expiry is set to 0, the Session ends when the Network Connection is closed
-		if s.expireIn != nil && *s.expireIn == 0 {
-			s.killOnDisconnect = true
-		}
+	id, _ := pkt.ID()
+	resp.SetPacketID(id)
+	resp.AddReturnCodes(retCodes) // nolint: errcheck
 
-		// valid willMsg pointer tells we have will message
-		// if session is clean send will regardless to will delay
-		if p.Will && s.will != nil && (s.killOnDisconnect || s.willDelay == 0) {
-			s.messenger.Publish(s.will) // nolint: errcheck
+	return resp, nil
+}
+
+func (s *session) SignalDisconnect(pkt *packet.Disconnect) (packet.Provider, error) {
+	var err error
+
+	err = packet.CodeSuccess
+
+	if s.version == packet.ProtocolV50 {
+		// FIXME: CodeRefusedBadUsernameOrPassword has same id as CodeDisconnectWithWill
+		if pkt.ReasonCode() != packet.CodeRefusedBadUsernameOrPassword {
 			s.will = nil
 		}
 
-		s.signalDisconnected(s.id, p.Reason, !s.killOnDisconnect)
-
-		if s.killOnDisconnect || !s.subscriber.HasSubscriptions() {
-			s.shutdownSubscriber(s.subscriber)
-			s.subscriber = nil
-		}
-
-		if s.killOnDisconnect {
-			defer finalize(exitReasonClean)
-		} else {
-			// check if remaining subscriptions exists, expiry is presented and will delay not set to 0
-			if s.expireIn == nil && s.willDelay == 0 {
-				// signal to shutdown session
-				defer finalize(exitReasonShutdown)
-			} else if (s.expireIn != nil && *s.expireIn > 0) || s.willDelay > 0 {
-				// new expiry value might be received upon disconnect message from the client
-				if p.ExpireAt != nil {
-					s.expireIn = p.ExpireAt
+		if prop := pkt.PropertyGet(packet.PropertySessionExpiryInterval); prop != nil {
+			if val, ok := prop.AsInt(); ok == nil {
+				// If the Session Expiry Interval in the CONNECT packet was zero, then it is a Protocol Error to set a non-
+				// zero Session Expiry Interval in the DISCONNECT packet sent by the Client. If such a non-zero Session
+				// Expiry Interval is received by the Server, it does not treat it as a valid DISCONNECT packet. The Server
+				// uses DISCONNECT with Reason Code 0x82 (Protocol Error) as described in section 4.13.
+				if (s.expireIn != nil && *s.expireIn == 0) && val != 0 {
+					err = packet.CodeProtocolError
+				} else {
+					s.expireIn = &val
 				}
-
-				s.runExpiry(p.Will)
 			}
 		}
-	})
+	} else {
+		s.will = nil
+	}
+
+	return nil, err
 }
 
-func (s *session) timerCallback() {
-	defer s.timerLock.Unlock()
-	s.timerLock.Lock()
+// SignalOffline put subscriber in offline mode
+func (s *session) SignalOffline() {
+	s.subscriber.Offline(!s.durable)
+}
 
-	finalize := func(reason exitReason) {
-		s.signalClose(s.id, reason)
-		s.finalized = true
+// SignalConnectionClose net connection has been closed
+func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
+	// If session expiry is set to 0, the Session ends when the Network Connection is closed
+	if s.expireIn != nil && *s.expireIn == 0 {
+		s.durable = true
 	}
 
-	// 1. check for will message available
-	if s.will != nil {
-		// publish if exists and wipe state
-		s.messenger.Publish(s.will) // nolint: errcheck
-		s.will = nil
-		s.willDelay = 0
-	}
-
-	if s.expireIn == nil {
-		// 2.a session has processed delayed will and there is nothing to do
-		// completely shutdown the session
-		defer finalize(exitReasonShutdown)
-	} else if *s.expireIn == 0 {
-		// session has expired. WIPE IT
-		if s.subscriber != nil {
-			s.shutdownSubscriber(s.subscriber)
+	// valid willMsg pointer tells we have will message
+	// if session is clean send will regardless to will delay
+	if s.will != nil && s.willDelay == 0 {
+		if err := s.messenger.Publish(s.will); err != nil {
+			s.log.Error("Publish will message", zap.String("ClientID", s.id), zap.Error(err))
 		}
-		defer finalize(exitReasonExpired)
-	} else {
-		// restart timer and wait again
-		val := *s.expireIn
-		// clear value pointed by expireIn so when next fire comes we signal session is expired
-		*s.expireIn = 0
-		s.timer.Reset(time.Duration(val) * time.Second)
+		s.will = nil
 	}
+
+	s.connectionClosed(s.id, params.Reason, !s.durable)
+
+	if s.durable && len(params.Packets) > 0 {
+		s.persistence.PacketsStore([]byte(s.id), params.Packets)
+	}
+
+	if !s.durable || !s.subscriber.HasSubscriptions() {
+		s.subscriberShutdown(s.id, s.subscriber)
+		s.subscriber = nil
+	}
+
+	var exp *expiry
+
+	if params.Reason != packet.CodeSessionTakenOver {
+		if s.willDelay > 0 || (s.expireIn != nil && *s.expireIn > 0) {
+			exp = newExpiry(
+				expiryConfig{
+					id:        s.id,
+					createdAt: s.createdAt,
+					messenger: s.messenger,
+					will:      s.will,
+					expireIn:  s.expireIn,
+					willDelay: s.willDelay,
+				})
+		}
+	}
+
+	s.sessionOffline(s.id, s.durable, exp)
 }

@@ -2,172 +2,129 @@ package connection
 
 import (
 	"container/list"
-	"errors"
+	"math/rand"
 	"net"
-	"sync"
+	"reflect"
 	"sync/atomic"
 	"time"
 
-	"reflect"
-
-	"math/rand"
-
 	"github.com/VolantMQ/volantmq/packet"
-	"github.com/VolantMQ/volantmq/types"
 	"go.uber.org/zap"
 )
 
-type transmitterConfig struct {
-	id            string
-	quit          chan struct{}
-	flowControl   *packetsFlowControl
-	pubIn         *ackQueue
-	pubOut        *ackQueue
-	log           *zap.Logger
-	conn          net.Conn
-	onDisconnect  func(bool, error)
-	maxPacketSize uint32
-	topicAliasMax uint16
+func (s *impl) gPushFront(pkt packet.Provider) {
+	s.txGLock.Lock()
+	s.txGMessages.PushFront(pkt)
+	s.txGLock.Unlock()
+	s.txSignalAvailable()
+	s.txRun()
 }
 
-type transmitter struct {
-	transmitterConfig
-	available         chan int
-	timer             *time.Timer
-	gMessages         *list.List
-	qMessages         *list.List
-	wg                sync.WaitGroup
-	onStop            types.OnceWait
-	gLock             sync.Mutex
-	qLock             sync.Mutex
-	topicAlias        map[string]uint16
-	running           uint32
-	topicAliasCurrMax uint16
-	qExceeded         bool
+func (s *impl) gPush(pkt packet.Provider) {
+	s.txGLock.Lock()
+	s.txGMessages.PushBack(pkt)
+	s.txGLock.Unlock()
+	s.txSignalAvailable()
+	s.txRun()
 }
 
-func newTransmitter(config *transmitterConfig) *transmitter {
-	p := &transmitter{
-		transmitterConfig: *config,
-		available:         make(chan int, 1),
-		timer:             time.NewTimer(1 * time.Second),
-		topicAlias:        make(map[string]uint16),
-		gMessages:         list.New(),
-		qMessages:         list.New(),
-	}
-	p.timer.Stop()
-
-	return p
+func (s *impl) gLoad(pkt packet.Provider) {
+	s.txGLock.Lock()
+	s.txGMessages.PushBack(pkt)
+	s.txGLock.Unlock()
+	s.txSignalAvailable()
 }
 
-func (p *transmitter) shutdown() {
-	p.onStop.Do(func() {
-		atomic.StoreUint32(&p.running, 0)
-		p.timer.Stop()
-		p.wg.Wait()
-
-		select {
-		case <-p.available:
-		default:
-			close(p.available)
-		}
-	})
+func (s *impl) gLoadList(l *list.List) {
+	s.txGLock.Lock()
+	s.txGMessages.PushBackList(l)
+	s.txGLock.Unlock()
 }
 
-func (p *transmitter) gPush(pkt packet.Provider) {
-	p.gLock.Lock()
-	p.gMessages.PushBack(pkt)
-	p.gLock.Unlock()
-	p.signalAvailable()
-	p.run()
+func (s *impl) qPush(pkt interface{}) {
+	s.txQLock.Lock()
+	s.txQMessages.PushBack(pkt)
+	s.txQLock.Unlock()
+	s.txSignalAvailable()
+	s.txRun()
 }
 
-func (p *transmitter) gLoad(pkt packet.Provider) {
-	p.gMessages.PushBack(pkt)
-	p.signalAvailable()
+func (s *impl) qLoad(pkt interface{}) {
+	s.txQLock.Lock()
+	s.txQMessages.PushBack(pkt)
+	s.txQLock.Unlock()
+	s.txSignalAvailable()
 }
 
-func (p *transmitter) gLoadList(l *list.List) {
-	p.gMessages.PushBackList(l)
-	p.signalAvailable()
+func (s *impl) qLoadList(l *list.List) {
+	s.txQLock.Lock()
+	s.txQMessages.PushBackList(l)
+	s.txQLock.Unlock()
 }
 
-func (p *transmitter) qPush(pkt interface{}) {
-	p.qLock.Lock()
-	p.qMessages.PushBack(pkt)
-	p.qLock.Unlock()
-	p.signalAvailable()
-	p.run()
-}
-
-func (p *transmitter) qLoad(pkt interface{}) {
-	p.qMessages.PushBack(pkt)
-	p.signalAvailable()
-}
-
-func (p *transmitter) qLoadList(l *list.List) {
-	p.qMessages.PushBackList(l)
-	p.signalAvailable()
-}
-
-func (p *transmitter) signalAvailable() {
+func (s *impl) txSignalAvailable() {
 	select {
-	case <-p.quit:
+	case <-s.quit:
 		return
 	default:
 		select {
-		case p.available <- 1:
+		case s.txAvailable <- 1:
 		default:
 		}
 	}
 }
 
-func (p *transmitter) signalQuota() {
-	p.qLock.Lock()
-	p.qExceeded = false
-	l := p.qMessages.Len()
-	p.qLock.Unlock()
+func (s *impl) signalQuota() {
+	s.txQLock.Lock()
+	s.txQuotaExceeded = false
+	l := s.txQMessages.Len()
+	s.txQLock.Unlock()
 
 	if l > 0 {
-		p.signalAvailable()
-		p.run()
+		s.txSignalAvailable()
+		s.txRun()
 	}
 }
 
-func (p *transmitter) run() {
-	if atomic.CompareAndSwapUint32(&p.running, 0, 1) {
-		p.wg.Wait()
-		p.wg.Add(1)
-		go p.routine()
+func (s *impl) txRun() {
+	select {
+	case <-s.quit:
+		return
+	default:
+	}
+
+	if atomic.CompareAndSwapUint32(&s.txRunning, 0, 1) {
+		s.txWg.Wait()
+		s.txWg.Add(1)
+		go s.txRoutine()
 	}
 }
 
-func (p *transmitter) flushBuffers(buf net.Buffers) error {
-	_, e := buf.WriteTo(p.conn)
+func (s *impl) flushBuffers(buf net.Buffers) error {
+	_, e := buf.WriteTo(s.conn)
 	buf = net.Buffers{}
-	// todo metrics
 	return e
 }
 
-func (p *transmitter) packetFitsSize(value interface{}) bool {
+func (s *impl) packetFitsSize(value interface{}) bool {
 	var sz int
 	var err error
 	if obj, ok := value.(sizeAble); !ok {
-		p.log.Fatal("Object does not belong to allowed types",
-			zap.String("ClientID", p.id),
+		s.log.Fatal("Object does not belong to allowed types",
+			zap.String("ClientID", s.id),
 			zap.String("Type", reflect.TypeOf(value).String()))
 	} else {
 		if sz, err = obj.Size(); err != nil {
-			p.log.Error("Couldn't calculate message size", zap.String("ClientID", p.id), zap.Error(err))
+			s.log.Error("Couldn't calculate message size", zap.String("ClientID", s.id), zap.Error(err))
 			return false
 		}
 	}
 
 	// ignore any packet with size bigger than negotiated
-	if sz > int(p.maxPacketSize) {
-		p.log.Warn("Ignore packet with size bigger than negotiated with client",
-			zap.String("ClientID", p.id),
-			zap.Uint32("negotiated", p.maxPacketSize),
+	if sz > int(s.maxTxPacketSize) {
+		s.log.Warn("Ignore packet with size bigger than negotiated with client",
+			zap.String("ClientID", s.id),
+			zap.Uint32("negotiated", s.maxTxPacketSize),
 			zap.Int("actual", sz))
 		return false
 	}
@@ -175,53 +132,50 @@ func (p *transmitter) packetFitsSize(value interface{}) bool {
 	return true
 }
 
-func (p *transmitter) gAvailable() bool {
-	defer p.gLock.Unlock()
-	p.gLock.Lock()
+func (s *impl) gAvailable() bool {
+	defer s.txGLock.Unlock()
+	s.txGLock.Lock()
 
-	return p.gMessages.Len() > 0
+	return s.txGMessages.Len() > 0
 }
 
-func (p *transmitter) qAvailable() bool {
-	defer p.qLock.Unlock()
-	p.qLock.Lock()
+func (s *impl) qAvailable() bool {
+	defer s.txQLock.Unlock()
+	s.txQLock.Lock()
 
-	return !p.qExceeded && p.qMessages.Len() > 0
+	return !s.txQuotaExceeded && s.txQMessages.Len() > 0
 }
 
-func (p *transmitter) gPopPacket() packet.Provider {
-	defer p.gLock.Unlock()
-	p.gLock.Lock()
+func (s *impl) gPopPacket() packet.Provider {
+	defer s.txGLock.Unlock()
+	s.txGLock.Lock()
 
 	var elem *list.Element
 
-	if elem = p.gMessages.Front(); elem == nil {
+	if elem = s.txGMessages.Front(); elem == nil {
 		return nil
 	}
 
-	value := p.gMessages.Remove(elem)
-
-	return value.(packet.Provider)
+	return s.txGMessages.Remove(elem).(packet.Provider)
 }
 
-func (p *transmitter) qPopPacket() packet.Provider {
-	defer p.qLock.Unlock()
-	p.qLock.Lock()
+func (s *impl) qPopPacket() packet.Provider {
+	defer s.txQLock.Unlock()
+	s.txQLock.Lock()
 
-	if elem := p.qMessages.Front(); !p.qExceeded && elem != nil {
-		var pkt packet.Provider
+	var pkt packet.Provider
+
+	if elem := s.txQMessages.Front(); !s.txQuotaExceeded && elem != nil {
 		value := elem.Value
 		switch m := value.(type) {
 		case *packet.Publish:
 			// try acquire packet id
-			id, err := p.flowControl.acquire()
+			id, err := s.flowAcquire()
 			if err == errExit {
-				atomic.StoreUint32(&p.running, 0)
+				atomic.StoreUint32(&s.txRunning, 0)
 				return nil
-			}
-
-			if err == errQuotaExceeded {
-				p.qExceeded = true
+			} else if err == errQuotaExceeded {
+				s.txQuotaExceeded = true
 			}
 
 			m.SetPacketID(id)
@@ -230,126 +184,135 @@ func (p *transmitter) qPopPacket() packet.Provider {
 			pkt = m.packet
 
 		}
-		p.qMessages.Remove(elem)
-		p.pubOut.store(pkt)
-
-		return pkt
+		s.txQMessages.Remove(elem)
+		s.pubOut.store(pkt)
 	}
 
-	return nil
+	return pkt
 }
 
-func (p *transmitter) routine() {
+func (s *impl) txRoutine() {
 	var err error
 
 	defer func() {
-		p.wg.Done()
+		s.txWg.Done()
 
 		if err != nil {
-			p.onDisconnect(true, nil)
+			s.onConnectionClose(err)
 		}
 	}()
 
 	sendBuffers := net.Buffers{}
-	for atomic.LoadUint32(&p.running) == 1 {
+
+	for atomic.LoadUint32(&s.txRunning) == 1 {
 		select {
-		case <-p.quit:
-			err = errors.New("exit")
-			atomic.StoreUint32(&p.running, 0)
-			return
-		case <-p.timer.C:
-			if err = p.flushBuffers(sendBuffers); err != nil {
-				atomic.StoreUint32(&p.running, 0)
-				return
-			}
-			sendBuffers = net.Buffers{}
-
-			if p.qAvailable() || p.gAvailable() {
-				p.signalAvailable()
-			} else {
-				atomic.StoreUint32(&p.running, 0)
-			}
-		case <-p.available:
-			// check if there any control packets except PUBLISH QoS 1/2
-			// and process them
+		case <-s.txAvailable:
 			prevLen := len(sendBuffers)
-			for _, pkt := range p.popPackets() {
-				switch _p := pkt.(type) {
-				case *packet.Publish:
-					if _p.Expired(true) {
-						pkt = nil
-					} else {
-						p.setTopicAlias(_p)
-					}
-				}
 
-				if pkt != nil {
-					if ok := p.packetFitsSize(pkt); ok {
-						if buf, e := packet.Encode(pkt); e != nil {
-							p.log.Error("Message encode", zap.String("ClientID", p.id), zap.Error(err))
+			for packets := s.popPackets(); len(packets) > 0; packets = s.popPackets() {
+				for _, pkt := range packets {
+					switch pack := pkt.(type) {
+					case *packet.Publish:
+						if _, expireLeft, expired := pack.Expired(); expired {
+							continue
 						} else {
+							if expireLeft > 0 {
+								if err = pkt.PropertySet(packet.PropertyPublicationExpiry, expireLeft); err != nil {
+									s.log.Error("Set publication expire", zap.String("ClientID", s.id), zap.Error(err))
+								}
+							}
+							s.setTopicAlias(pack)
+						}
+					}
+
+					if ok := s.packetFitsSize(pkt); ok {
+						if buf, e := packet.Encode(pkt); e != nil {
+							s.log.Error("Message encode", zap.String("ClientID", s.id), zap.Error(err))
+						} else {
+							// todo (troian) might not be good place to do metrics
+							s.metric.Sent(pkt.Type())
 							sendBuffers = append(sendBuffers, buf)
 						}
 					}
 				}
+
+				if len(sendBuffers) >= 5 {
+					break
+				}
 			}
 
-			available := true
-
-			if p.qAvailable() || p.gAvailable() {
-				p.signalAvailable()
-			} else {
-				available = false
+			available := false
+			if s.qAvailable() || s.gAvailable() {
+				s.txSignalAvailable()
+				available = true
 			}
 
-			if prevLen == 0 {
-				p.timer.Reset(1 * time.Millisecond)
+			if prevLen == 0 && len(sendBuffers) < 5 {
+				s.txTimer.Reset(1 * time.Millisecond)
 			} else if len(sendBuffers) >= 5 {
-				p.timer.Stop()
-				if err = p.flushBuffers(sendBuffers); err != nil {
-					atomic.StoreUint32(&p.running, 0)
+				s.txTimer.Stop()
+				if err = s.flushBuffers(sendBuffers); err != nil {
+					atomic.StoreUint32(&s.txRunning, 0)
+					return
 				}
 
 				sendBuffers = net.Buffers{}
 
 				if !available {
-					atomic.StoreUint32(&p.running, 0)
+					atomic.StoreUint32(&s.txRunning, 0)
 				}
 			}
+		case <-s.txTimer.C:
+			if err = s.flushBuffers(sendBuffers); err != nil {
+				atomic.StoreUint32(&s.txRunning, 0)
+				return
+			}
+
+			sendBuffers = net.Buffers{}
+
+			if s.qAvailable() || s.gAvailable() {
+				s.txSignalAvailable()
+			} else {
+				atomic.StoreUint32(&s.txRunning, 0)
+			}
+		case <-s.quit:
+			atomic.StoreUint32(&s.txRunning, 0)
+			return
 		}
 	}
 }
 
-func (p *transmitter) popPackets() []packet.Provider {
+// +
+func (s *impl) popPackets() []packet.Provider {
 	var packets []packet.Provider
-	if pkt := p.gPopPacket(); pkt != nil {
+	if pkt := s.gPopPacket(); pkt != nil {
 		packets = append(packets, pkt)
 	}
 
-	if pkt := p.qPopPacket(); pkt != nil {
+	if pkt := s.qPopPacket(); pkt != nil {
 		packets = append(packets, pkt)
 	}
 
 	return packets
 }
 
-func (p *transmitter) setTopicAlias(pkt *packet.Publish) {
-	if p.topicAliasMax > 0 {
-		var ok bool
+// +
+func (s *impl) setTopicAlias(pkt *packet.Publish) {
+	if s.maxTxTopicAlias > 0 {
+		var exists bool
 		var alias uint16
-		if alias, ok = p.topicAlias[pkt.Topic()]; !ok {
-			if p.topicAliasCurrMax < p.topicAliasMax {
-				p.topicAliasCurrMax++
-				alias = p.topicAliasCurrMax
-				ok = true
+		if alias, exists = s.txTopicAlias[pkt.Topic()]; !exists {
+			if s.topicAliasCurrMax < s.maxTxTopicAlias {
+				s.topicAliasCurrMax++
+				alias = s.topicAliasCurrMax
 			} else {
-				alias = uint16(rand.Intn(int(p.topicAliasMax)) + 1)
+				alias = uint16(rand.Intn(int(s.maxTxTopicAlias)))
 			}
-		} else {
-			ok = false
+
+			s.txTopicAlias[pkt.Topic()] = alias
 		}
 
-		if err := pkt.PropertySet(packet.PropertyTopicAlias, alias); err == nil && !ok {
+		if err := pkt.PropertySet(packet.PropertyTopicAlias, alias); err == nil && exists {
 			pkt.SetTopic("") // nolint: errcheck
 		}
 	}

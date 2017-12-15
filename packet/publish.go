@@ -14,7 +14,9 @@
 
 package packet
 
-import "time"
+import (
+	"time"
+)
 
 // Publish A PUBLISH Control Packet is sent from a Client to a Server or from Server to a Client
 // to transport an Application Message.
@@ -24,60 +26,59 @@ type Publish struct {
 	payload   []byte
 	topic     string
 	publishID uintptr
-	expireAt  *time.Time
+	expireAt  time.Time
 }
 
 var _ Provider = (*Publish)(nil)
 
 func newPublish() *Publish {
-	return &Publish{
-		expireAt:  nil,
-		publishID: 0,
-	}
+	return &Publish{}
 }
 
-// SetExpiry time object
-func (msg *Publish) SetExpiry(tm time.Time) {
-	msg.expireAt = &tm
+// NewPublish creates a new PUBLISH packet
+func NewPublish(v ProtocolVersion) *Publish {
+	p := newPublish()
+	p.init(PUBLISH, v, p.size, p.encodeMessage, p.decodeMessage)
+	return p
 }
 
-// GetExpiry time object
-func (msg *Publish) GetExpiry() *time.Time {
-	return msg.expireAt
+// SetExpireAt time object
+func (msg *Publish) SetExpireAt(tm time.Time) {
+	msg.expireAt = tm
 }
 
 // Expired check if packet has elapsed it's time or not
-// if not expirable returns false
-func (msg *Publish) Expired(set bool) bool {
-	expired := false
-	if msg.expireAt != nil {
+// returns false if does not expire
+func (msg *Publish) Expired() (time.Time, uint32, bool) {
+	if !msg.expireAt.IsZero() {
+		var df uint32
+		expired := true
 		now := time.Now()
-		if df := uint32(msg.expireAt.Sub(now) / time.Second); msg.expireAt.After(now) && df > 0 {
-			if set && msg.version >= ProtocolV50 {
-				// TODO(troian): check error
-				msg.properties.Set(msg.mType, PropertyPublicationExpiry, df) // nolint: errcheck
+
+		if msg.expireAt.After(now) {
+			if df = uint32(msg.expireAt.Sub(now) / time.Second); df > 0 {
+				expired = false
 			}
-		} else {
-			expired = true
 		}
+
+		return msg.expireAt, df, expired
 	}
 
-	return expired
+	return time.Time{}, 0, false
 }
 
 // Clone packet
 // qos, topic, payload, retain and properties
 func (msg *Publish) Clone(v ProtocolVersion) (*Publish, error) {
 	// message version should be same as session as encode/decode depends on it
-	_pkt, _ := New(msg.version, PUBLISH)
-	pkt, _ := _pkt.(*Publish)
+	pkt := NewPublish(msg.version)
 
 	// [MQTT-3.3.1-9]
 	// [MQTT-3.3.1-3]
 	pkt.Set(msg.topic, msg.Payload(), msg.QoS(), msg.Retain(), false) // nolint: errcheck
 
-	// clone expiration setting with no matter of version as message should not be delivered to V3 brokers
-	// when it expired
+	// clone expiration setting with no matter of version as expired publish packet
+	// should not be delivered to V3 brokers when it expired
 	pkt.expireAt = msg.expireAt
 
 	if msg.version == ProtocolV50 && v == ProtocolV50 {
@@ -302,7 +303,7 @@ func (msg *Publish) decodeMessage(from []byte) (int, error) {
 	}
 
 	if msg.version == ProtocolV50 {
-		msg.properties, n, err = decodeProperties(msg.Type(), from[offset:])
+		n, err = msg.properties.decode(msg.Type(), from[offset:])
 		offset += n
 		if err != nil {
 			return offset, err
@@ -393,11 +394,11 @@ func (msg *Publish) encodeMessage(to []byte) (int, error) {
 
 	// V5.0   [MQTT-3.1.2.11]
 	if msg.version == ProtocolV50 {
-		if n, err = msg.properties.encode(to[offset:]); err != nil {
-			return offset + n, err
-		}
-
+		n, err = msg.properties.encode(to[offset:])
 		offset += n
+		if err != nil {
+			return offset, err
+		}
 	}
 
 	offset += copy(to[offset:], msg.payload)

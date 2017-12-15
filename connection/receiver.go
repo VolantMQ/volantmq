@@ -3,128 +3,93 @@ package connection
 import (
 	"bufio"
 	"encoding/binary"
-	"net"
-	"sync"
+	"errors"
 	"sync/atomic"
-	"time"
 
 	"github.com/VolantMQ/volantmq/packet"
 	"github.com/troian/easygo/netpoll"
 )
 
-type receiverConfig struct {
-	conn           net.Conn
-	keepAliveTimer *time.Timer // nolint: structcheck
-	will           *bool
-	quit           chan struct{}
-	keepAlive      time.Duration // nolint: structcheck
-	waitForRead    func() error
-	onPacket       func(packet.Provider) error
-	onDisconnect   func(bool, error) // nolint: megacheck
-	maxPacketSize  uint32
-	version        packet.ProtocolVersion
-}
-
-type receiver struct {
-	receiverConfig
-	wg sync.WaitGroup
-	//started       sync.WaitGroup
-	running       uint32
-	recv          []byte
-	remainingRecv int
-}
-
-func newReceiver(config *receiverConfig) *receiver {
-	r := &receiver{
-		receiverConfig: *config,
-	}
-
-	if r.keepAlive > 0 {
-		r.keepAliveTimer = time.AfterFunc(r.keepAlive, r.keepAliveExpired)
-	}
-
-	return r
-}
-
-func (r *receiver) keepAliveExpired() {
-	r.onDisconnect(true, nil)
-}
-
-func (r *receiver) shutdown() {
-	r.wg.Wait()
-
-	if r.keepAlive > 0 {
-		r.keepAliveTimer.Stop()
-		r.keepAliveTimer = nil
-	}
-}
-
-func (r *receiver) run(event netpoll.Event) {
-	select {
-	case <-r.quit:
-		return
-	default:
-	}
-
-	if atomic.CompareAndSwapUint32(&r.running, 0, 1) {
-		r.wg.Wait()
-		r.wg.Add(1)
-
-		exit := false
-		if event&(netpoll.EventReadHup|netpoll.EventWriteHup|netpoll.EventHup|netpoll.EventErr) != 0 {
-			exit = true
+func (s *impl) rxRun(event netpoll.Event) {
+	if atomic.CompareAndSwapUint32(&s.rxRunning, 0, 1) {
+		mask := netpoll.EventHup | netpoll.EventReadHup | netpoll.EventWriteHup | netpoll.EventErr | netpoll.EventPollClosed
+		if (event & mask) != 0 {
+			go s.onConnectionClose(nil)
+		} else {
+			go func() {
+				s.rxWg.Wait()
+				s.rxWg.Add(1)
+				s.rxRoutine()
+			}()
 		}
-
-		go r.routine(exit)
 	}
 }
 
-func (r *receiver) routine(exit bool) {
+func (s *impl) rxConnection(event netpoll.Event) {
+	mask := netpoll.EventHup | netpoll.EventReadHup | netpoll.EventWriteHup | netpoll.EventErr | netpoll.EventPollClosed
+	if (event & mask) != 0 {
+		go func() {
+			s.connect <- errors.New("disconnected")
+		}()
+	} else {
+		go func() {
+			s.connectionRoutine()
+		}()
+	}
+}
+
+func (s *impl) rxRoutine() {
 	var err error
 
-	signalDisconnect := func() {
-		r.wg.Done()
-		if _, ok := err.(packet.ReasonCode); !ok {
-			err = nil
+	defer func() {
+		s.rxWg.Done()
+		if err != nil {
+			s.onConnectionClose(err)
 		}
-		r.onDisconnect(*r.will, err)
-	}
+	}()
 
-	if exit {
-		defer signalDisconnect()
-		return
-	}
+	buf := bufio.NewReader(s.conn)
 
-	buf := bufio.NewReader(r.conn)
+	for atomic.LoadUint32(&s.rxRunning) == 1 {
+		s.runKeepAlive()
 
-	for atomic.LoadUint32(&r.running) == 1 {
-		if r.keepAlive > 0 {
-			r.keepAliveTimer.Reset(r.keepAlive)
-		}
 		var pkt packet.Provider
-		if pkt, err = r.readPacket(buf); err == nil {
-			err = r.onPacket(pkt)
+		if pkt, err = s.readPacket(buf); err == nil {
+			s.metric.Received(pkt.Type())
+			err = s.processIncoming(pkt)
 		}
 
 		if err != nil {
-			atomic.StoreUint32(&r.running, 0)
+			atomic.StoreUint32(&s.rxRunning, 0)
+			break
 		}
 	}
 
 	if _, ok := err.(packet.ReasonCode); ok {
-		defer signalDisconnect()
+		return
+	}
+
+	err = s.ePoll.Resume(s.desc)
+}
+
+func (s *impl) connectionRoutine() {
+	buf := bufio.NewReader(s.conn)
+
+	pkt, err := s.readPacket(buf)
+
+	s.keepAliveTimer.Stop()
+	if err == nil {
+		s.metric.Received(pkt.Type())
+		err = s.processIncoming(pkt)
 	} else {
-		r.wg.Done()
-		if err = r.waitForRead(); err != nil {
-			defer signalDisconnect()
-		}
+		s.connect <- err
 	}
 }
 
-func (r *receiver) readPacket(buf *bufio.Reader) (packet.Provider, error) {
+func (s *impl) readPacket(buf *bufio.Reader) (packet.Provider, error) {
 	var err error
 
-	if len(r.recv) == 0 {
+	if len(s.rxRecv) == 0 {
 		var header []byte
 		peekCount := 2
 		// Let's read enough bytes to get the fixed header/fh (msg type/flags, remaining length)
@@ -139,11 +104,6 @@ func (r *receiver) readPacket(buf *bufio.Reader) (packet.Provider, error) {
 				return nil, err
 			}
 
-			// If not enough bytes are returned, then continue until there's enough.
-			if len(header) < peekCount {
-				continue
-			}
-
 			// If we got enough bytes, then check the last byte to see if the continuation
 			// bit is set. If so, increment cnt and continue peeking
 			if header[peekCount-1] >= 0x80 {
@@ -156,29 +116,32 @@ func (r *receiver) readPacket(buf *bufio.Reader) (packet.Provider, error) {
 		// Get the remaining length of the message
 		remLen, m := binary.Uvarint(header[1:])
 		// Total message length is remlen + 1 (msg type) + m (remlen bytes)
-		r.remainingRecv = int(remLen) + 1 + m
-		r.recv = make([]byte, r.remainingRecv)
+		s.rxRemaining = int(remLen) + 1 + m
+		s.rxRecv = make([]byte, s.rxRemaining)
 	}
 
-	if r.remainingRecv > int(r.maxPacketSize) {
+	if s.rxRemaining > int(s.maxRxPacketSize) {
 		return nil, packet.CodePacketTooLarge
 	}
 
-	offset := len(r.recv) - r.remainingRecv
+	offset := len(s.rxRecv) - s.rxRemaining
 
-	for offset != r.remainingRecv {
+	for offset != s.rxRemaining {
 		var n int
-		if n, err = buf.Read(r.recv[offset:]); err != nil {
+
+		n, err = buf.Read(s.rxRecv[offset:])
+		offset += n
+		if err != nil {
+			s.rxRemaining -= offset
 			return nil, err
 		}
-		offset += n
 	}
 
 	var pkt packet.Provider
-	pkt, _, err = packet.Decode(r.version, r.recv)
+	pkt, _, err = packet.Decode(s.version, s.rxRecv)
 
-	r.recv = []byte{}
-	r.remainingRecv = 0
+	s.rxRecv = []byte{}
+	s.rxRemaining = 0
 
 	return pkt, err
 }

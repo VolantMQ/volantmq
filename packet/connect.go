@@ -30,7 +30,7 @@ func init() {
 	clientIDRegexp = regexp.MustCompile(`^[0-9a-zA-Z \-_,.|/]*$`)
 }
 
-// Connect After a Network Connection is established by a Client to a Server, the first Packet
+// Connect Accept After a Network Connection is established by a Client to a Server, the first Packet
 // sent from the Client to the Server MUST be a CONNECT Packet [MQTT-3.1.0-1].
 //
 // A Client can only send the CONNECT Packet once over a Network Connection. The Server
@@ -62,17 +62,16 @@ type Connect struct {
 var _ Provider = (*Connect)(nil)
 
 func newConnect() *Connect {
-	msg := &Connect{}
-
-	return msg
+	return &Connect{}
 }
 
-// Version returns the the 8 bit unsigned value that represents the revision level
-// of the protocol used by the Client. The value of the Protocol Level field for
-// the version 3.1.1 of the protocol is 4 (0x04).
-//func (msg *Connect) Version() byte {
-//	return msg.version
-//}
+// NewConnect creates a new CONNECT packet
+func NewConnect(v ProtocolVersion) *Connect {
+	p := newConnect()
+	p.init(CONNECT, v, p.size, p.encodeMessage, p.decodeMessage)
+	p.properties.reset()
+	return p
+}
 
 // IsClean returns the bit that specifies the handling of the Session state.
 // The Client and Server can store Session state to enable reliable messaging to
@@ -202,7 +201,7 @@ func (msg *Connect) SetCredentials(u []byte, p []byte) error {
 }
 
 // willFlag returns the bit that specifies whether a Will Message should be stored
-// on the server. If the Will Flag is set to 1 this indicates that, if the Connect
+// on the server. If the Will Flag is set to 1 this indicates that, if the Accept
 // request is accepted, a Will Message MUST be stored on the Server and associated
 // with the Network Connection.
 func (msg *Connect) willFlag() bool {
@@ -238,12 +237,9 @@ func (msg *Connect) encodeMessage(to []byte) (int, error) {
 		return 0, ErrInvalidProtocolVersion
 	}
 
-	offset := 0
-
 	// V3.1.1 [MQTT-3.1.2.1]
 	// V5.0   [MQTT-3.1.2.1]
-	n, err := WriteLPBytes(to[offset:], []byte(SupportedVersions[msg.version]))
-	offset += n
+	offset, err := WriteLPBytes(to, []byte(SupportedVersions[msg.version]))
 	if err != nil {
 		return offset, err
 	}
@@ -263,13 +259,14 @@ func (msg *Connect) encodeMessage(to []byte) (int, error) {
 	binary.BigEndian.PutUint16(to[offset:], msg.keepAlive)
 	offset += 2
 
+	var n int
 	// V5.0   [MQTT-3.1.2.11]
-	if msg.version == ProtocolV50 {
-		if n, err = encodeProperties(msg.properties, to[offset:]); err != nil {
-			return offset + n, err
-		}
-
+	if msg.version >= ProtocolV50 {
+		n, err = msg.properties.encode(to[offset:])
 		offset += n
+		if err != nil {
+			return offset, err
+		}
 	}
 
 	// V3.1.1 [MQTT-3.1.3.1]
@@ -348,9 +345,7 @@ func (msg *Connect) decodeMessage(from []byte) (int, error) {
 
 	// V3.1.1 [MQTT-3.1.2-2]
 	// V5.0   [MQTT-3.1.2-2]
-	if verStr, ok := SupportedVersions[msg.version]; !ok {
-		return offset, ErrInvalidProtocolVersion
-	} else if verStr != string(protoName) {
+	if verStr, ok := SupportedVersions[msg.version]; !ok || verStr != string(protoName) {
 		return offset, ErrInvalidProtocolVersion
 	}
 
@@ -407,8 +402,8 @@ func (msg *Connect) decodeMessage(from []byte) (int, error) {
 	offset += 2
 
 	// v5.0   [MQTT-3.1.2.11] specifies properties in variable header
-	if msg.version == ProtocolV50 {
-		msg.properties, n, err = decodeProperties(msg.mType, from[offset:])
+	if msg.version >= ProtocolV50 {
+		n, err = msg.properties.decode(msg.Type(), from[offset:])
 		offset += n
 		if err != nil {
 			return offset, err
@@ -506,9 +501,8 @@ func (msg *Connect) size() int {
 	total += 2 + len(version) + 1 + 1 + 2
 
 	// v5.0 [MQTT-3.1.2.11]
-	if msg.version == ProtocolV50 {
-		pLen, _ := encodeProperties(msg.properties, []byte{})
-		total += pLen
+	if msg.version >= ProtocolV50 {
+		total += int(msg.properties.FullLen())
 	}
 
 	//       the length prefix

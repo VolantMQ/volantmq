@@ -13,27 +13,26 @@ type header struct {
 		size   sizeCallback
 	}
 
-	properties *property // presented only in V5.0
+	properties property
 	packetID   []byte
-
-	remLen  int32
-	mFlags  byte
-	mType   Type
-	version ProtocolVersion
+	remLen     int32
+	mFlags     byte
+	mType      Type
+	version    ProtocolVersion
 }
 
 const (
 	offsetPacketType byte = 0x04
-	//offsetPublishFlagRetain     byte = 0x00
+	// offsetPublishFlagRetain     byte = 0x00
 	offsetPublishFlagQoS byte = 0x01
-	//offsetPublishFlagDup        byte = 0x03
+	// offsetPublishFlagDup        byte = 0x03
 	offsetConnFlagWillQoS byte = 0x03
-	//offsetSubscribeOps             byte = 0x06
-	//offsetSubscriptionQoS          byte = 0x00
+	// offsetSubscribeOps             byte = 0x06
+	// offsetSubscriptionQoS          byte = 0x00
 	offsetSubscriptionNL             byte = 0x02
 	offsetSubscriptionRAP            byte = 0x03
 	offsetSubscriptionRetainHandling byte = 0x04
-	//offsetSubscriptionReserved     byte = 0x06
+	// offsetSubscriptionReserved     byte = 0x06
 
 )
 
@@ -55,6 +54,18 @@ const (
 	maskSubscriptionRetainHandling byte = 0x30
 	maskSubscriptionReserved       byte = 0xC0
 )
+
+func (h *header) init(t Type, v ProtocolVersion, sz func() int, enc, dec func([]byte) (int, error)) {
+	h.mType = t
+	h.version = v
+	h.cb.encode = enc
+	h.cb.decode = dec
+	h.cb.size = sz
+
+	if v >= ProtocolV50 {
+		h.properties.reset()
+	}
+}
 
 // Name returns a string representation of the message type. Examples include
 // "PUBLISH", "SUBSCRIBE", and others. This is statically defined for each of
@@ -86,10 +97,13 @@ func (h *header) RemainingLength() int32 {
 	return h.remLen
 }
 
+// Version protocol version used by packet
 func (h *header) Version() ProtocolVersion {
 	return h.version
 }
 
+// ID packet id, valid only for
+// PUBLISH (QoS 1/2), PUBACK, PUBREC, PUBREL, PUBCOMP, SUBSCRIBE, SUBACK, UNSUBSCRIBE, UNSUBACK
 func (h *header) ID() (IDType, error) {
 	if len(h.packetID) == 0 {
 		return 0, ErrNotSet
@@ -98,6 +112,7 @@ func (h *header) ID() (IDType, error) {
 	return IDType(binary.BigEndian.Uint16(h.packetID)), nil
 }
 
+// Encode packet into buffer, Size() should be called to determine expected buffer size
 func (h *header) Encode(to []byte) (int, error) {
 	expectedSize, err := h.Size()
 	if err != nil {
@@ -122,6 +137,7 @@ func (h *header) Encode(to []byte) (int, error) {
 	return offset, err
 }
 
+// SetVersion protocol version used to encode packet
 func (h *header) SetVersion(v ProtocolVersion) {
 	h.version = v
 }
@@ -137,6 +153,12 @@ func (h *header) Size() (int, error) {
 	return h.size() + ml, nil
 }
 
+// PropertiesDiscard discard all previously set properties
+func (h *header) PropertiesDiscard() {
+	h.properties.reset()
+}
+
+// PropertyGet get property value, nil if not present
 func (h *header) PropertyGet(id PropertyID) PropertyToType {
 	if h.version != ProtocolV50 {
 		return nil
@@ -145,6 +167,7 @@ func (h *header) PropertyGet(id PropertyID) PropertyToType {
 	return h.properties.Get(id)
 }
 
+// PropertySet set value
 func (h *header) PropertySet(id PropertyID, val interface{}) error {
 	if h.version != ProtocolV50 {
 		return ErrNotSupported
@@ -153,13 +176,10 @@ func (h *header) PropertySet(id PropertyID, val interface{}) error {
 	return h.properties.Set(h.mType, id, val)
 }
 
+// PropertyForEach iterate over properties
 func (h *header) PropertyForEach(f func(PropertyID, PropertyToType)) error {
 	if h.version != ProtocolV50 {
 		return ErrNotSupported
-	}
-
-	if h.properties == nil {
-		return ErrNotSet
 	}
 
 	h.properties.ForEach(f)
@@ -230,7 +250,6 @@ func (h *header) decode(from []byte) (int, error) {
 	offset := 0
 
 	// decode and validate fixed header
-	//h.mTypeFlags = src[total]
 	h.mType = Type(from[offset] >> offsetPacketType)
 	h.mFlags = from[offset] & maskMessageFlags
 

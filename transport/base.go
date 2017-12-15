@@ -1,14 +1,10 @@
 package transport
 
 import (
-	"errors"
 	"sync"
-	"time"
 
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/clients"
-	"github.com/VolantMQ/volantmq/packet"
-	"github.com/VolantMQ/volantmq/routines"
 	"github.com/VolantMQ/volantmq/systree"
 	"go.uber.org/zap"
 )
@@ -24,10 +20,6 @@ type Config struct {
 
 // InternalConfig used by server implementation to configure internal specific needs
 type InternalConfig struct {
-	// AllowedVersions what protocol version server will handle
-	// If not set than defaults to 0x3 and 0x04
-	AllowedVersions map[packet.ProtocolVersion]bool
-
 	Sessions *clients.Manager
 
 	Metric systree.Metric
@@ -76,14 +68,6 @@ func (c *baseConfig) handleConnection(conn conn) {
 		return
 	}
 
-	var err error
-
-	defer func() {
-		if err != nil {
-			conn.Close() // nolint: errcheck, gas
-		}
-	}()
-
 	// To establish a connection, we must
 	// 1. Read and decode the message.ConnectMessage from the wire
 	// 2. If no decoding errors, then authenticate using username and password.
@@ -96,66 +80,9 @@ func (c *baseConfig) handleConnection(conn conn) {
 	// Read the CONNECT message from the wire, if error, then check to see if it's
 	// a CONNACK error. If it's CONNACK error, send the proper CONNACK error back
 	// to client. Exit regardless of error type.
-	conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(c.ConnectTimeout))) // nolint: errcheck, gas
+	//conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(c.ConnectTimeout))) // nolint: errcheck, gas
 
-	var req packet.Provider
-
-	var buf []byte
-	if buf, err = routines.GetMessageBuffer(conn); err != nil {
-		c.log.Error("Couldn't get CONNECT message", zap.Error(err))
-		return
-	}
-
-	if req, _, err = packet.Decode(packet.ProtocolV50, buf); err != nil {
-		c.log.Warn("Couldn't decode message", zap.Error(err))
-
-		if _, ok := err.(packet.ReasonCode); ok {
-			if req != nil {
-				c.Metric.Packets().Received(req.Type())
-			}
-		}
-	} else {
-		// Disable read deadline. Will set it later if keep-alive interval is bigger than 0
-		conn.SetReadDeadline(time.Time{}) // nolint: errcheck
-		switch r := req.(type) {
-		case *packet.Connect:
-			m, _ := packet.New(req.Version(), packet.CONNACK)
-			resp, _ := m.(*packet.ConnAck)
-
-			var reason packet.ReasonCode
-			// If protocol version is not in allowed list then give reject and pass control to session manager
-			// to handle response
-			if allowed, ok := c.AllowedVersions[r.Version()]; !ok || !allowed {
-				reason = packet.CodeRefusedUnacceptableProtocolVersion
-				if r.Version() == packet.ProtocolV50 {
-					reason = packet.CodeUnsupportedProtocol
-				}
-			} else {
-				user, pass := r.Credentials()
-
-				if status := c.config.AuthManager.Password(string(user), string(pass)); status == auth.StatusAllow {
-					reason = packet.CodeSuccess
-				} else {
-					reason = packet.CodeRefusedBadUsernameOrPassword
-					if req.Version() == packet.ProtocolV50 {
-						reason = packet.CodeBadUserOrPassword
-					}
-				}
-			}
-			resp.SetReturnCode(reason) // nolint: errcheck
-
-			c.Sessions.NewSession(
-				&clients.StartConfig{
-					Req:  r,
-					Resp: resp,
-					Conn: conn,
-					Auth: c.config.AuthManager,
-				})
-		default:
-			c.log.Error("Unexpected message type",
-				zap.String("expected", "CONNECT"),
-				zap.String("received", r.Type().Name()))
-			err = errors.New("unexpected message type")
-		}
+	if err := c.Sessions.Handle(conn, c.config.AuthManager); err != nil {
+		conn.Close() // nolint: errcheck, gas
 	}
 }
