@@ -31,11 +31,22 @@ import (
 
 	_ "net/http/pprof"
 	_ "runtime/debug"
+	"fmt"
 )
 
 func main() {
+	viper.SetConfigName("config_main")
+	viper.AddConfigPath("conf")
+	viper.SetConfigType("toml")
+	if err := viper.ReadInConfig(); err != nil {
+		panic(fmt.Sprintf("Couldn't read config file: %v", err))
+		os.Exit(1)
+	}
+
 	ops := configuration.Options{
 		LogWithTs: false,
+		LogLevel: viper.GetString("log.level"),
+		LogEnableTrace: viper.GetBool("log.enable_trace"),
 	}
 
 	configuration.Init(ops)
@@ -46,19 +57,13 @@ func main() {
 
 	logger.Info("Starting application")
 	logger.Info("Allocated cores", zap.Int("GOMAXPROCS", runtime.GOMAXPROCS(0)))
-	viper.SetConfigName("config_main")
-	viper.AddConfigPath("conf")
-	viper.SetConfigType("toml")
 
 	go func() {
 		http.ListenAndServe("localhost:6061", nil) // nolint: errcheck
 	}()
 
 	logger.Info("Initializing configs")
-	if err = viper.ReadInConfig(); err != nil {
-		logger.Error("Couldn't read config file", zap.Error(err))
-		os.Exit(1)
-	}
+
 
 	ia := internalAuth{
 		creds: make(map[string]string),

@@ -13,3 +13,9 @@ password="testpassword"
 [[mqtt.auth.internal]]
 user="testuser1"
 password="testpassword1"
+
+[log]
+# options are: debug,info,warn,error,panic,fatal
+level="debug"
+# whether capture the trace info in error and above level logs.
+enable_trace=true
