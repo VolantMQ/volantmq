@@ -30,6 +30,7 @@ import (
 	"github.com/VolantMQ/volantmq/types"
 	"github.com/troian/easygo/netpoll"
 	"go.uber.org/zap"
+	"fmt"
 )
 
 // nolint: golint
@@ -137,7 +138,7 @@ type Type struct {
 	topicAliasCurrMax uint16
 	txQuotaExceeded   bool
 	will              bool
-	// the unique message IDs(createAt field of the PUBLISH packet) of the
+	// the unique message IDs(createdAt field of the PUBLISH packet) of the
 	// lasted completed message(PUBLISH packet with QoS1 or QoS2) by the remote subscribers.
 	// map[topic name]map[message createdAt]true
 	lastCompletedSubscribedMessageUniqueIds *LastCompletedSubscribedMessageUniqueIds
@@ -145,21 +146,21 @@ type Type struct {
 
 type LastCompletedSubscribedMessageUniqueIds struct{
 	lock sync.RWMutex
-	// the subscribed topics and the last retained message IDs(createAt field of the PUBLISH packet)
+	// the subscribed topics and the last retained message IDs(createdAt field of the PUBLISH packet)
 	topics *map[string]int64
 }
 
 func (lids *LastCompletedSubscribedMessageUniqueIds)Store(p *packet.Publish){
 	lids.lock.Lock()
 	topic := p.Topic()
-	(*lids.topics)[topic] = p.GetCreateTimeStamp()
+	(*lids.topics)[topic] = p.GetCreateTimestamp()
 	lids.lock.Unlock()
 }
 
 func(lids *LastCompletedSubscribedMessageUniqueIds)Exists(p *packet.Publish)bool{
 	lids.lock.RLock()
 	defer lids.lock.RUnlock()
-	if id, ok := (*lids.topics)[p.Topic()]; ok && p.GetCreateTimeStamp() == id {
+	if id, ok := (*lids.topics)[p.Topic()]; ok && p.GetCreateTimestamp() == id {
 		return true
 	}
 	return false
@@ -366,10 +367,13 @@ func (s *Type) loadPersistence() error {
 	if err != nil {
 		return err
 	} else {
-		s.log.Debug("Deleting loaded persisted packets...", zap.String("ClientID", s.ID))
 		err = s.PersistedSession.PacketsDelete([]byte(s.ID))
-		if err != nil {
+		if err != nil && err != persistence.ErrNotFound {
 			return err
+		} else if err == nil{
+			s.log.Debug("Persisted packets are loaded and cleaned on persistent.", zap.String("ClientID", s.ID))
+		} else {
+			s.log.Debug("No persisted packets were found for client .", zap.String("ClientID", s.ID))
 		}
 	}
 
@@ -379,6 +383,8 @@ func (s *Type) loadPersistence() error {
 		s.WasPersisted = true
 		s.SetLastCompletedSubscribedMessageUniqueTopicIds(state.LastCompletedSubscribedMessageUniqueIds)
 		s.log.Debug("Persisted session state loaded:", zap.String("ClientID", s.ID), zap.Any("state", *state))
+	} else {
+		s.log.Debug("No persisted session state found:", zap.String("ClientID", s.ID))
 	}
 	return nil
 }

@@ -19,6 +19,8 @@ type header struct {
 	mFlags     byte
 	mType      Type
 	version    ProtocolVersion
+	// the unix nano timestamp on creating the publish packet, it should be unique in all packets.
+	createdAt    int64
 }
 
 const (
@@ -54,6 +56,16 @@ const (
 	maskSubscriptionRetainHandling byte = 0x30
 	maskSubscriptionReserved       byte = 0xC0
 )
+
+// GetCreateTimeStamp get the unixnano timestamp on creating the packet.
+// (this is not part of the protocols, just for server side internal functions.)
+func (msg *Publish) GetCreateTimestamp()int64{
+	return msg.createdAt
+}
+
+func (msg *Publish) SetCreateTimestamp(t int64){
+	msg.createdAt = t
+}
 
 // Name returns a string representation of the message type. Examples include
 // "PUBLISH", "SUBSCRIBE", and others. This is statically defined for each of

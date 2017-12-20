@@ -115,7 +115,6 @@ func (s *Type) Subscribe(topic string, params *topicsTypes.SubscriptionParams) (
 	q, r, err := s.topics.Subscribe(topic, s, params)
 
 	s.subscriptions[topic] = params
-
 	return q, r, err
 }
 

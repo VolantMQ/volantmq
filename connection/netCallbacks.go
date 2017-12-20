@@ -281,13 +281,13 @@ func (s *Type) onSubscribe(msg *packet.Subscribe) packet.Provider {
 	// Now put retained messages into publish queue
 	for _, rp := range retainedPublishes {
 		if s.SubscribedMessageCompleted(rp){
-			s.log.Debug("Skip completed retained message:", zap.String("ClientID", s.ID), zap.Int64("MessageID", rp.GetCreateTimeStamp()))
+			s.log.Debug("Skip completed retained message:", zap.String("ClientID", s.ID), zap.Int64("MessageID", rp.GetCreateTimestamp()))
 			continue
 		}
 		if pkt, err := rp.Clone(s.Version); err == nil {
 			pkt.SetRetain(true)
 			s.onSubscribedPublish(pkt)
-			s.log.Debug("Pushed retained message:", zap.String("ClientID", s.ID), zap.Int64("MessageID", rp.GetCreateTimeStamp()))
+			s.log.Debug("Pushed retained message:", zap.String("ClientID", s.ID), zap.Int64("MessageID", rp.GetCreateTimestamp()))
 		} else {
 			s.log.Error("Couldn't clone PUBLISH message", zap.String("ClientID", s.ID), zap.Error(err))
 		}

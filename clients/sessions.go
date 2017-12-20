@@ -548,13 +548,14 @@ func (m *Manager) onSessionClose(id string, reason exitReason) {
 	} else if s, ok := m.sessions.Load(id); ok{
 		sub := s.(*sessionWrap).s.subscriber
 		if sub != nil && sub.HasSubscriptions(){
-			m.log.Debug("Persisting session state...", zap.String("ClientId", id))
+			m.log.Debug("Persisting session state...", zap.String("ClientId", id), zap.Any("state", s.(*sessionWrap).s.getRuntimeState()))
 			err := m.persistence.StateStore([]byte(id), s.(*sessionWrap).s.getRuntimeState())
 			if err != nil {
 				m.log.Warn("Session state persisting failed on close.", zap.String("ClientId", id), zap.Error(err))
 			}
 		} else {
-			m.log.Debug("Deleting persisted session on close...", zap.String("ClientId", id))
+			// if the client has no subscriptions, maybe no persistence are needed.
+			m.log.Debug("Client has no subscriptions, deleting persisted session on close...", zap.String("ClientId", id))
 			err := m.persistence.Delete([]byte(id))
 			if err != nil {
 				m.log.Warn("Failed to delete persisted session on close.", zap.String("ClientId", id), zap.Error(err))
@@ -569,6 +570,7 @@ func (m *Manager) onSessionClose(id string, reason exitReason) {
 }
 
 func (m *Manager) loadSessions() error {
+	m.log.Info("Loading persisted sessions...")
 	subs := map[string]*subscriberConfig{}
 
 	delayedWills := []*packet.Publish{}
@@ -590,9 +592,12 @@ func (m *Manager) loadSessions() error {
 			since, err := time.Parse(time.RFC3339, state.Expire.Since)
 			if err != nil {
 				m.log.Error("Parse expiration value", zap.String("ClientID", sID), zap.Error(err))
-				if err := m.persistence.SubscriptionsDelete(id); err != nil && err != persistence.ErrNotFound {
-					m.log.Error("Persisted subscriber delete", zap.Error(err))
-				}
+				// in separate routine for avoiding persistence dead lock.
+				go func() {
+					if err := m.persistence.SubscriptionsDelete(id); err != nil && err != persistence.ErrNotFound {
+						m.log.Error("Persisted subscriber delete", zap.Error(err))
+					}
+				}()
 				return nil
 			}
 
@@ -626,9 +631,11 @@ func (m *Manager) loadSessions() error {
 
 					if time.Now().Before(expireAt) {
 						// persisted session has expired, wipe it
-						if err := m.persistence.Delete(id); err != nil && err != persistence.ErrNotFound {
-							m.log.Error("Persisted session delete", zap.Error(err))
-						}
+						go func() {
+							if err := m.persistence.Delete(id); err != nil && err != persistence.ErrNotFound {
+								m.log.Error("Persisted session delete", zap.Error(err))
+							}
+						}()
 						return nil
 					}
 				} else {
@@ -664,12 +671,9 @@ func (m *Manager) loadSessions() error {
 		if len(state.Subscriptions) > 0 {
 			if sCfg, err := m.loadSubscriber(state.Subscriptions); err == nil {
 				subs[sID] = sCfg
+				m.log.Debug("Persisted subscriptions loaded for client:", zap.String("ClientID", sID), zap.Any("ver", sCfg.version), zap.Any("sub", sCfg.topics))
 			} else {
 				m.log.Error("Decode subscriber", zap.String("ClientID", sID), zap.Error(err))
-			}
-
-			if err := m.persistence.SubscriptionsDelete(id); err != nil && err != persistence.ErrNotFound {
-				m.log.Error("Persisted subscriber delete", zap.Error(err))
 			}
 		}
 
@@ -716,7 +720,7 @@ func (m *Manager) loadSubscriber(from []byte) (*subscriberConfig, error) {
 	version := packet.ProtocolVersion(from[offset])
 	offset++
 	remaining := len(from) - 1
-	for offset != remaining {
+	for offset < remaining {
 		t, total, e := packet.ReadLPBytes(from[offset:])
 		if e != nil {
 			return nil, e
@@ -740,51 +744,54 @@ func (m *Manager) loadSubscriber(from []byte) (*subscriberConfig, error) {
 	}, nil
 }
 
+func (m *Manager) persistSubscriptions(id string, s subscriber.ConnectionProvider)(err error) {
+	topics := s.Subscriptions()
+	// calculate size of the encoded entry
+	// consist of:
+	//  _ _ _ _ _     _ _ _ _ _ _
+	// |_|_|_|_|_|...|_|_|_|_|_|_|
+	//  ___ _ _________ _ _______
+	//   |  |     |     |    |
+	//   |  |     |     |    4 bytes - subscription id
+	//   |  |     |     | 1 byte - topic options
+	//   |  |     | n bytes - topic
+	//   |  | 1 bytes - protocol version
+	//   | 2 bytes - length prefix
+
+	size := 0
+	for topic := range topics {
+		size += 2 + len(topic) + 1 + int(unsafe.Sizeof(uint32(0)))
+	}
+
+	buf := make([]byte, size+1)
+	offset := 0
+	buf[offset] = byte(s.Version())
+	offset++
+
+	for s, params := range topics {
+		total, _ := packet.WriteLPBytes(buf[offset:], []byte(s))
+		offset += total
+		buf[offset] = byte(params.Ops)
+		offset++
+		binary.BigEndian.PutUint32(buf[offset:], params.ID)
+		offset += 4
+	}
+
+	m.log.Debug("Persisting client subscriptions...", zap.String("ClientID", id), zap.Any("Subscrptions", topics))
+	if err = m.persistence.SubscriptionsStore([]byte(id), buf); err != nil {
+		m.log.Error("Couldn't persist subscriptions", zap.String("ClientID", id), zap.Error(err))
+	}
+	return err
+}
+
 func (m *Manager) storeSubscribers() error {
 	// 4. shutdown and persist subscriptions from non-clean session
 	//for id, s := range m.subscribers {
 	m.subscribers.Range(func(k, v interface{}) bool {
 		id := k.(string)
 		s := v.(subscriber.ConnectionProvider)
-		s.Offline(true)
-
-		topics := s.Subscriptions()
-
-		// calculate size of the encoded entry
-		// consist of:
-		//  _ _ _ _ _     _ _ _ _ _ _
-		// |_|_|_|_|_|...|_|_|_|_|_|_|
-		//  ___ _ _________ _ _______
-		//   |  |     |     |    |
-		//   |  |     |     |    4 bytes - subscription id
-		//   |  |     |     | 1 byte - topic options
-		//   |  |     | n bytes - topic
-		//   |  | 1 bytes - protocol version
-		//   | 2 bytes - length prefix
-
-		size := 0
-		for topic := range topics {
-			size += 2 + len(topic) + 1 + int(unsafe.Sizeof(uint32(0)))
-		}
-
-		buf := make([]byte, size+1)
-		offset := 0
-		buf[offset] = byte(s.Version())
-		offset++
-
-		for s, params := range topics {
-			total, _ := packet.WriteLPBytes(buf[offset:], []byte(s))
-			offset += total
-			buf[offset] = byte(params.Ops)
-			offset++
-			binary.BigEndian.PutUint32(buf[offset:], params.ID)
-			offset += 4
-		}
-
-		if err := m.persistence.SubscriptionsStore([]byte(id), buf); err != nil {
-			m.log.Error("Couldn't persist subscriptions", zap.String("ClientID", id), zap.Error(err))
-		}
-
+		s.Offline(false)
+		m.persistSubscriptions(id, s)
 		return true
 	})
 
@@ -810,7 +817,7 @@ func (m *Manager) onPublish(id string, p *packet.Publish) {
 		m.log.Error("Couldn't encode packet", zap.String("ClientID", id), zap.Error(err))
 		return
 	}
-	m.log.Debug("Persisting message packet:", zap.String("ClientID", id), zap.Int64("MessageID", p.GetCreateTimeStamp()))
+	m.log.Debug("Persisting message packet:", zap.String("ClientID", id), zap.Int64("MessageUniqueID", p.GetCreateTimestamp()))
 	if err = m.persistence.PacketStore([]byte(id), pkt); err != nil {
 		m.log.Error("Couldn't persist message", zap.String("ClientID", id), zap.Error(err))
 	}

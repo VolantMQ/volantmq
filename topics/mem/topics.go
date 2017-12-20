@@ -78,6 +78,7 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 				p.log.Error("Couldn't decode retained message", zap.Error(err))
 			} else {
 				if m, ok := pkt.(*packet.Publish); ok {
+					m.SetCreateTimestamp(d.CreatedAt)
 					if len(d.ExpireAt) > 0 {
 						if tm, err := time.Parse(time.RFC3339, d.ExpireAt); err == nil {
 							m.SetExpiry(tm)
@@ -88,6 +89,7 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 					p.log.Debug("restoring persisted retained message:", zap.String("topic", m.Topic()),
 						zap.Any("version", m.Version()),
 							zap.String("payload", string(m.Payload())),
+							zap.Int64("createdAt", m.GetCreateTimestamp()),
 						)
 					p.Retain(m) // nolint: errcheck
 				} else {
@@ -190,6 +192,7 @@ func (mT *provider) Close() error {
 					entry := persistence.PersistedPacket{
 						Data: buf,
 						Version: persistence.ProtocolVersion(pkt.Version()),
+						CreatedAt:pkt.GetCreateTimestamp(),
 					}
 					if tm := pkt.GetExpiry(); !tm.IsZero() {
 						entry.ExpireAt = tm.Format(time.RFC3339)

@@ -342,7 +342,6 @@ func (s *server) Close() error {
 		for port := range s.transports.list {
 			delete(s.transports.list, port)
 		}
-
 		if s.sessionsMgr != nil {
 			if s.Persistence != nil {
 				s.sessionsMgr.Shutdown() // nolint: errcheck, gas

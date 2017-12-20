@@ -27,20 +27,14 @@ type Publish struct {
 	topic     string
 	publishID uintptr
 	expireAt  time.Time
-	// the unix nano timestamp on creating the publish packet, it should be unique in all packets.
-	createAt    int64
 }
 
 var _ Provider = (*Publish)(nil)
 
 func newPublish() *Publish {
-	return &Publish{createAt: time.Now().UnixNano()}
+	return &Publish{header: header{createdAt: time.Now().UnixNano()}}
 }
 
-//GetCreateTimeStamp get the unixnano timestamp on creating the packet
-func (msg *Publish) GetCreateTimeStamp()int64{
-	return msg.createAt
-}
 // SetExpiry time object
 func (msg *Publish) SetExpiry(tm time.Time) {
 	msg.expireAt = tm
@@ -76,7 +70,7 @@ func (msg *Publish) Clone(v ProtocolVersion) (*Publish, error) {
 	// message version should be same as session as encode/decode depends on it
 	_pkt, _ := New(msg.version, PUBLISH)
 	pkt, _ := _pkt.(*Publish)
-	pkt.createAt = msg.createAt
+	pkt.createdAt = msg.createdAt
 
 	// [MQTT-3.3.1-9]
 	// [MQTT-3.3.1-3]
