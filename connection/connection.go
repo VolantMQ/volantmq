@@ -30,7 +30,6 @@ import (
 	"github.com/VolantMQ/volantmq/types"
 	"github.com/troian/easygo/netpoll"
 	"go.uber.org/zap"
-	"fmt"
 )
 
 // nolint: golint
