@@ -306,7 +306,7 @@ func (s *Type) processIncoming(p packet.Provider) error {
 			}
 		}
 	default:
-		s.log.Error("Unsupported incoming message type",
+		s.log.Error("Unsupported incoming message type on flight stage",
 			zap.String("ClientID", s.ID),
 			zap.String("type", p.Type().Name()))
 		return nil
@@ -473,6 +473,7 @@ func (s *Type) onSubscribedPublish(p *packet.Publish) {
 
 // forward PUBLISH message to topics manager which takes care about subscribers
 func (s *Type) publishToTopic(p *packet.Publish) error {
+	// TODO: right place?
 	if err := s.postProcessPublish(p); err != nil {
 		return err
 	}
