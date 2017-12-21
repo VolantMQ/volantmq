@@ -9,14 +9,14 @@ import (
 	"github.com/VolantMQ/volantmq/types"
 )
 
-type subscriber struct {
+type topicSubscriber struct {
 	s topicsTypes.Subscriber
 	p *topicsTypes.SubscriptionParams
 }
 
-type subscribers map[uintptr]*subscriber
+type subscribers map[uintptr]*topicSubscriber
 
-func (s *subscriber) acquire() *publish {
+func (s *topicSubscriber) acquire() *publish {
 	s.s.Acquire()
 	pe := &publish{
 		s:   s.s,
@@ -106,7 +106,7 @@ func (mT *provider) subscriptionInsert(filter string, sub topicsTypes.Subscriber
 	// Otherwise create new entry
 	exists := false
 	if s, ok := root.subs[sub.Hash()]; !ok {
-		root.subs[sub.Hash()] = &subscriber{
+		root.subs[sub.Hash()] = &topicSubscriber{
 			s: sub,
 			p: p,
 		}
