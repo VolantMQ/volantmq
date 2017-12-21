@@ -26,7 +26,8 @@ func init() {
 	// Added space for Paho compliance test
 	// Added underscore (_) for MQTT C client test
 	// Added coma(,) for MQTT C client test
-	clientIDRegexp = regexp.MustCompile(`^[0-9a-zA-Z \-_,.|]*$`)
+	// Added slash(/) for GCP test
+	clientIDRegexp = regexp.MustCompile(`^[0-9a-zA-Z \-_,.|/]*$`)
 }
 
 // Connect Accept After a Network Connection is established by a Client to a Server, the first Packet
