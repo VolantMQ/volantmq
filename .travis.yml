@@ -4,16 +4,27 @@ notifications:
   email: false
 go:
   - 1.9
+env:
+  DEP_VERSION="v0.3.2"
+os:
+  - linux
+  - osx
+before_install:
+  - npm install -g codeclimate-test-reporter
+  - go get -u github.com/alecthomas/gometalinter
+  - gometalinter --install
+  - |
+    if [ "$TRAVIS_OS_NAME" == "osx" ]; then
+        brew install dep;
+    else
+        curl -L -s https://github.com/golang/dep/releases/download/${DEP_VERSION}/dep-linux-amd64 -o $GOPATH/bin/dep;
+        chmod +x $GOPATH/bin/dep;
+    fi
 jobs:
   include:
     - stage: test
       install:
-        - npm install -g codeclimate-test-reporter
-        - go get -u github.com/alecthomas/gometalinter
-        - gometalinter --install
-        - go get -u github.com/golang/dep/cmd/dep
         - dep ensure
-      os: linux
       script:
         - go build -race -v -gcflags "-N -l" ./examples/...
         - gometalinter --fast --exclude=corefoundation.go --deadline=360s --enable-gc --sort=path --cyclo-over=40 --dupl-threshold=100 --disable=gotype --vendor --enable=goimports./...
