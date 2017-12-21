@@ -317,7 +317,7 @@ func TestInsert1(t *testing.T) {
 	require.Equal(t, 0, len(level5.children))
 	require.Equal(t, 1, len(level5.subs))
 
-	var e *subscriber
+	var e *topicSubscriber
 
 	e, ok = level5.subs[sub1.Hash()]
 	require.Equal(t, true, ok)
@@ -343,7 +343,7 @@ func TestSNodeInsert2(t *testing.T) {
 	require.Equal(t, 0, len(n2.children))
 	require.Equal(t, 1, len(n2.subs))
 
-	var e *subscriber
+	var e *topicSubscriber
 
 	e, ok = n2.subs[sub1.Hash()]
 	require.Equal(t, true, ok)
@@ -381,7 +381,7 @@ func TestSNodeInsert3(t *testing.T) {
 	require.Equal(t, 0, len(n4.children))
 	require.Equal(t, 1, len(n4.subs))
 
-	var e *subscriber
+	var e *topicSubscriber
 
 	e, ok = n4.subs[sub1.Hash()]
 	require.Equal(t, true, ok)
@@ -413,7 +413,7 @@ func TestSNodeInsert4(t *testing.T) {
 	require.Equal(t, 0, len(n3.children))
 	require.Equal(t, 1, len(n3.subs))
 
-	var e *subscriber
+	var e *topicSubscriber
 
 	e, ok = n3.subs[sub1.Hash()]
 	require.Equal(t, true, ok)
@@ -447,7 +447,7 @@ func TestSNodeInsertDup(t *testing.T) {
 	require.Equal(t, 0, len(n3.children))
 	require.Equal(t, 1, len(n3.subs))
 
-	var e *subscriber
+	var e *topicSubscriber
 
 	e, ok = n3.subs[sub1.Hash()]
 	require.Equal(t, true, ok)
