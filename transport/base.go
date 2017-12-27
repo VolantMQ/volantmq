@@ -106,23 +106,31 @@ func (c *baseConfig) handleConnection(conn conn) {
 		return
 	}
 
+	var reason packet.ReasonCode
+	var hasErrReason bool
 	if req, _, err = packet.Decode(packet.ProtocolV50, buf); err != nil {
-		c.log.Warn("Couldn't decode message", zap.Error(err))
-
-		if _, ok := err.(packet.ReasonCode); ok {
+		if reason, hasErrReason = err.(packet.ReasonCode); hasErrReason {
 			if req != nil {
 				c.Metric.Packets().Received(req.Type())
 			}
+		} else {
+			c.log.Warn("Couldn't decode message", zap.Error(err))
+			return
 		}
-	} else {
+	}
+
+	if err == nil || hasErrReason{
 		// Disable read deadline. Will set it later if keep-alive interval is bigger than 0
 		conn.SetReadDeadline(time.Time{}) // nolint: errcheck
 		switch r := req.(type) {
 		case *packet.Connect:
 			m, _ := packet.New(req.Version(), packet.CONNACK)
 			resp, _ := m.(*packet.ConnAck)
-
-			var reason packet.ReasonCode
+			if hasErrReason {
+				resp.SetReturnCode(reason)
+				routines.WriteMessage(conn, resp)
+				return
+			}
 			// If protocol version is not in allowed list then give reject and pass control to session manager
 			// to handle response
 			if allowed, ok := c.AllowedVersions[r.Version()]; !ok || !allowed {

@@ -245,11 +245,9 @@ func Decode(v ProtocolVersion, buf []byte) (msg Provider, total int, err error) 
 		return nil, 0, err
 	}
 
-	if total, err = msg.decode(buf); err != nil {
-		return nil, total, err
-	}
+	total, err = msg.decode(buf)
 
-	return msg, total, nil
+	return msg, total, err
 }
 
 // ValidTopic checks the topic, which is a slice of bytes, to see if it's valid. Topic is
