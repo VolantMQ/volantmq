@@ -144,8 +144,8 @@ func (m *Manager) NewSession(config *StartConfig) {
 	defer func() {
 		if err != nil {
 			var reason packet.ReasonCode
-			var hasErrReson bool
-			if reason, hasErrReson = err.(packet.ReasonCode); !hasErrReson {
+			var hasErrReason bool
+			if reason, hasErrReason = err.(packet.ReasonCode); !hasErrReason {
 				switch config.Req.Version() {
 				case packet.ProtocolV50:
 					reason = packet.CodeUnspecifiedError
