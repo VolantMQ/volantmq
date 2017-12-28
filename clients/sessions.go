@@ -144,13 +144,17 @@ func (m *Manager) NewSession(config *StartConfig) {
 	defer func() {
 		if err != nil {
 			var reason packet.ReasonCode
-			switch config.Req.Version() {
-			case packet.ProtocolV50:
-				reason = packet.CodeUnspecifiedError
-			default:
-				reason = packet.CodeRefusedServerUnavailable
+			var hasErrReson bool
+			if reason, hasErrReson = err.(packet.ReasonCode); !hasErrReson {
+				switch config.Req.Version() {
+				case packet.ProtocolV50:
+					reason = packet.CodeUnspecifiedError
+				default:
+					reason = packet.CodeRefusedServerUnavailable
+				}
 			}
 			config.Resp.SetReturnCode(reason) // nolint: errcheck
+			m.log.Warn("Session create error.", zap.Error(err))
 		}
 
 		if err = routines.WriteMessage(config.Conn, config.Resp); err != nil {
@@ -217,6 +221,7 @@ func (m *Manager) loadSession(id string, v packet.ProtocolVersion, resp *packet.
 				}
 				oldWrap.release()
 			} else {
+				// [MQTT-5]
 				// session will be replaced with new connection
 				// stop current active connection
 				old.stop(packet.CodeSessionTakenOver)
