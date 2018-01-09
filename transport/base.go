@@ -152,7 +152,7 @@ func (c *baseConfig) handleConnection(conn conn) {
 			}
 			resp.SetReturnCode(reason) // nolint: errcheck
 
-			c.Sessions.NewSession(
+			err = c.Sessions.NewSession(
 				&clients.StartConfig{
 					Req:  r,
 					Resp: resp,

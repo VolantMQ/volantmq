@@ -133,10 +133,9 @@ func (m *Manager) Shutdown() error {
 
 // NewSession create new session with provided established connection
 // This is god function. Might be try split it
-func (m *Manager) NewSession(config *StartConfig) {
+func (m *Manager) NewSession(config *StartConfig)(err error) {
 	var id string
 	var ses *session
-	var err error
 	idGenerated := false
 
 	var systreeConnStatus *systree.ClientConnectStatus
@@ -157,8 +156,8 @@ func (m *Manager) NewSession(config *StartConfig) {
 			m.log.Warn("Session create error.", zap.Error(err))
 		}
 
-		if err = routines.WriteMessage(config.Conn, config.Resp); err != nil {
-			m.log.Error("Couldn't write CONNACK", zap.String("ClientID", id), zap.Error(err))
+		if rErr := routines.WriteMessage(config.Conn, config.Resp); rErr != nil {
+			m.log.Error("Couldn't write CONNACK", zap.String("ClientID", id), zap.Error(rErr))
 		} else {
 			if ses != nil {
 				ses.start()
@@ -187,6 +186,7 @@ func (m *Manager) NewSession(config *StartConfig) {
 			m.sessionsCount.Done()
 		}
 	}
+	return
 }
 
 func (m *Manager) loadSession(id string, v packet.ProtocolVersion, resp *packet.ConnAck) (*session, error) {
