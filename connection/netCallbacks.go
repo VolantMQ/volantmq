@@ -94,7 +94,6 @@ func (s *Type) onConnectionClose(will bool, err error) {
 		if !s.KillOnDisconnect {
 			s.persist()
 		}
-
 		s.OnDisconnect(params)
 	})
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/VolantMQ/volantmq/packet"
 	"github.com/troian/easygo/netpoll"
+	"go.uber.org/zap"
 )
 
 func (s *Type) keepAliveExpired() {
@@ -30,8 +31,15 @@ func (s *Type) rxRun(event netpoll.Event) {
 		if event&(netpoll.EventReadHup|netpoll.EventWriteHup|netpoll.EventHup|netpoll.EventErr) != 0 {
 			exit = true
 		}
-
-		go s.rxRoutine(exit)
+		if exit {
+			s.log.Debug("Client connection problem, session is going to be shutdown.", zap.Any("error_reason", event.String()),
+				zap.String("client_id", s.ID), zap.String("client_addr", s.Conn.RemoteAddr().String()))
+			s.rxRoutine(exit)
+		} else {
+			s.log.Debug("Starting new receiver routine for session",
+				zap.String("client_id", s.ID), zap.String("client_addr", s.Conn.RemoteAddr().String()))
+			go s.rxRoutine(exit)
+		}
 	}
 }
 
@@ -64,14 +72,12 @@ func (s *Type) rxRoutine(exit bool) {
 		if pkt, err = s.readPacket(buf); err == nil {
 			err = s.processIncoming(pkt)
 		}
-
 		if err != nil {
 			atomic.StoreUint32(&s.rxRunning, 0)
 		}
 	}
-
 	if _, ok := err.(packet.ReasonCode); !ok {
-		err = s.EventPoll.Resume(s.Desc)
+		s.EventPoll.Resume(s.Desc)
 	}
 }
 

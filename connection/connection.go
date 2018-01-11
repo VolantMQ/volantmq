@@ -250,7 +250,10 @@ func New(c *Config) (s *Type, err error) {
 func (s *Type) Start() {
 	s.onStart.Do(func() {
 		s.txRun()
-		s.EventPoll.Start(s.Desc, s.rxRun) // nolint: errcheck
+		err := s.EventPoll.Start(s.Desc, s.rxRun) // nolint: errcheck
+		if err != nil {
+			s.log.Error("Failed to monitor client connection.", zap.String("err", err.Error()))
+		}
 		s.started.Done()
 	})
 }
@@ -282,14 +285,12 @@ func (s *Type) processIncoming(p packet.Provider) error {
 	case *packet.Disconnect:
 		// For DISCONNECT message, we should quit without sending Will
 		s.will = false
-
+		err = errors.New("disconnect")
 		if s.Version == packet.ProtocolV50 {
 			// FIXME: CodeRefusedBadUsernameOrPassword has same id as CodeDisconnectWithWill
 			if pkt.ReasonCode() == packet.CodeRefusedBadUsernameOrPassword {
 				s.will = true
 			}
-
-			err = errors.New("disconnect")
 
 			if prop := pkt.PropertyGet(packet.PropertySessionExpiryInterval); prop != nil {
 				if val, ok := prop.AsInt(); ok == nil {
@@ -305,6 +306,8 @@ func (s *Type) processIncoming(p packet.Provider) error {
 				}
 			}
 		}
+		s.log.Debug("Client requested to disconnect, session is going to be shutdown.",
+			zap.String("client_id", s.ID), zap.String("client_addr", s.Conn.RemoteAddr().String()))
 	default:
 		s.log.Error("Unsupported incoming message type on flight stage",
 			zap.String("ClientID", s.ID),
