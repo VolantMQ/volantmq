@@ -272,6 +272,7 @@ func NewServer(config *ServerConfig) (Server, error) {
 	return s, nil
 }
 
+// ListenAndServe
 func (s *server) ListenAndServe(config interface{}) error {
 	var l transport.Provider
 	var err error
@@ -322,6 +323,7 @@ func (s *server) ListenAndServe(config interface{}) error {
 	return nil
 }
 
+// Close server
 func (s *server) Close() error {
 	// By closing the quit channel, we are telling the server to stop accepting new
 	// connection.

@@ -81,9 +81,9 @@ func (s *impl) connectionRoutine() {
 	if err == nil {
 		s.metric.Received(pkt.Type())
 		err = s.processIncoming(pkt)
+	} else {
+		s.connect <- err
 	}
-
-	s.connect <- err
 }
 
 func (s *impl) readPacket(buf *bufio.Reader) (packet.Provider, error) {

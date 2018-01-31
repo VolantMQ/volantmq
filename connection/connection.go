@@ -294,15 +294,21 @@ func (s *impl) Accept() (chan interface{}, error) {
 
 	s.desc = netpoll.Must(netpoll.HandleReadOnce(s.conn))
 	s.keepAliveTimer = time.AfterFunc(time.Duration(s.keepAlive), s.keepAliveFired)
-	return s.connect, s.ePoll.Start(s.desc, s.rxConnection)
+
+	if err := s.ePoll.Start(s.desc, s.rxConnection); err != nil {
+		close(s.connect)
+		return nil, err
+	}
+
+	return s.connect, nil
 }
 
-// Session
+// Session object
 func (s *impl) Session() Session {
 	return s
 }
 
-// Send
+// Send packet to connection
 func (s *impl) Send(pkt packet.Provider) {
 	if pkt.Type() == packet.AUTH {
 		s.state = stateAuth
@@ -314,6 +320,7 @@ func (s *impl) Send(pkt packet.Provider) {
 	s.ePoll.Resume(s.desc)
 }
 
+// Acknowledge incoming connection
 func (s *impl) Acknowledge(p *packet.ConnAck, opts ...Option) bool {
 	ack := true
 	s.ePoll.Stop(s.desc)
