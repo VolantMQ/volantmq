@@ -70,6 +70,7 @@ func MaxTxPacketSize(val uint32) Option {
 func TxQuota(val int32) Option {
 	return func(t *impl) error {
 		t.txQuota = val
+		//t.pubOut.quota = val
 		return nil
 	}
 }
@@ -77,6 +78,7 @@ func TxQuota(val int32) Option {
 func RxQuota(val int32) Option {
 	return func(t *impl) error {
 		t.rxQuota = val
+		//t.pubIn.quota = val
 		return nil
 	}
 }

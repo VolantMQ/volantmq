@@ -155,13 +155,13 @@ func (mT *provider) Retained(filter string) ([]*packet.Publish, error) {
 }
 
 func (mT *provider) Close() error {
-	defer mT.smu.Unlock()
-	mT.smu.Lock()
-
 	close(mT.inbound)
 	close(mT.inRetained)
 
 	mT.wgPublisher.Wait()
+
+	defer mT.smu.Unlock()
+	mT.smu.Lock()
 
 	if mT.persist != nil {
 		var res []*packet.Publish
@@ -170,7 +170,7 @@ func (mT *provider) Close() error {
 		mT.retainSearch("/#", &res)
 		mT.retainSearch("$share/#", &res)
 
-		var encoded []persistence.PersistedPacket
+		var encoded persistence.PersistedPackets
 
 		for _, pkt := range res {
 			// Discard retained expired and QoS0 messages
@@ -178,7 +178,7 @@ func (mT *provider) Close() error {
 				if buf, err := packet.Encode(pkt); err != nil {
 					mT.log.Error("Couldn't encode retained message", zap.Error(err))
 				} else {
-					entry := persistence.PersistedPacket{
+					entry := &persistence.PersistedPacket{
 						Data: buf,
 					}
 					if !expireAt.IsZero() {

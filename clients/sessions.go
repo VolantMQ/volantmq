@@ -140,8 +140,7 @@ func NewManager(c *Config) (*Manager, error) {
 	return m, nil
 }
 
-// Shutdown sessions manager
-// gracefully shutdown by stopping all active sessions and persist states
+// Shutdown gracefully by stopping all active sessions and persist states
 func (m *Manager) Shutdown() error {
 	select {
 	case <-m.quit:
@@ -150,11 +149,33 @@ func (m *Manager) Shutdown() error {
 		close(m.quit)
 	}
 
+	// stop running sessions
 	m.sessions.Range(func(k, v interface{}) bool {
 		wrap := v.(*container)
-		ses := wrap.ses.Load().(*session)
-		state := ses.stop(packet.CodeServerShuttingDown)
-		m.persistence.StateStore([]byte(k.(string)), state) // nolint: errcheck
+		wrap.rmLock.Lock()
+		ses := wrap.ses
+		wrap.rmLock.Unlock()
+
+		if ses != nil {
+			ses.stop(packet.CodeServerShuttingDown)
+		}
+		// m.persistence.StateStore([]byte(k.(string)), state) // nolint: errcheck
+		return true
+	})
+
+	// shutdown subscribers and expiry
+	m.sessions.Range(func(k, v interface{}) bool {
+		wrap := v.(*container)
+
+		exp := wrap.expiry.Load().(*expiry)
+		if exp != nil {
+			exp.cancel()
+
+		}
+
+		//if wrap.sub != nil {
+		//	wrap.sub.
+		//}
 		return true
 	})
 
@@ -165,7 +186,7 @@ func (m *Manager) Shutdown() error {
 	return nil
 }
 
-// LoadSession load persisted session. Invoked by persisted provider
+// LoadSession load persisted session. Invoked by persistence provider
 func (m *Manager) LoadSession(context interface{}, id []byte, state *persistence.SessionState) error {
 	sID := string(id)
 	ctx := context.(*loadContext)
@@ -420,6 +441,7 @@ func (m *Manager) checkServerStatus(v packet.ProtocolVersion, resp *packet.ConnA
 	}
 }
 
+// allocContainer
 func (m *Manager) allocContainer(id string, createdAt time.Time, cn connection.Session) *container {
 	ses := newSession(sessionPreConfig{
 		id:          id,
@@ -429,57 +451,86 @@ func (m *Manager) allocContainer(id string, createdAt time.Time, cn connection.S
 		persistence: m.persistence,
 	})
 
-	wrap := &container{}
-	ses.idLock = &wrap.lock
-	wrap.ses.Store(ses)
-	wrap.acquire()
+	cont := &container{
+		removable: true,
+	}
 
-	return wrap
+	ses.idLock = &cont.lock
+	cont.ses = ses
+	cont.acquire()
+
+	return cont
 }
 
 func (m *Manager) loadContainer(cn connection.Session, params *connection.ConnectParams) (cont *containerInfo, err error) {
 	newContainer := m.allocContainer(params.ID, time.Now(), cn)
-	if ss, present := m.sessions.LoadOrStore(params.ID, newContainer); present {
-		// release lock of newly allocated session as lock from old one will be used
-		newContainer.release()
+
+	inc := false
+
+	// search for existing container with given id
+	if curr, present := m.sessions.LoadOrStore(params.ID, newContainer); present {
+		// container with given id already exists with either active connection or expiry and/or willDelay set
 
 		// there is some old session exists, check if it has active network connection then stop if so
 		// if it is offline (either waiting for expiration to fire or will event or) switch back to online
 		// and use this session henceforth
-		currContainer := ss.(*container)
+		currContainer := curr.(*container)
 
-		// lock id to prevent other upcoming session make any changes until we done
+		// lock id to prevent other incoming connections with same ID making any changes until we done
 		currContainer.acquire()
 
-		if current := currContainer.session(); current != nil {
-			m.OnReplaceAttempt(params.ID, m.AllowReplace)
-			if !m.AllowReplace {
-				// we do not make any changes to current network connection
-				// response to new one with error and release both new & old sessions
-				err = packet.CodeRefusedIdentifierRejected
-				if params.Version >= packet.ProtocolV50 {
-					err = packet.CodeInvalidClientID
+		currContainer.setRemovable(false)
+
+		if curr, present = m.sessions.LoadOrStore(params.ID, newContainer); present {
+			// release lock of newly allocated container as lock from old one will be used
+			newContainer.release()
+
+			if current := currContainer.session(); current != nil {
+				// container has session with active connection
+
+				m.OnReplaceAttempt(params.ID, m.AllowReplace)
+				if !m.AllowReplace {
+					// we do not make any changes to current network connection
+					// response to new one with error and release both new & old sessions
+					err = packet.CodeRefusedIdentifierRejected
+					if params.Version >= packet.ProtocolV50 {
+						err = packet.CodeInvalidClientID
+					}
+
+					currContainer.setRemovable(true)
+
+					currContainer.release()
+					newContainer = nil
+					return
 				}
-				currContainer.release()
-				newContainer = nil
-				return
+
+				// session will be replaced with new connection
+				// stop current active connection
+				current.stop(packet.CodeSessionTakenOver)
 			}
-			// session will be replaced with new connection
-			// stop current active connection
-			current.stop(packet.CodeSessionTakenOver)
+
+			if val := currContainer.expiry.Load(); val != nil {
+				exp := val.(*expiry)
+				exp.cancel()
+				currContainer.expiry = atomic.Value{}
+			}
+
+			newContainer = currContainer.swap(newContainer)
+
+			if _, ok := m.sessions.LoadOrStore(params.ID, currContainer); !ok {
+				inc = true
+			}
+		} else {
+			currContainer.release()
+			inc = true
 		}
 
-		if val := currContainer.expiry.Load(); val != nil {
-			exp := val.(*expiry)
-			exp.cancel()
-			currContainer.expiry = atomic.Value{}
-			m.sessionsCount.Done()
-		}
-
-		newContainer = currContainer.swap(newContainer)
-		m.sessions.Store(params.ID, currContainer)
-		m.sessionsCount.Add(1)
+		currContainer.setRemovable(true)
 	} else {
+		inc = true
+	}
+
+	if inc {
 		m.sessionsCount.Add(1)
 	}
 
@@ -507,8 +558,18 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 		}
 	}
 
+	if !present {
+		status := &systree.SessionCreatedStatus{
+			Clean:     params.CleanStart,
+			Durable:   params.Durable,
+			Timestamp: time.Now().Format(time.RFC3339),
+			WillDelay: strconv.FormatUint(uint64(params.WillDelay), 10),
+		}
+		m.Systree.Sessions().Created(params.ID, status)
+	}
+
 	cont = &containerInfo{
-		ses:     newContainer.ses.Load().(*session),
+		ses:     newContainer.ses,
 		sub:     sub,
 		present: present,
 	}
@@ -581,9 +642,8 @@ func (m *Manager) writeSessionProperties(resp *packet.ConnAck, id string) error 
 	return nil
 }
 
-func (m *Manager) connectionClosed(id string, reason packet.ReasonCode, retain bool) {
-	m.log.Debug("Disconnected", zap.String("ClientID", id))
-	m.Systree.Clients().Disconnected(id, reason, retain)
+func (m *Manager) connectionClosed(id string, reason packet.ReasonCode) {
+	m.Systree.Clients().Disconnected(id, reason)
 }
 
 func (m *Manager) subscriberShutdown(id string, sub subscriber.SessionProvider) {
@@ -613,26 +673,34 @@ func (m *Manager) sessionTimer(id string, expired bool) {
 	m.Systree.Sessions().Removed(id, state)
 }
 
-func (m *Manager) sessionOffline(id string, durable bool, exp *expiry) {
-	if !durable {
-		state := &systree.SessionDeletedStatus{
-			Timestamp: time.Now().Format(time.RFC3339),
-			Reason:    "clean",
+func (m *Manager) sessionOffline(id string, keep bool, exp *expiry) {
+	if obj, ok := m.sessions.Load(id); ok {
+		wrap := obj.(*container)
+		wrap.rmLock.Lock()
+		wrap.ses = nil
+
+		if keep {
+			if exp != nil {
+				wrap.expiry.Store(exp)
+				exp.start()
+			}
+		} else {
+			if wrap.removable {
+				m.sessions.Delete(id)
+				m.sessionsCount.Done()
+			}
+
+			state := &systree.SessionDeletedStatus{
+				Timestamp: time.Now().Format(time.RFC3339),
+				Reason:    "",
+			}
+
+			m.Systree.Sessions().Removed(id, state)
 		}
 
-		m.Systree.Sessions().Removed(id, state)
-	}
-
-	if exp != nil {
-		obj, _ := m.sessions.Load(id)
-		wrap := obj.(*container)
-		wrap.expiry.Store(exp)
-		exp.start()
-	}
-
-	if !durable || exp == nil {
-		m.sessions.Delete(id)
-		m.sessionsCount.Done()
+		wrap.rmLock.Unlock()
+	} else {
+		m.log.Error("Couldn't wipe session, object does not exist")
 	}
 }
 
@@ -850,7 +918,7 @@ func (m *Manager) encodeSubscribers() error {
 }
 
 func (m *Manager) Publish(id string, p *packet.Publish) {
-	pkt := persistence.PersistedPacket{UnAck: false}
+	pkt := &persistence.PersistedPacket{UnAck: false}
 
 	var expired bool
 	var expireAt time.Time

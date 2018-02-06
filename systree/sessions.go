@@ -14,6 +14,7 @@ type SessionCreatedStatus struct {
 	WillDelay      string `json:"willDelay,omitempty"`
 	Timestamp      string `json:"timestamp"`
 	Clean          bool   `json:"clean"`
+	Durable        bool   `json:"durable"`
 }
 
 // SessionDeletedStatus report when session status once deleted

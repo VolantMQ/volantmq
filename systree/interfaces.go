@@ -42,7 +42,7 @@ type Sessions interface {
 // Clients Statistic of sessions
 type Clients interface {
 	Connected(id string, status *ClientConnectStatus)
-	Disconnected(id string, reason packet.ReasonCode, retain bool)
+	Disconnected(id string, reason packet.ReasonCode)
 }
 
 // TopicsStat statistic of topics

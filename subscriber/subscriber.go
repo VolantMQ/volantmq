@@ -5,6 +5,9 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"go.uber.org/zap"
+
+	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/packet"
 	"github.com/VolantMQ/volantmq/topics/types"
 )
@@ -43,8 +46,10 @@ type Config struct {
 // Type subscriber object
 type Type struct {
 	subscriptions Subscriptions
-	publish       atomic.Value
+	publisher     atomic.Value
+	log           *zap.Logger
 	access        sync.WaitGroup
+	inProgress    sync.WaitGroup
 	Config
 }
 
@@ -55,7 +60,12 @@ func New(c Config) *Type {
 	p := &Type{
 		subscriptions: make(Subscriptions),
 		Config:        c,
+		log:           configuration.GetLogger().Named("subscriber"),
 	}
+
+	p.publisher.Store(&publisher{
+		Publisher: c.OfflinePublish,
+	})
 
 	return p
 }
@@ -152,10 +162,10 @@ func (s *Type) Publish(p *packet.Publish, grantedQoS packet.QosType, ops packet.
 		// case message.QoS0:
 	}
 
-	pb := s.publish.Load().(*publisher)
-	pb.Add(1)
+	s.inProgress.Add(1)
+	pb := s.publisher.Load().(*publisher)
 	pb.Publish(s.ID, pkt)
-	pb.Done()
+	s.inProgress.Done()
 
 	return nil
 }
@@ -163,17 +173,11 @@ func (s *Type) Publish(p *packet.Publish, grantedQoS packet.QosType, ops packet.
 // Online moves subscriber to online state
 // since this moment all of publishes are forwarded to provided callback
 func (s *Type) Online(c Publisher) {
-	p := s.publish.Load()
-
-	pb := &publisher{
+	s.publisher.Store(&publisher{
 		Publisher: c,
-	}
-	s.publish.Store(pb)
+	})
 
-	if p != nil {
-		old := p.(*publisher)
-		old.Wait()
-	}
+	s.inProgress.Wait()
 }
 
 // Offline put session offline
@@ -186,11 +190,10 @@ func (s *Type) Offline(shutdown bool) {
 			delete(s.subscriptions, topic)
 		}
 	} else {
-		pb := &publisher{
+		s.publisher.Store(&publisher{
 			Publisher: s.OfflinePublish,
-		}
-		old := s.publish.Load().(*publisher)
-		s.publish.Store(pb)
-		old.Wait()
+		})
+
+		s.inProgress.Wait()
 	}
 }

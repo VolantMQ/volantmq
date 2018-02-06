@@ -107,7 +107,7 @@ func (s state) desc() string {
 // DisconnectParams session state when stopped
 type DisconnectParams struct {
 	Reason  packet.ReasonCode
-	Packets []persistence.PersistedPacket
+	Packets persistence.PersistedPackets
 }
 
 //type onDisconnect func(*DisconnectParams)
@@ -170,7 +170,10 @@ type flow struct {
 }
 
 type tx struct {
-	txGMessages     list.List
+	// txGMessages contains any messages except PUBLISH QoS 1/2
+	txGMessages list.List
+	// txQMessages contains PUBLISH QoS 1/2 messages. Separate queue is required to keep other messages sending
+	//             if quota reached
 	txQMessages     list.List
 	txGLock         sync.Mutex
 	txQLock         sync.Mutex
@@ -371,9 +374,10 @@ func (s *impl) LoadRemaining(g, q *list.List) {
 	s.qLoadList(q)
 }
 
-func (s *impl) LoadPersistedPacket(entry persistence.PersistedPacket) error {
+func (s *impl) LoadPersistedPacket(entry *persistence.PersistedPacket) error {
 	var err error
 	var pkt packet.Provider
+
 	if pkt, _, err = packet.Decode(s.version, entry.Data); err != nil {
 		s.log.Error("Couldn't decode persisted message", zap.Error(err))
 		return ErrPersistence
@@ -393,7 +397,8 @@ func (s *impl) LoadPersistedPacket(entry persistence.PersistedPacket) error {
 	} else {
 		if p, ok := pkt.(*packet.Publish); ok {
 			if len(entry.ExpireAt) > 0 {
-				if tm, err := time.Parse(time.RFC3339, entry.ExpireAt); err == nil {
+				var tm time.Time
+				if tm, err = time.Parse(time.RFC3339, entry.ExpireAt); err == nil {
 					p.SetExpireAt(tm)
 				} else {
 					s.log.Error("Parse publish expiry", zap.String("ClientID", s.id), zap.Error(err))
@@ -562,6 +567,7 @@ func (s *impl) readConnProperties(req *packet.Connect, params *ConnectParams) {
 	// [MQTT-3.1.2.11.4]
 	if prop := req.PropertyGet(packet.PropertyReceiveMaximum); prop != nil {
 		if val, e := prop.AsShort(); e == nil {
+			//s.pubOut.quota = int32(val)
 			s.txQuota = int32(val)
 			params.SendQuota = val
 		}
@@ -645,12 +651,12 @@ func (s *impl) processIncoming(p packet.Provider) error {
 	return err
 }
 
-func (s *impl) getToPersist() []persistence.PersistedPacket {
-	var packets []persistence.PersistedPacket
+func (s *impl) getQueuedPackets() persistence.PersistedPackets {
+	var packets persistence.PersistedPackets
 
-	persistAppend := func(p interface{}) {
+	packetEncode := func(p interface{}) {
 		var pkt packet.Provider
-		pPkt := persistence.PersistedPacket{UnAck: false}
+		pPkt := &persistence.PersistedPacket{UnAck: false}
 
 		switch tp := p.(type) {
 		case *packet.Publish:
@@ -688,21 +694,28 @@ func (s *impl) getToPersist() []persistence.PersistedPacket {
 	var next *list.Element
 	for elem := s.txQMessages.Front(); elem != nil; elem = next {
 		next = elem.Next()
-		persistAppend(s.txQMessages.Remove(elem))
+		packetEncode(s.txQMessages.Remove(elem))
 	}
 
 	for elem := s.txGMessages.Front(); elem != nil; elem = next {
 		next = elem.Next()
 		switch tp := s.txGMessages.Remove(elem).(type) {
 		case *packet.Publish:
-			persistAppend(tp)
+			packetEncode(tp)
 		}
 	}
 
 	s.pubOut.messages.Range(func(k, v interface{}) bool {
 		if pkt, ok := v.(packet.Provider); ok {
-			persistAppend(&unacknowledged{packet: pkt})
+			packetEncode(&unacknowledged{packet: pkt})
 		}
+
+		s.pubOut.messages.Delete(k)
+		return true
+	})
+
+	s.pubIn.messages.Range(func(k, v interface{}) bool {
+		s.pubIn.messages.Delete(k)
 		return true
 	})
 

@@ -16,7 +16,7 @@ import (
 
 type sessionEvents interface {
 	sessionOffline(string, bool, *expiry)
-	connectionClosed(string, packet.ReasonCode, bool)
+	connectionClosed(string, packet.ReasonCode)
 	subscriberShutdown(string, subscriber.SessionProvider)
 }
 
@@ -40,10 +40,10 @@ type sessionConfig struct {
 
 type session struct {
 	sessionPreConfig
-	log      *zap.Logger
-	idLock   *sync.Mutex
-	lock     sync.Mutex
-	connStop types.Once
+	log     *zap.Logger
+	idLock  *sync.Mutex
+	lock    sync.Mutex
+	stopReq types.Once
 	sessionConfig
 }
 
@@ -95,14 +95,16 @@ func (s *session) start() {
 	s.idLock.Unlock()
 }
 
-func (s *session) stop(reason packet.ReasonCode) *persistence.SessionState {
-	s.conn.Stop(reason)
+func (s *session) stop(reason packet.ReasonCode) {
+	s.stopReq.Do(func() {
+		s.conn.Stop(reason)
+	})
 
 	//s.wgDisconnected.Wait()
 
-	state := &persistence.SessionState{
-		Timestamp: s.createdAt.Format(time.RFC3339),
-	}
+	//state := &persistence.SessionState{
+	//	Timestamp: s.createdAt.Format(time.RFC3339),
+	//}
 
 	//if s.expireIn != nil || (s.willDelay > 0 && s.will != nil) {
 	//	state.Expire = &persistence.SessionDelays{
@@ -127,9 +129,10 @@ func (s *session) stop(reason packet.ReasonCode) *persistence.SessionState {
 	//	}
 	//}
 
-	return state
+	//return state
 }
 
+// SignalPublish process PUBLISH packet from client
 func (s *session) SignalPublish(pkt *packet.Publish) error {
 	pkt.SetPublishID(s.subscriber.Hash())
 
@@ -155,6 +158,7 @@ func (s *session) SignalPublish(pkt *packet.Publish) error {
 	return nil
 }
 
+// SignalSubscribe process SUBSCRIBE packet from client
 func (s *session) SignalSubscribe(pkt *packet.Subscribe) (packet.Provider, error) {
 	m, _ := packet.New(s.version, packet.SUBACK)
 	resp, _ := m.(*packet.SubAck)
@@ -217,6 +221,7 @@ func (s *session) SignalSubscribe(pkt *packet.Subscribe) (packet.Provider, error
 	return resp, nil
 }
 
+// SignalUnSubscribe process UNSUBSCRIBE packet from client
 func (s *session) SignalUnSubscribe(pkt *packet.UnSubscribe) (packet.Provider, error) {
 	var retCodes []packet.ReasonCode
 
@@ -247,6 +252,7 @@ func (s *session) SignalUnSubscribe(pkt *packet.UnSubscribe) (packet.Provider, e
 	return resp, nil
 }
 
+// SignalDisconnect process DISCONNECT packet from client
 func (s *session) SignalDisconnect(pkt *packet.Disconnect) (packet.Provider, error) {
 	var err error
 
@@ -299,11 +305,13 @@ func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 		s.will = nil
 	}
 
-	s.connectionClosed(s.id, params.Reason, !s.durable)
+	s.connectionClosed(s.id, params.Reason)
 
 	if s.durable && len(params.Packets) > 0 {
 		s.persistence.PacketsStore([]byte(s.id), params.Packets)
 	}
+
+	keepContainer := s.durable && s.subscriber.HasSubscriptions()
 
 	if !s.durable || !s.subscriber.HasSubscriptions() {
 		s.subscriberShutdown(s.id, s.subscriber)
@@ -323,8 +331,13 @@ func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 					expireIn:  s.expireIn,
 					willDelay: s.willDelay,
 				})
+
+			keepContainer = true
 		}
 	}
 
-	s.sessionOffline(s.id, s.durable, exp)
+	s.sessionOffline(s.id, keepContainer, exp)
+
+	s.stopReq.Do(func() {})
+	s.conn = nil
 }

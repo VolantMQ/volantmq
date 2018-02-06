@@ -68,10 +68,8 @@ func (t *clients) Connected(id string, status *ClientConnectStatus) {
 		notifyMsg.SetPayload(out)
 	}
 
-	if t.topicsManager != nil {
-		t.topicsManager.Publish(notifyMsg) // nolint: errcheck
-		t.topicsManager.Retain(notifyMsg)  // nolint: errcheck
-	}
+	t.topicsManager.Publish(notifyMsg) // nolint: errcheck
+	t.topicsManager.Retain(notifyMsg)  // nolint: errcheck
 
 	// notify remove previous disconnect if any
 	nm, _ = packet.New(packet.ProtocolV311, packet.PUBLISH)
@@ -79,14 +77,11 @@ func (t *clients) Connected(id string, status *ClientConnectStatus) {
 	notifyMsg.SetRetain(false)
 	notifyMsg.SetQoS(packet.QoS0)                      // nolint: errcheck
 	notifyMsg.SetTopic(t.topic + id + "/disconnected") // nolint: errcheck
-
-	if t.topicsManager != nil {
-		t.topicsManager.Retain(notifyMsg) // nolint: errcheck
-	}
+	t.topicsManager.Retain(notifyMsg)                  // nolint: errcheck
 }
 
 // Disconnected remove client from statistic
-func (t *clients) Disconnected(id string, reason packet.ReasonCode, retain bool) {
+func (t *clients) Disconnected(id string, reason packet.ReasonCode) {
 	atomic.AddUint64(&t.curr.val, ^uint64(0))
 
 	nm, _ := packet.New(packet.ProtocolV311, packet.PUBLISH)
@@ -105,12 +100,7 @@ func (t *clients) Disconnected(id string, reason packet.ReasonCode, retain bool)
 		notifyMsg.SetPayload(out)
 	}
 
-	if t.topicsManager != nil {
-		if retain {
-			t.topicsManager.Retain(notifyMsg) // nolint: errcheck
-		}
-		t.topicsManager.Publish(notifyMsg) // nolint: errcheck
-	}
+	t.topicsManager.Publish(notifyMsg) // nolint: errcheck
 
 	// remove connected retained message
 	nm, _ = packet.New(packet.ProtocolV311, packet.PUBLISH)
@@ -118,8 +108,5 @@ func (t *clients) Disconnected(id string, reason packet.ReasonCode, retain bool)
 	notifyMsg.SetRetain(false)
 	notifyMsg.SetQoS(packet.QoS0)                   // nolint: errcheck
 	notifyMsg.SetTopic(t.topic + id + "/connected") // nolint: errcheck
-
-	if t.topicsManager != nil {
-		t.topicsManager.Retain(notifyMsg) // nolint: errcheck
-	}
+	t.topicsManager.Retain(notifyMsg)               // nolint: errcheck
 }

@@ -27,10 +27,10 @@ func (s *impl) rxShutdown() {
 func (s *impl) onConnectionClose(status error) bool {
 	return s.onConnDisconnect.Do(func() {
 		s.keepAliveTimer.Stop()
+		// shutdown quit channel tells all routines finita la commedia
 		close(s.quit)
 
 		var err error
-		// shutdown quit channel tells all routines finita la commedia
 		s.ePoll.Stop(s.desc)
 
 		if s.state != stateConnecting && s.state != stateAuth && s.state != stateConnectFailed {
@@ -43,40 +43,40 @@ func (s *impl) onConnectionClose(status error) bool {
 			}
 		}
 
+		if err = s.conn.Close(); err != nil {
+			s.log.Error("close connection", zap.String("ClientID", s.id), zap.Error(err))
+		}
+
 		// clean up transmitter to allow send disconnect command to client if needed
 		s.txShutdown()
 
-		if reason, ok := status.(packet.ReasonCode); ok &&
-			reason != packet.CodeSuccess && s.version >= packet.ProtocolV50 &&
-			s.state != stateConnecting && s.state != stateAuth && s.state != stateConnectFailed {
-			// server wants to tell client disconnect reason
-			pkt := packet.NewDisconnect(s.version)
-			pkt.SetReasonCode(reason)
-
-			var buf []byte
-			if buf, err = packet.Encode(pkt); err != nil {
-				s.log.Error("encode disconnect packet", zap.String("ClientID", s.id), zap.Error(err))
-			} else {
-				var written int
-				if written, err = s.conn.Write(buf); written != len(buf) {
-					s.log.Error("Couldn't write disconnect message",
-						zap.String("ClientID", s.id),
-						zap.Int("packet size", len(buf)),
-						zap.Int("written", written))
-				} else if err != nil {
-					s.log.Debug("Couldn't write disconnect message",
-						zap.String("ClientID", s.id),
-						zap.Error(err))
-				}
-			}
-		}
+		//if reason, ok := status.(packet.ReasonCode); ok &&
+		//	reason != packet.CodeSuccess && s.version >= packet.ProtocolV50 &&
+		//	s.state != stateConnecting && s.state != stateAuth && s.state != stateConnectFailed {
+		//	// server wants to tell client disconnect reason
+		//	pkt := packet.NewDisconnect(s.version)
+		//	pkt.SetReasonCode(reason)
+		//
+		//	var buf []byte
+		//	if buf, err = packet.Encode(pkt); err != nil {
+		//		s.log.Error("encode disconnect packet", zap.String("ClientID", s.id), zap.Error(err))
+		//	} else {
+		//		var written int
+		//		if written, err = s.conn.Write(buf); written != len(buf) {
+		//			s.log.Error("Couldn't write disconnect message",
+		//				zap.String("ClientID", s.id),
+		//				zap.Int("packet size", len(buf)),
+		//				zap.Int("written", written))
+		//		} else if err != nil {
+		//			s.log.Debug("Couldn't write disconnect message",
+		//				zap.String("ClientID", s.id),
+		//				zap.Error(err))
+		//		}
+		//	}
+		//}
 
 		if err = s.desc.Close(); err != nil {
 			s.log.Error("Close polling descriptor", zap.String("ClientID", s.id), zap.Error(err))
-		}
-
-		if err = s.conn.Close(); err != nil {
-			s.log.Error("close connection", zap.String("ClientID", s.id), zap.Error(err))
 		}
 
 		s.rxShutdown()
@@ -85,7 +85,7 @@ func (s *impl) onConnectionClose(status error) bool {
 
 		if s.state != stateConnecting && s.state != stateAuth && s.state != stateConnectFailed {
 			params := DisconnectParams{
-				Packets: s.getToPersist(),
+				Packets: s.getQueuedPackets(),
 				Reason:  packet.CodeSuccess,
 			}
 
@@ -136,64 +136,71 @@ func (s *impl) onPublish(pkt *packet.Publish) (packet.Provider, error) {
 			reason = packet.CodeReceiveMaximumExceeded
 		} else {
 			s.rxQuota--
-			resp, _ = packet.New(s.version, packet.PUBREC)
-			r, _ := resp.(*packet.Ack)
+			r := packet.NewPubRec(s.version)
 			id, _ := pkt.ID()
 
 			r.SetPacketID(id)
-			r.SetReason(reason)
 
+			resp = r
+
+			// if reason < packet.CodeUnspecifiedError {
 			// [MQTT-4.3.3-9]
 			// store incoming QoS 2 message before sending PUBREC as theoretically PUBREL
 			// might come before store in case message store done after write PUBREC
 			if reason < packet.CodeUnspecifiedError {
 				s.pubIn.store(pkt)
 			}
+			//if !s.pubIn.store(pkt) {
+			//	reason = packet.CodeReceiveMaximumExceeded
+			//}
+			// }
+
+			r.SetReason(packet.CodeSuccess)
 		}
 	case packet.QoS1:
-		resp, _ = packet.New(s.version, packet.PUBACK)
-		r, _ := resp.(*packet.Ack)
+		r := packet.NewPubAck(s.version)
 
 		id, _ := pkt.ID()
 
 		r.SetPacketID(id)
 		r.SetReason(reason)
+		resp = r
 		fallthrough
 	case packet.QoS0: // QoS 0
 		// [MQTT-4.3.1]
 		// [MQTT-4.3.2-4]
-		if reason < packet.CodeUnspecifiedError {
-			if err = s.publishToTopic(pkt); err != nil {
-				s.log.Error("Couldn't publish message",
-					zap.String("ClientID", s.id),
-					zap.Uint8("QoS", uint8(pkt.QoS())),
-					zap.Error(err))
-			}
+		// if reason < packet.CodeUnspecifiedError {
+		if err = s.publishToTopic(pkt); err != nil {
+			s.log.Error("Couldn't publish message",
+				zap.String("ClientID", s.id),
+				zap.Uint8("QoS", uint8(pkt.QoS())),
+				zap.Error(err))
 		}
+		// }
 	}
 
 	return resp, err
 }
 
 // onAck handle ack acknowledgment received from remote
-func (s *impl) onAck(msg packet.Provider) (packet.Provider, error) {
+func (s *impl) onAck(pkt packet.Provider) (packet.Provider, error) {
 	var resp packet.Provider
-	switch mIn := msg.(type) {
+	switch mIn := pkt.(type) {
 	case *packet.Ack:
-		switch msg.Type() {
+		switch pkt.Type() {
 		case packet.PUBACK:
 			// remote acknowledged PUBLISH QoS 1 message sent by this server
-			s.pubOut.release(msg)
+			s.pubOut.release(pkt)
 		case packet.PUBREC:
 			// remote received PUBLISH message sent by this server
-			s.pubOut.release(msg)
+			s.pubOut.release(pkt)
 
 			discard := false
 
-			id, _ := msg.ID()
+			id, _ := pkt.ID()
 
 			if s.version == packet.ProtocolV50 && mIn.Reason() >= packet.CodeUnspecifiedError {
-				// v5.9 [MQTT-4.9]
+				// v5.0 [MQTT-4.9]
 				if s.flowRelease(id) {
 					s.signalQuota()
 				}
@@ -217,18 +224,18 @@ func (s *impl) onAck(msg packet.Provider) (packet.Provider, error) {
 			resp, _ = packet.New(s.version, packet.PUBCOMP)
 			r, _ := resp.(*packet.Ack)
 
-			id, _ := msg.ID()
+			id, _ := pkt.ID()
 			r.SetPacketID(id)
 
 			s.rxQuota++
-			s.pubIn.release(msg)
+			s.pubIn.release(pkt)
 		case packet.PUBCOMP:
 			// PUBREL message has been acknowledged, release from queue
-			s.pubOut.release(msg)
+			s.pubOut.release(pkt)
 		default:
 			s.log.Error("Unsupported ack message type",
 				zap.String("ClientID", s.id),
-				zap.String("type", msg.Type().Name()))
+				zap.String("type", pkt.Type().Name()))
 		}
 	}
 
