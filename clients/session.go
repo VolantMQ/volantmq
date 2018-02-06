@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/VolantMQ/persistence"
+	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/connection"
 	"github.com/VolantMQ/volantmq/packet"
 	"github.com/VolantMQ/volantmq/subscriber"
@@ -70,6 +71,7 @@ func (t *temporaryPublish) Publish(id string, p *packet.Publish) {
 func newSession(c sessionPreConfig) *session {
 	s := &session{
 		sessionPreConfig: c,
+		log:              configuration.GetLogger().Named("session"),
 	}
 
 	return s
