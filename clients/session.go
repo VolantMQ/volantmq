@@ -41,7 +41,7 @@ type sessionConfig struct {
 
 type session struct {
 	sessionPreConfig
-	log     *zap.Logger
+	log     *zap.SugaredLogger
 	idLock  *sync.Mutex
 	lock    sync.Mutex
 	stopReq types.Once

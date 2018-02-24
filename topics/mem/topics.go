@@ -32,7 +32,7 @@ type provider struct {
 	root               *node
 	stat               systree.TopicsStat
 	persist            persistence.Retained
-	log                *zap.Logger
+	log                *zap.SugaredLogger
 	onCleanUnsubscribe func([]string)
 	wgPublisher        sync.WaitGroup
 	wgPublisherStarted sync.WaitGroup

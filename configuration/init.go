@@ -1,14 +1,18 @@
 package configuration
 
 import (
+	"flag"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"go.uber.org/zap"
 )
 
 type config struct {
-	log  *zap.Logger
-	once sync.Once
+	log      *zap.SugaredLogger
+	humanLog *zap.SugaredLogger
+	once     sync.Once
 }
 
 // Options global MQTT config
@@ -19,36 +23,73 @@ type Options struct {
 
 var cfg config
 
+var configFile string
+
+// WorkDir absolute path to service working directory
+var WorkDir string
+
+// PluginsDir absolute path to service plugins directory
+var PluginsDir string
+
 func init() {
+	// initialize startup logger
 	logCfg := zap.NewProductionConfig()
 
 	logCfg.DisableStacktrace = true
-	logCfg.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
-
+	logCfg.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
+	logCfg.EncoderConfig.TimeKey = ""
+	logCfg.EncoderConfig.LevelKey = ""
+	logCfg.EncoderConfig.CallerKey = ""
+	logCfg.Encoding = "console"
 	log, _ := logCfg.Build()
 
-	cfg.log = log.Named("mqtt")
-}
+	cfg.humanLog = log.Sugar()
 
-// Init global MQTT config with given options
-// if not being called default set by init() is used
-func Init(ops Options) {
-	cfg.once.Do(func() {
-		logCfg := zap.NewProductionConfig()
-		logCfg.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
+	logCfg = zap.NewProductionConfig()
 
-		logCfg.DisableStacktrace = true
+	logCfg.DisableStacktrace = true
+	logCfg.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
+	logCfg.EncoderConfig.TimeKey = ""
+	logCfg.Encoding = "console"
+	log, _ = logCfg.Build()
 
-		if !ops.LogWithTs {
-			logCfg.EncoderConfig.TimeKey = ""
-		}
+	cfg.log = log.Sugar()
 
-		log, _ := logCfg.Build()
-		cfg.log = log.Named("mqtt")
-	})
+	WorkDir = "/var/lib/volantmq"
+	PluginsDir = WorkDir + "/plugins"
+
+	configFile, _ = os.LookupEnv("VOLANTMQ_CONFIG")
+
+	if str, ok := os.LookupEnv("VOLANTMQ_WORK_DIR"); ok {
+		WorkDir = str
+	}
+
+	if str, ok := os.LookupEnv("VOLANTMQ_PLUGINS_DIR"); ok {
+		PluginsDir = str
+	}
+
+	flag.StringVar(&configFile, "config", configFile, "config file")
+	flag.StringVar(&WorkDir, "work-dir", WorkDir, "service work directory")
+	flag.StringVar(&PluginsDir, "plugins-dir", PluginsDir, "service plugins directory")
+
+	var err error
+	WorkDir, err = filepath.Abs(WorkDir)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	PluginsDir, err = filepath.Abs(PluginsDir)
+	if err != nil {
+		panic(err.Error())
+	}
 }
 
 // GetLogger return production logger
-func GetLogger() *zap.Logger {
+func GetLogger() *zap.SugaredLogger {
 	return cfg.log
+}
+
+// GetHumanLogger return production logger
+func GetHumanLogger() *zap.SugaredLogger {
+	return cfg.humanLog
 }

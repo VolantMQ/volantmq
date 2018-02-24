@@ -3,18 +3,19 @@ package auth
 import (
 	"errors"
 	"fmt"
-	"strings"
+
+	"github.com/VolantMQ/auth"
 )
 
 // Manager auth
 type Manager struct {
-	p []Provider
+	p []auth.Provider
 }
 
-var providers = make(map[string]Provider)
+var providers = make(map[string]auth.Provider)
 
 // Register auth provider
-func Register(name string, provider Provider) error {
+func Register(name string, provider auth.Provider) error {
 	if name == "" && provider == nil {
 		return errors.New("invalid args")
 	}
@@ -34,11 +35,10 @@ func UnRegister(name string) {
 }
 
 // NewManager new auth manager
-func NewManager(p string) (*Manager, error) {
+func NewManager(p []string) (*Manager, error) {
 	m := Manager{}
 
-	list := strings.Split(p, ";")
-	for _, pa := range list {
+	for _, pa := range p {
 		pvd, ok := providers[pa]
 		if !ok {
 			return nil, fmt.Errorf("session: unknown provider %q", pa)
@@ -51,23 +51,23 @@ func NewManager(p string) (*Manager, error) {
 }
 
 // Password authentication
-func (m *Manager) Password(user, password string) Status {
+func (m *Manager) Password(user, password string) auth.Status {
 	for _, p := range m.p {
-		if status := p.Password(user, password); status == StatusAllow {
+		if status := p.Password(user, password); status == auth.StatusAllow {
 			return status
 		}
 	}
 
-	return StatusDeny
+	return auth.StatusDeny
 }
 
 // ACL check permissions
-func (m *Manager) ACL(clientID, user, topic string, access AccessType) Status {
+func (m *Manager) ACL(clientID, user, topic string, access auth.AccessType) auth.Status {
 	for _, p := range m.p {
-		if status := p.ACL(clientID, user, topic, access); status == StatusAllow {
+		if status := p.ACL(clientID, user, topic, access); status == auth.StatusAllow {
 			return status
 		}
 	}
 
-	return StatusDeny
+	return auth.StatusDeny
 }

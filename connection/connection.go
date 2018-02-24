@@ -213,7 +213,7 @@ type impl struct {
 	onStart           types.Once
 	onConnDisconnect  types.OnceWait
 	started           sync.WaitGroup
-	log               *zap.Logger
+	log               *zap.SugaredLogger
 	keepAlive         time.Duration
 	authMethod        string
 	connectProcessed  uint32
@@ -375,43 +375,43 @@ func (s *impl) LoadRemaining(g, q *list.List) {
 }
 
 func (s *impl) LoadPersistedPacket(entry *persistence.PersistedPacket) error {
-	var err error
-	var pkt packet.Provider
+	//var err error
+	//var pkt packet.Provider
+	//
+	//if pkt, _, err = packet.Decode(s.version, entry.Data); err != nil {
+	//	s.log.Error("Couldn't decode persisted message", zap.Error(err))
+	//	return ErrPersistence
+	//}
 
-	if pkt, _, err = packet.Decode(s.version, entry.Data); err != nil {
-		s.log.Error("Couldn't decode persisted message", zap.Error(err))
-		return ErrPersistence
-	}
-
-	if entry.UnAck {
-		switch p := pkt.(type) {
-		case *packet.Publish:
-			id, _ := p.ID()
-			s.flowReAcquire(id)
-		case *packet.Ack:
-			id, _ := p.ID()
-			s.flowReAcquire(id)
-		}
-
-		s.qLoad(&unacknowledged{packet: pkt})
-	} else {
-		if p, ok := pkt.(*packet.Publish); ok {
-			if len(entry.ExpireAt) > 0 {
-				var tm time.Time
-				if tm, err = time.Parse(time.RFC3339, entry.ExpireAt); err == nil {
-					p.SetExpireAt(tm)
-				} else {
-					s.log.Error("Parse publish expiry", zap.String("ClientID", s.id), zap.Error(err))
-				}
-			}
-
-			if p.QoS() == packet.QoS0 {
-				s.gLoad(pkt)
-			} else {
-				s.qLoad(pkt)
-			}
-		}
-	}
+	//if entry.UnAck {
+	//	switch p := pkt.(type) {
+	//	case *packet.Publish:
+	//		id, _ := p.ID()
+	//		s.flowReAcquire(id)
+	//	case *packet.Ack:
+	//		id, _ := p.ID()
+	//		s.flowReAcquire(id)
+	//	}
+	//
+	//	s.qLoad(&unacknowledged{packet: pkt})
+	//} else {
+	//	if p, ok := pkt.(*packet.Publish); ok {
+	//		if len(entry.ExpireAt) > 0 {
+	//			var tm time.Time
+	//			if tm, err = time.Parse(time.RFC3339, entry.ExpireAt); err == nil {
+	//				p.SetExpireAt(tm)
+	//			} else {
+	//				s.log.Error("Parse publish expiry", zap.String("ClientID", s.id), zap.Error(err))
+	//			}
+	//		}
+	//
+	//		if p.QoS() == packet.QoS0 {
+	//			s.gLoad(pkt)
+	//		} else {
+	//			s.qLoad(pkt)
+	//		}
+	//	}
+	//}
 
 	return nil
 }
@@ -654,70 +654,70 @@ func (s *impl) processIncoming(p packet.Provider) error {
 func (s *impl) getQueuedPackets() persistence.PersistedPackets {
 	var packets persistence.PersistedPackets
 
-	packetEncode := func(p interface{}) {
-		var pkt packet.Provider
-		pPkt := &persistence.PersistedPacket{UnAck: false}
+	//packetEncode := func(p interface{}) {
+	//	var pkt packet.Provider
+	//	pPkt := &persistence.PersistedPacket{UnAck: false}
+	//
+	//	switch tp := p.(type) {
+	//	case *packet.Publish:
+	//		if expireAt, _, expired := tp.Expired(); expired && (s.offlineQoS0 || tp.QoS() != packet.QoS0) {
+	//			if !expireAt.IsZero() {
+	//				pPkt.ExpireAt = expireAt.Format(time.RFC3339)
+	//			}
+	//
+	//			if tp.QoS() != packet.QoS0 {
+	//				// make sure message has some IDType to prevent encode error
+	//				tp.SetPacketID(0)
+	//			}
+	//
+	//			pkt = tp
+	//		}
+	//	case *unacknowledged:
+	//		if pb, ok := tp.packet.(*packet.Publish); ok && pb.QoS() == packet.QoS1 {
+	//			pb.SetDup(true)
+	//		}
+	//
+	//		pkt = tp.packet
+	//		pPkt.UnAck = true
+	//	}
+	//
+	//	if pkt != nil {
+	//		var err error
+	//		if pPkt.Data, err = packet.Encode(pkt); err != nil {
+	//			s.log.Error("Couldn't encode message for persistence", zap.Error(err))
+	//		} else {
+	//			packets = append(packets, pPkt)
+	//		}
+	//	}
+	//}
 
-		switch tp := p.(type) {
-		case *packet.Publish:
-			if expireAt, _, expired := tp.Expired(); expired && (s.offlineQoS0 || tp.QoS() != packet.QoS0) {
-				if !expireAt.IsZero() {
-					pPkt.ExpireAt = expireAt.Format(time.RFC3339)
-				}
-
-				if tp.QoS() != packet.QoS0 {
-					// make sure message has some IDType to prevent encode error
-					tp.SetPacketID(0)
-				}
-
-				pkt = tp
-			}
-		case *unacknowledged:
-			if pb, ok := tp.packet.(*packet.Publish); ok && pb.QoS() == packet.QoS1 {
-				pb.SetDup(true)
-			}
-
-			pkt = tp.packet
-			pPkt.UnAck = true
-		}
-
-		if pkt != nil {
-			var err error
-			if pPkt.Data, err = packet.Encode(pkt); err != nil {
-				s.log.Error("Couldn't encode message for persistence", zap.Error(err))
-			} else {
-				packets = append(packets, pPkt)
-			}
-		}
-	}
-
-	var next *list.Element
-	for elem := s.txQMessages.Front(); elem != nil; elem = next {
-		next = elem.Next()
-		packetEncode(s.txQMessages.Remove(elem))
-	}
-
-	for elem := s.txGMessages.Front(); elem != nil; elem = next {
-		next = elem.Next()
-		switch tp := s.txGMessages.Remove(elem).(type) {
-		case *packet.Publish:
-			packetEncode(tp)
-		}
-	}
-
-	s.pubOut.messages.Range(func(k, v interface{}) bool {
-		if pkt, ok := v.(packet.Provider); ok {
-			packetEncode(&unacknowledged{packet: pkt})
-		}
-
-		s.pubOut.messages.Delete(k)
-		return true
-	})
-
-	s.pubIn.messages.Range(func(k, v interface{}) bool {
-		s.pubIn.messages.Delete(k)
-		return true
-	})
+	//var next *list.Element
+	//for elem := s.txQMessages.Front(); elem != nil; elem = next {
+	//	next = elem.Next()
+	//	packetEncode(s.txQMessages.Remove(elem))
+	//}
+	//
+	//for elem := s.txGMessages.Front(); elem != nil; elem = next {
+	//	next = elem.Next()
+	//	switch tp := s.txGMessages.Remove(elem).(type) {
+	//	case *packet.Publish:
+	//		packetEncode(tp)
+	//	}
+	//}
+	//
+	//s.pubOut.messages.Range(func(k, v interface{}) bool {
+	//	if pkt, ok := v.(packet.Provider); ok {
+	//		packetEncode(&unacknowledged{packet: pkt})
+	//	}
+	//
+	//	s.pubOut.messages.Delete(k)
+	//	return true
+	//})
+	//
+	//s.pubIn.messages.Range(func(k, v interface{}) bool {
+	//	s.pubIn.messages.Delete(k)
+	//	return true
+	//})
 
 	return packets
 }

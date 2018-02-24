@@ -65,4 +65,4 @@
 //       conformance test because the features are not yet implemented.
 //     - Actually I think there's a bug in the test suite as it calls the PUBLISH
 //       handler function for non-PUBLISH messages.
-package volantmq
+package main

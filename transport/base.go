@@ -14,6 +14,7 @@ type Config struct {
 	// AuthManager
 	AuthManager *auth.Manager
 
+	Host string
 	// Port tcp port to listen on
 	Port string
 }
@@ -39,7 +40,7 @@ type baseConfig struct {
 	onConnection sync.WaitGroup // nolint: structcheck
 	onceStop     sync.Once      // nolint: structcheck
 	quit         chan struct{}  // nolint: structcheck
-	log          *zap.Logger
+	log          *zap.SugaredLogger
 	protocol     string
 }
 
@@ -80,7 +81,7 @@ func (c *baseConfig) handleConnection(conn conn) {
 	// Read the CONNECT message from the wire, if error, then check to see if it's
 	// a CONNACK error. If it's CONNACK error, send the proper CONNACK error back
 	// to client. Exit regardless of error type.
-	//conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(c.ConnectTimeout))) // nolint: errcheck, gas
+	// conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(c.ConnectTimeout))) // nolint: errcheck, gas
 
 	if err := c.Sessions.Handle(conn, c.config.AuthManager); err != nil {
 		conn.Close() // nolint: errcheck, gas

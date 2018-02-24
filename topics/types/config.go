@@ -11,21 +11,21 @@ type ProviderConfig interface{}
 
 // MemConfig of topics manager
 type MemConfig struct {
-	Stat                          systree.TopicsStat
-	Persist                       persistence.Retained
-	OnCleanUnsubscribe            func([]string)
-	Name                          string
-	MaxQosAllowed                 packet.QosType
-	AllowOverlappingSubscriptions bool
+	Stat                     systree.TopicsStat
+	Persist                  persistence.Retained
+	OnCleanUnsubscribe       func([]string)
+	Name                     string
+	MaxQos                   packet.QosType
+	OverlappingSubscriptions bool
 }
 
 // NewMemConfig generate default config for memory
 func NewMemConfig() *MemConfig {
 
 	return &MemConfig{
-		Name:                          "mem",
-		MaxQosAllowed:                 packet.QoS2,
-		OnCleanUnsubscribe:            func([]string) {},
-		AllowOverlappingSubscriptions: false,
+		Name:                     "mem",
+		MaxQos:                   packet.QoS2,
+		OnCleanUnsubscribe:       func([]string) {},
+		OverlappingSubscriptions: false,
 	}
 }

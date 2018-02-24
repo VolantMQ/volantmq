@@ -43,3 +43,4 @@ coverage.txt
 vendor
 
 persist.db
+plugins

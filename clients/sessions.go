@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/VolantMQ/auth"
 	"github.com/VolantMQ/persistence"
-	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/connection"
 	"github.com/VolantMQ/volantmq/packet"
@@ -32,25 +32,12 @@ type subscriberConfig struct {
 
 // Config manager configuration
 type Config struct {
-	TopicsMgr                     topicsTypes.Provider
-	Persist                       persistence.Provider
-	Systree                       systree.Provider
-	OnReplaceAttempt              func(string, bool)
-	AllowedVersions               map[packet.ProtocolVersion]bool
-	NodeName                      string
-	ConnectTimeout                int
-	KeepAlive                     int
-	MaxPacketSize                 uint32
-	ReceiveMax                    uint16
-	TopicAliasMaximum             uint16
-	MaximumQoS                    packet.QosType
-	AvailableRetain               bool
-	AvailableWildcardSubscription bool
-	AvailableSubscriptionID       bool
-	AvailableSharedSubscription   bool
-	OfflineQoS0                   bool
-	AllowReplace                  bool
-	ForceKeepAlive                bool
+	configuration.MqttConfig
+	TopicsMgr        topicsTypes.Provider
+	Persist          persistence.Provider
+	Systree          systree.Provider
+	OnReplaceAttempt func(string, bool)
+	NodeName         string
 }
 
 type preloadConfig struct {
@@ -61,7 +48,7 @@ type preloadConfig struct {
 // Manager clients manager
 type Manager struct {
 	persistence   persistence.Sessions
-	log           *zap.Logger
+	log           *zap.SugaredLogger
 	quit          chan struct{}
 	sessionsCount sync.WaitGroup
 	sessions      sync.Map
@@ -240,13 +227,13 @@ func (m *Manager) Handle(conn net.Conn, auth auth.SessionPermissions) error {
 		connection.TxQuota(types.DefaultReceiveMax),
 		connection.RxQuota(types.DefaultReceiveMax),
 		connection.Metric(m.Systree.Metric().Packets()),
-		connection.RetainAvailable(m.AvailableRetain),
-		connection.OfflineQoS0(m.OfflineQoS0),
+		connection.RetainAvailable(m.Options.RetainAvailable),
+		connection.OfflineQoS0(m.Options.OfflineQoS0),
 		connection.MaxTxPacketSize(types.DefaultMaxPacketSize),
-		connection.MaxRxPacketSize(m.MaxPacketSize),
-		connection.MaxRxTopicAlias(m.TopicAliasMaximum),
+		connection.MaxRxPacketSize(m.Options.MaxPacketSize),
+		connection.MaxRxTopicAlias(m.Options.MaxTopicAlias),
 		connection.MaxTxTopicAlias(0),
-		connection.KeepAlive(m.ConnectTimeout),
+		connection.KeepAlive(m.Options.ConnectTimeout),
 	)
 
 	var connParams *connection.ConnectParams
@@ -289,14 +276,14 @@ func (m *Manager) Handle(conn net.Conn, auth auth.SessionPermissions) error {
 func (m *Manager) processConnect(cn connection.Initial, params *connection.ConnectParams) (packet.Provider, error) {
 	var resp packet.Provider
 
-	if allowed, ok := m.AllowedVersions[params.Version]; !ok || !allowed {
-		reason := packet.CodeRefusedUnacceptableProtocolVersion
-		if params.Version == packet.ProtocolV50 {
-			reason = packet.CodeUnsupportedProtocol
-		}
-
-		return nil, reason
-	}
+	//if allowed, ok := m.AllowedVersions[params.Version]; !ok || !allowed {
+	//	reason := packet.CodeRefusedUnacceptableProtocolVersion
+	//	if params.Version == packet.ProtocolV50 {
+	//		reason = packet.CodeUnsupportedProtocol
+	//	}
+	//
+	//	return nil, reason
+	//}
 
 	if len(params.AuthMethod) > 0 {
 		// TODO(troian): verify method is allowed
@@ -333,9 +320,9 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 
 	defer func() {
 		keepAlive := int(params.KeepAlive)
-		if m.ForceKeepAlive || params.KeepAlive > 0 {
-			if m.ForceKeepAlive {
-				keepAlive = int(m.KeepAlive)
+		if m.KeepAlive.Force || params.KeepAlive > 0 {
+			if m.KeepAlive.Force {
+				keepAlive = m.KeepAlive.Period
 			}
 		}
 
@@ -488,8 +475,8 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 			if current := currContainer.session(); current != nil {
 				// container has session with active connection
 
-				m.OnReplaceAttempt(params.ID, m.AllowReplace)
-				if !m.AllowReplace {
+				m.OnReplaceAttempt(params.ID, m.Options.SessionDups)
+				if !m.Options.SessionDups {
 					// we do not make any changes to current network connection
 					// response to new one with error and release both new & old sessions
 					err = packet.CodeRefusedIdentifierRejected
@@ -587,24 +574,24 @@ func (m *Manager) writeSessionProperties(resp *packet.ConnAck, id string) error 
 	}
 
 	// [MQTT-3.2.2.3.2] if server receive max less than 65536 than let client to know about
-	if m.ReceiveMax < types.DefaultReceiveMax {
-		if err := resp.PropertySet(packet.PropertyReceiveMaximum, m.ReceiveMax); err != nil {
+	if m.Options.ReceiveMax < types.DefaultReceiveMax {
+		if err := resp.PropertySet(packet.PropertyReceiveMaximum, m.Options.ReceiveMax); err != nil {
 			return err
 		}
 	}
 	// [MQTT-3.2.2.3.3] if supported server's QoS less than 2 notify client
-	if m.MaximumQoS < packet.QoS2 {
-		if err := resp.PropertySet(packet.PropertyMaximumQoS, byte(m.MaximumQoS)); err != nil {
+	if m.Options.MaxQoS < packet.QoS2 {
+		if err := resp.PropertySet(packet.PropertyMaximumQoS, byte(m.Options.MaxQoS)); err != nil {
 			return err
 		}
 	}
 	// [MQTT-3.2.2.3.4] tell client whether retained messages supported
-	if err := resp.PropertySet(packet.PropertyRetainAvailable, boolToByte(m.AvailableRetain)); err != nil {
+	if err := resp.PropertySet(packet.PropertyRetainAvailable, boolToByte(m.Options.RetainAvailable)); err != nil {
 		return err
 	}
 	// [MQTT-3.2.2.3.5] if server max packet size less than 268435455 than let client to know about
-	if m.MaxPacketSize < types.DefaultMaxPacketSize {
-		if err := resp.PropertySet(packet.PropertyMaximumPacketSize, m.MaxPacketSize); err != nil {
+	if m.Options.MaxPacketSize < types.DefaultMaxPacketSize {
+		if err := resp.PropertySet(packet.PropertyMaximumPacketSize, m.Options.MaxPacketSize); err != nil {
 			return err
 		}
 	}
@@ -615,25 +602,25 @@ func (m *Manager) writeSessionProperties(resp *packet.ConnAck, id string) error 
 		}
 	}
 	// [MQTT-3.2.2.3.7]
-	if m.TopicAliasMaximum > 0 {
-		if err := resp.PropertySet(packet.PropertyTopicAliasMaximum, m.TopicAliasMaximum); err != nil {
+	if m.Options.MaxTopicAlias > 0 {
+		if err := resp.PropertySet(packet.PropertyTopicAliasMaximum, m.Options.MaxTopicAlias); err != nil {
 			return err
 		}
 	}
 	// [MQTT-3.2.2.3.10] tell client whether server supports wildcard subscriptions or not
-	if err := resp.PropertySet(packet.PropertyWildcardSubscriptionAvailable, boolToByte(m.AvailableWildcardSubscription)); err != nil {
+	if err := resp.PropertySet(packet.PropertyWildcardSubscriptionAvailable, boolToByte(m.Options.SubsWildcard)); err != nil {
 		return err
 	}
 	// [MQTT-3.2.2.3.11] tell client whether server supports subscription identifiers or not
-	if err := resp.PropertySet(packet.PropertySubscriptionIdentifierAvailable, boolToByte(m.AvailableSubscriptionID)); err != nil {
+	if err := resp.PropertySet(packet.PropertySubscriptionIdentifierAvailable, boolToByte(m.Options.SubsID)); err != nil {
 		return err
 	}
 	// [MQTT-3.2.2.3.12] tell client whether server supports shared subscriptions or not
-	if err := resp.PropertySet(packet.PropertySharedSubscriptionAvailable, boolToByte(m.AvailableSharedSubscription)); err != nil {
+	if err := resp.PropertySet(packet.PropertySharedSubscriptionAvailable, boolToByte(m.Options.SubsShared)); err != nil {
 		return err
 	}
 
-	if m.ForceKeepAlive {
+	if m.KeepAlive.Force {
 		if err := resp.PropertySet(packet.PropertyServerKeepAlive, m.KeepAlive); err != nil {
 			return err
 		}
@@ -918,29 +905,29 @@ func (m *Manager) encodeSubscribers() error {
 }
 
 func (m *Manager) Publish(id string, p *packet.Publish) {
-	pkt := &persistence.PersistedPacket{UnAck: false}
-
-	var expired bool
-	var expireAt time.Time
-
-	if expireAt, _, expired = p.Expired(); expired {
-		return
-	}
-
-	if !expireAt.IsZero() {
-		pkt.ExpireAt = expireAt.Format(time.RFC3339)
-	}
-
-	p.SetPacketID(0)
-
-	var err error
-	pkt.Data, err = packet.Encode(p)
-	if err != nil {
-		m.log.Error("Couldn't encode packet", zap.String("ClientID", id), zap.Error(err))
-		return
-	}
-
-	if err = m.persistence.PacketStore([]byte(id), pkt); err != nil {
-		m.log.Error("Couldn't persist message", zap.String("ClientID", id), zap.Error(err))
-	}
+	//pkt := &persistence.PersistedPacket{UnAck: false}
+	//
+	//var expired bool
+	//var expireAt time.Time
+	//
+	//if expireAt, _, expired = p.Expired(); expired {
+	//	return
+	//}
+	//
+	//if !expireAt.IsZero() {
+	//	pkt.ExpireAt = expireAt.Format(time.RFC3339)
+	//}
+	//
+	//p.SetPacketID(0)
+	//
+	//var err error
+	//pkt.Data, err = packet.Encode(p)
+	//if err != nil {
+	//	m.log.Error("Couldn't encode packet", zap.String("ClientID", id), zap.Error(err))
+	//	return
+	//}
+	//
+	//if err = m.persistence.PacketStore([]byte(id), pkt); err != nil {
+	//	m.log.Error("Couldn't persist message", zap.String("ClientID", id), zap.Error(err))
+	//}
 }

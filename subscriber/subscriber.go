@@ -47,7 +47,7 @@ type Config struct {
 type Type struct {
 	subscriptions Subscriptions
 	publisher     atomic.Value
-	log           *zap.Logger
+	log           *zap.SugaredLogger
 	access        sync.WaitGroup
 	inProgress    sync.WaitGroup
 	Config

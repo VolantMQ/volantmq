@@ -2,11 +2,9 @@ package transport
 
 import (
 	"context"
-	"crypto/tls"
 	"net/http"
 	"time"
 
-	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
@@ -19,11 +17,6 @@ type httpServer struct {
 
 // ConfigWS listener object for websocket server
 type ConfigWS struct {
-	transport *Config
-
-	// AuthManager
-	AuthManager *auth.Manager
-
 	// CertFile
 	CertFile string
 
@@ -35,6 +28,8 @@ type ConfigWS struct {
 
 	// SubProtocols
 	SubProtocols []string
+
+	transport *Config
 }
 
 type ws struct {
@@ -63,22 +58,19 @@ func NewWS(config *ConfigWS, internal *InternalConfig) (Provider, error) {
 	}
 
 	l.quit = make(chan struct{})
-	l.protocol = "ws"
 	l.InternalConfig = *internal
 	l.config = *config.transport
-	l.log = configuration.GetLogger().Named("server.transport.ws")
+
+	if len(l.certFile) != 0 {
+		l.protocol = "wss"
+	} else {
+		l.protocol = "ws"
+	}
+
+	l.log = configuration.GetLogger().Named("listener: " + l.protocol + "://:" + config.transport.Port)
 
 	if len(config.Path) == 0 {
 		config.Path = "/"
-	}
-
-	if len(config.CertFile) != 0 && len(config.KeyFile) != 0 {
-		certificates := make([]tls.Certificate, 1)
-		var err error
-
-		if certificates[0], err = tls.LoadX509KeyPair(config.CertFile, config.KeyFile); err != nil {
-			return nil, err
-		}
 	}
 
 	l.up.Subprotocols = config.SubProtocols
@@ -94,12 +86,13 @@ func NewWS(config *ConfigWS, internal *InternalConfig) (Provider, error) {
 	return l, nil
 }
 
+// ServeHTTP http connection upgrade
 func (s *httpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
 func (l *ws) serveWs(w http.ResponseWriter, r *http.Request) {
-	conn, err := l.up.Upgrade(w, r, nil)
+	cn, err := l.up.Upgrade(w, r, nil)
 	if err != nil {
 		l.log.Error("Couldn't upgrade WebSocket connection", zap.Error(err))
 		return
@@ -108,12 +101,12 @@ func (l *ws) serveWs(w http.ResponseWriter, r *http.Request) {
 	l.onConnection.Add(1)
 	go func(cn *websocket.Conn) {
 		defer l.onConnection.Done()
-		if conn, err := newConnWs(cn, l.Metric.Bytes()); err != nil {
-			l.log.Error("Couldn't create connection interface", zap.Error(err))
+		if inConn, e := newConnWs(cn, l.Metric.Bytes()); e != nil {
+			l.log.Error("Couldn't create connection interface", zap.Error(e))
 		} else {
-			l.handleConnection(conn)
+			l.handleConnection(inConn)
 		}
-	}(conn)
+	}(cn)
 }
 
 func (l *ws) Serve() error {
@@ -127,6 +120,7 @@ func (l *ws) Serve() error {
 	return e
 }
 
+// Close websocket connection
 func (l *ws) Close() error {
 	var err error
 
@@ -139,8 +133,4 @@ func (l *ws) Close() error {
 	})
 
 	return err
-}
-
-func (l *ws) Protocol() string {
-	return "ws"
 }
