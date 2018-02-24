@@ -42,7 +42,7 @@ mqtt:
     maxTopicAlias: 65535
     maxQoS: 2
 listeners:
-  defaultAddr: "127.0.0.1"
+  defaultAddr: ""
   mqtt:
     tcp:
       1883:
