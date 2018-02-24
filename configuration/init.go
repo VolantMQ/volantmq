@@ -66,6 +66,8 @@ func init() {
 
 	if str, ok := os.LookupEnv("VOLANTMQ_PLUGINS_DIR"); ok {
 		PluginsDir = str
+	} else {
+		PluginsDir = WorkDir + "/plugins"
 	}
 
 	flag.StringVar(&configFile, "config", configFile, "config file")

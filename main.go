@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -215,7 +214,11 @@ var logger *zap.SugaredLogger
 
 func main() {
 	defer func() {
-		fmt.Println("service stopped")
+		logger.Info("service stopped")
+
+		if r := recover(); r != nil {
+			logger.Panic(r)
+		}
 	}()
 
 	logger = configuration.GetHumanLogger()
