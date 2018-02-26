@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/VolantMQ/auth"
 	"github.com/VolantMQ/persistence"
+	"github.com/VolantMQ/vlauth"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/connection"
 	"github.com/VolantMQ/volantmq/packet"
@@ -62,7 +62,7 @@ type StartConfig struct {
 	Req  *packet.Connect
 	Resp *packet.ConnAck
 	Conn net.Conn
-	Auth auth.SessionPermissions
+	Auth vlauth.Permissions
 }
 
 type containerInfo struct {
@@ -219,7 +219,7 @@ func (m *Manager) LoadSession(context interface{}, id []byte, state *persistence
 }
 
 // Handle incoming connection
-func (m *Manager) Handle(conn net.Conn, auth auth.SessionPermissions) error {
+func (m *Manager) Handle(conn net.Conn, auth vlauth.Permissions) error {
 	cn := connection.New(
 		connection.OnAuth(m.onAuth),
 		connection.EPoll(m.ePoll),

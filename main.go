@@ -1,22 +1,27 @@
 package main
 
 import (
+	"crypto/sha256"
 	"errors"
+	"io/ioutil"
 	"os"
 	"os/signal"
 	"syscall"
 
-	vlAuth "github.com/VolantMQ/auth"
 	"github.com/VolantMQ/persistence"
-	"github.com/VolantMQ/plugin"
+	"github.com/VolantMQ/vlauth"
+	"github.com/VolantMQ/vlplugin"
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/server"
 	"github.com/VolantMQ/volantmq/transport"
 	"go.uber.org/zap"
+	"gopkg.in/yaml.v2"
 )
 
-type pluginTypes map[string]map[string]plugin.Plugin
+type pluginType map[string]vlplugin.Plugin
+
+type pluginTypes map[string]pluginType
 
 func loadMqttListeners(defaultAuth *auth.Manager, lCfg *configuration.ListenersConfig) ([]interface{}, error) {
 	var listeners []interface{}
@@ -95,6 +100,39 @@ func loadListeners(defaultAuth *auth.Manager, lst *configuration.ListenersConfig
 	return listeners, nil
 }
 
+func configureSimpleAuth(cfg interface{}) (vlauth.Iface, error) {
+	sAuth := newSimpleAuth()
+	authConfig := cfg.(map[interface{}]interface{})
+
+	if list, kk := authConfig["users"].(map[interface{}]interface{}); kk {
+		for u, p := range list {
+			sAuth.addUser(u.(string), p.(string))
+		}
+	}
+
+	if uFile, kk := authConfig["usersFile"].(string); kk {
+		if fl, err := ioutil.ReadFile(uFile); err != nil {
+			logger.Error("\treading simpleAuth users file: ", err.Error())
+		} else {
+			users := make(map[string]string)
+			if err = yaml.Unmarshal(fl, &users); err != nil {
+				logger.Error("\tdecoding simpleAuth users file: ", err.Error())
+			} else {
+				for u, p := range users {
+					sAuth.addUser(u, p)
+				}
+			}
+		}
+	}
+
+	if len(sAuth.creds) == 0 {
+		logger.Warn("\tsimpleAuth config without users. setting default to guest:guest")
+		sAuth.addUser("guest", string(sha256.New().Sum([]byte("guest"))))
+	}
+
+	return sAuth, nil
+}
+
 func loadAuth(cfg *configuration.Config, plTypes pluginTypes) (*auth.Manager, error) {
 	logger.Info("configuring auth")
 
@@ -109,25 +147,51 @@ func loadAuth(cfg *configuration.Config, plTypes pluginTypes) (*auth.Manager, er
 		return nil, errors.New("")
 	}
 
-	for nm, i := range a.(map[interface{}]interface{}) {
-		var provider vlAuth.Provider
+	for idx, cfgEntry := range a.([]interface{}) {
+		entry := cfgEntry.(map[interface{}]interface{})
 
-		pv := i.(map[interface{}]interface{})
-		switch pv["type"] {
+		var name string
+		var backend string
+		var config interface{}
+
+		if name, ok = entry["name"].(string); !ok {
+			logger.Fatalf("\tplugins.config.auth[%d] must contain key \"name\"", idx)
+		}
+
+		if backend, ok = entry["backend"].(string); !ok {
+			logger.Fatalf("\tplugins.config.auth[%d] must contain key \"backend\"", idx)
+		}
+
+		if config, ok = entry["config"]; !ok {
+			logger.Fatalf("\tplugins.config.auth[%d] must contain map \"config\"", idx)
+		}
+
+		var iface vlauth.Iface
+
+		switch backend {
 		case "simpleAuth":
-			ia := internalAuth{
-				creds: make(map[string]string),
-			}
+			iface, _ = configureSimpleAuth(config)
+		default:
+			var authPlugins pluginType
+			if authPlugins, ok = plTypes["auth"]; ok {
+				if pl, kk := authPlugins[backend]; kk {
+					plObject, err := configurePlugin(pl, config)
+					if err != nil {
+						logger.Fatalf(err.Error())
+						return nil, errors.New("")
+					}
 
-			provider = ia
-			list := pv["users"].(map[interface{}]interface{})
-			for u, p := range list {
-				ia.creds[u.(string)] = p.(string)
+					iface = plObject.(vlauth.Iface)
+				} else {
+					logger.Warnf("\tno enabled plugin of type [%d] for config [%s]", backend, name)
+				}
+			} else {
+				logger.Error("\tno auth plugins loaded")
 			}
 		}
 
-		if err := auth.Register(nm.(string), provider); err != nil {
-			logger.Error("\tauth provider", zap.String("name", nm.(string)), zap.String("type", pv["type"].(string)), zap.Error(err))
+		if err := auth.Register(name, iface); err != nil {
+			logger.Error("\tauth provider", zap.String("name", name), zap.String("backend", backend), zap.Error(err))
 
 			return nil, err
 		}
@@ -136,13 +200,76 @@ func loadAuth(cfg *configuration.Config, plTypes pluginTypes) (*auth.Manager, er
 	def, err := auth.NewManager(cfg.Auth.DefaultOrder)
 
 	if err != nil {
-		logger.Error("\tcreating default auth: %s", err.Error())
+		logger.Error("\tcreating default auth:", err.Error())
 		return nil, err
 	}
 
 	logger.Info("\tdefault order: ", cfg.Auth.DefaultOrder)
 
 	return def, nil
+}
+
+func loadPersistence(cfg interface{}, plTypes pluginTypes) (persistence.Provider, error) {
+	persist := persistence.Default()
+
+	logger.Info("loading persistence")
+	if cfg == nil {
+		logger.Warn("\tno persistence backend provided\n\tusing in-memory. Data will be lost on shutdown")
+	} else {
+		persistenceConfigs := cfg.([]interface{})
+		if len(persistenceConfigs) > 1 {
+			logger.Warn("\tplugins.config.persistence: multiple persistence providers not supported")
+			return nil, errors.New("")
+		}
+
+		persistenceConfig := persistenceConfigs[0].(map[interface{}]interface{})
+		var ok bool
+		var backend string
+		var config interface{}
+
+		if backend, ok = persistenceConfig["backend"].(string); !ok {
+			logger.Error("\tplugins.config.persistence[0] must contain key \"backend\"")
+			return nil, errors.New("")
+		}
+
+		if config, ok = persistenceConfig["config"]; !ok {
+			logger.Fatalf("\tplugins.config.persistence[0] must contain map \"config\"")
+		}
+
+		if pl, kk := plTypes["persistence"][backend]; !kk {
+			logger.Fatalf("\tplugins.config.persistence.backend: plugin type [%s] not found", backend)
+			return nil, errors.New("")
+		} else {
+			plObject, err := configurePlugin(pl, config)
+			if err != nil {
+				logger.Fatalf(err.Error())
+				return nil, errors.New("")
+			}
+
+			persist = plObject.(persistence.Provider)
+			logger.Infof("\tusing persistence provider [%s]", backend)
+		}
+	}
+
+	return persist, nil
+}
+
+func configurePlugin(pl vlplugin.Plugin, c interface{}) (interface{}, error) {
+	name := "plugin." + pl.Info().Type() + "." + pl.Info().Name()
+
+	sysParams := &vlplugin.SysParams{
+		SignalFailure: pluginFailureSignal,
+		Log:           configuration.GetLogger().Named(name),
+	}
+
+	var err error
+	var plObject interface{}
+
+	if plObject, err = pl.Load(c, sysParams); err != nil {
+		return nil, errors.New(name + ": acquire failed : " + err.Error())
+	}
+
+	return plObject, err
 }
 
 func loadPlugins(cfg *configuration.PluginsConfig) (pluginTypes, error) {
@@ -157,14 +284,15 @@ func loadPlugins(cfg *configuration.PluginsConfig) (pluginTypes, error) {
 			} else if pl.Plugin == nil {
 				logger.Info("\t", name, "Not Found")
 			} else {
+				apiV, plV := pl.Plugin.Info().Version()
 				logger.Info("\t", name, ":",
-					"\n\t\tPlugins API Version: ", pl.Plugin.Info().APIVersion(),
-					"\n\t\t     Plugin Version: ", pl.Plugin.Info().Version(),
+					"\n\t\tPlugins API Version: ", apiV,
+					"\n\t\t     Plugin Version: ", plV,
 					"\n\t\t               Type: ", pl.Plugin.Info().Type(),
 					"\n\t\t        Description: ", pl.Plugin.Info().Desc(),
 					"\n\t\t               Name: ", pl.Plugin.Info().Name())
 				if _, ok := plTypes[pl.Plugin.Info().Type()]; !ok {
-					plTypes[pl.Plugin.Info().Type()] = make(map[string]plugin.Plugin)
+					plTypes[pl.Plugin.Info().Type()] = make(map[string]vlplugin.Plugin)
 				}
 
 				plTypes[pl.Plugin.Info().Type()][pl.Plugin.Info().Name()] = pl.Plugin
@@ -173,41 +301,6 @@ func loadPlugins(cfg *configuration.PluginsConfig) (pluginTypes, error) {
 	}
 
 	return plTypes, nil
-}
-
-func loadPersistence(cfg interface{}, plTypes pluginTypes) (persistence.Provider, error) {
-	persist := persistence.Default()
-
-	logger.Info("loading persistence")
-	if cfg == nil {
-		logger.Warn("\tno persistence backend provided\n\tusing in-memory. Data will be lost on shutdown")
-	} else {
-		pProvidersConfig := cfg.(map[interface{}]interface{})
-		if len(pProvidersConfig) > 1 {
-			logger.Warn("\tplugins.config.persistence: multiple persistence providers not supported")
-			return nil, errors.New("")
-		}
-
-		for nm, pCfg := range pProvidersConfig {
-			name := nm.(string)
-			if pl, kk := plTypes["persistence"][name]; !kk {
-				logger.Fatalf("\tplugins.config.persistence: plugin type [%s] not found", name)
-				return nil, errors.New("")
-			} else {
-				if plObject, err := pl.Load(pCfg); err != nil {
-					logger.Fatalf("\tplugin [%s] acquire failed: %s", name, err.Error())
-					return nil, errors.New("")
-				} else {
-					persist = plObject.(persistence.Provider)
-					logger.Infof("\tusing persistence provider [%s]", name)
-				}
-			}
-
-			break
-		}
-	}
-
-	return persist, nil
 }
 
 var logger *zap.SugaredLogger
@@ -296,4 +389,8 @@ func main() {
 	if err = srv.Close(); err != nil {
 		logger.Error("shutdown server", zap.Error(err))
 	}
+}
+
+func pluginFailureSignal(name, msg string) {
+	logger.Error("plugin: ", name, ": ", msg)
 }

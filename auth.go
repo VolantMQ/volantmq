@@ -1,22 +1,42 @@
 package main
 
-import vlAuth "github.com/VolantMQ/auth"
+import (
+	"github.com/VolantMQ/vlauth"
+)
 
-type internalAuth struct {
+type simpleAuth struct {
 	creds map[string]string
 }
 
-// nolint: golint
-func (a internalAuth) Password(user, password string) vlAuth.Status {
-	if hash, ok := a.creds[user]; ok {
-		if password == hash {
-			return vlAuth.StatusAllow
-		}
+var _ vlauth.Iface = (*simpleAuth)(nil)
+
+func newSimpleAuth() *simpleAuth {
+	return &simpleAuth{
+		creds: make(map[string]string),
 	}
-	return vlAuth.StatusDeny
+}
+
+func (a *simpleAuth) addUser(u, p string) {
+	a.creds[u] = p
 }
 
 // nolint: golint
-func (a internalAuth) ACL(clientID, user, topic string, access vlAuth.AccessType) vlAuth.Status {
-	return vlAuth.StatusAllow
+func (a *simpleAuth) Password(user, password string) error {
+	if hash, ok := a.creds[user]; ok {
+		if password == hash {
+			return vlauth.StatusAllow
+		}
+	}
+	return vlauth.StatusDeny
+}
+
+// nolint: golint
+func (a *simpleAuth) ACL(clientID, user, topic string, access vlauth.AccessType) error {
+	return vlauth.StatusAllow
+}
+
+// nolint: golint
+func (a *simpleAuth) Shutdown() error {
+	a.creds = nil
+	return nil
 }

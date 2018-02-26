@@ -11,11 +11,12 @@ system:
         level: info # available levels: debug, info, warn, error, dpanic, panic, fatal
 plugins:
   config:
-    auth:
-      internal:
-        type: simpleAuth
-        users:
-          testuser: testpassword
+    auth: # plugin type
+      - name: internal
+        backend: simpleAuth
+        config:
+          users:
+            testuser: "e0d7d338cb1259086d775c964fba50b2a84244ba4cd2815e9f6f4a8d9daaa656" # password must be sha-256 hashed
 auth:
   defaultOrder:
     - internal

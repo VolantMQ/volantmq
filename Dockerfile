@@ -18,12 +18,10 @@ RUN curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
 
 RUN go get github.com/VolantMQ/volantmq && \
     cd $GOPATH/src/github.com/VolantMQ/volantmq && \
-    dep ensure && \
     go build $VOLANTMQ_BUILD_FLAGS && \
     cp volantmq /usr/lib/rabbitmq/bin/ && \
     go get github.com/VolantMQ/persistence-boltdb && \
     cd $GOPATH/src/github.com/VolantMQ/persistence-boltdb/plugin && \
-    dep ensure && \
     go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -o $VOLANTMQ_WORK_DIR/plugins/persistence_boltdb.so && \
     cd / && \
     rm -r $GOPATH/src

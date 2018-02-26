@@ -3,12 +3,12 @@ package configuration
 import (
 	"plugin"
 
-	vlPlugin "github.com/VolantMQ/plugin"
+	"github.com/VolantMQ/vlplugin"
 )
 
 // PluginState status
 type PluginState struct {
-	Plugin vlPlugin.Plugin
+	Plugin vlplugin.Plugin
 	Errors []error
 }
 
@@ -46,7 +46,7 @@ func LoadPlugins(path string, list []string) map[string]PluginState {
 			if sym, err = plEntry.Lookup("Plugin"); err != nil {
 				pl.Errors = append(pl.Errors, err)
 			} else {
-				pl.Plugin = sym.(vlPlugin.Plugin)
+				pl.Plugin = sym.(vlplugin.Plugin)
 			}
 		}
 		plugins[p] = pl

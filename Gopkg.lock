@@ -15,21 +15,9 @@
 
 [[projects]]
   branch = "master"
-  name = "github.com/VolantMQ/persistence-boltdb"
+  name = "github.com/VolantMQ/vlplugin"
   packages = ["."]
-  revision = "7d70a72f69c73d2344a19e588fc7aef6f3b819ec"
-
-[[projects]]
-  branch = "master"
-  name = "github.com/VolantMQ/plugin"
-  packages = ["."]
-  revision = "34f53192daf1fecc474b3e614ff84832c35db7ec"
-
-[[projects]]
-  name = "github.com/boltdb/bolt"
-  packages = ["."]
-  revision = "2f1ce7a837dcb8da3ec595b1dac9d0632f0f99e8"
-  version = "v1.3.1"
+  revision = "d8ae12ee1e7f6878e8dd8b639d80fa5da5146842"
 
 [[projects]]
   name = "github.com/davecgh/go-spew"
@@ -193,7 +181,7 @@
   branch = "master"
   name = "golang.org/x/sys"
   packages = ["unix"]
-  revision = "88d2dcc510266da9f7f8c7f34e1940716cab5f5c"
+  revision = "f6cff0780e542efa0c8e864dc8fa522808f6a598"
 
 [[projects]]
   name = "golang.org/x/text"
@@ -217,6 +205,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "a65a97b07f4ac5d946106003fc5910998661bfd0ca326777f2400de641a53208"
+  inputs-digest = "f39b22f26062882970976cde1477ef18fab57f31d3a4711af7c91b2e89d4e1c6"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -4,19 +4,19 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/VolantMQ/auth"
+	"github.com/VolantMQ/vlauth"
 )
 
 // Manager auth
 type Manager struct {
-	p []auth.Provider
+	p []vlauth.Iface
 }
 
-var providers = make(map[string]auth.Provider)
+var providers = make(map[string]vlauth.Iface)
 
 // Register auth provider
-func Register(name string, provider auth.Provider) error {
-	if name == "" && provider == nil {
+func Register(name string, i vlauth.Iface) error {
+	if name == "" && i == nil {
 		return errors.New("invalid args")
 	}
 
@@ -24,7 +24,7 @@ func Register(name string, provider auth.Provider) error {
 		return errors.New("already exists")
 	}
 
-	providers[name] = provider
+	providers[name] = i
 
 	return nil
 }
@@ -51,23 +51,23 @@ func NewManager(p []string) (*Manager, error) {
 }
 
 // Password authentication
-func (m *Manager) Password(user, password string) auth.Status {
+func (m *Manager) Password(user, password string) error {
 	for _, p := range m.p {
-		if status := p.Password(user, password); status == auth.StatusAllow {
+		if status := p.Password(user, password); status == vlauth.StatusAllow {
 			return status
 		}
 	}
 
-	return auth.StatusDeny
+	return vlauth.StatusDeny
 }
 
 // ACL check permissions
-func (m *Manager) ACL(clientID, user, topic string, access auth.AccessType) auth.Status {
+func (m *Manager) ACL(clientID, user, topic string, access vlauth.AccessType) error {
 	for _, p := range m.p {
-		if status := p.ACL(clientID, user, topic, access); status == auth.StatusAllow {
+		if status := p.ACL(clientID, user, topic, access); status == vlauth.StatusAllow {
 			return status
 		}
 	}
 
-	return auth.StatusDeny
+	return vlauth.StatusDeny
 }
