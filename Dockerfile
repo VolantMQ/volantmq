@@ -21,7 +21,7 @@ RUN go get github.com/VolantMQ/volantmq && \
     go build $VOLANTMQ_BUILD_FLAGS && \
     cp volantmq /usr/lib/rabbitmq/bin/ && \
     go get github.com/VolantMQ/persistence-boltdb && \
-    cd $GOPATH/src/github.com/VolantMQ/persistence-boltdb/plugin && \
+    cd $GOPATH/src/github.com/VolantMQ/persistence-boltdb && \
     go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -o $VOLANTMQ_WORK_DIR/plugins/persistence_boltdb.so && \
     cd / && \
     rm -r $GOPATH/src
