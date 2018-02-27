@@ -3,7 +3,7 @@ package topics
 import (
 	"testing"
 
-	"github.com/VolantMQ/volantmq/packet"
+	"github.com/VolantMQ/mqttp"
 	"github.com/VolantMQ/volantmq/subscriber"
 	"github.com/VolantMQ/volantmq/topics/types"
 	"github.com/stretchr/testify/require"
