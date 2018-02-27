@@ -23,7 +23,7 @@
   branch = "master"
   name = "github.com/VolantMQ/vlplugin"
   packages = ["."]
-  revision = "d8ae12ee1e7f6878e8dd8b639d80fa5da5146842"
+  revision = "fcffa566ad4397405c5a75c45bac6a6e025a1027"
 
 [[projects]]
   name = "github.com/davecgh/go-spew"
@@ -125,6 +125,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "2563cf9e027236618e5b8555394b5b85bc62e613da14c64d5e48bdf4b66356eb"
+  inputs-digest = "267290c0c5e7a91ba9bbd660b6abbc1b0af4b90bd0f8803834119880111544e9"
   solver-name = "gps-cdcl"
   solver-version = 1
