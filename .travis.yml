@@ -17,8 +17,8 @@ jobs:
       install:
         - dep ensure
       script:
-        - go build -race -v -gcflags "-N -l" ./examples/...
-        - gometalinter --fast --exclude=corefoundation.go --deadline=360s --enable-gc --sort=path --cyclo-over=40 --dupl-threshold=100 --disable=gotype --vendor --enable=goimports ./...
+        - go build -race -v -gcflags "-N -l" .
+        #- gometalinter --fast --exclude=corefoundation.go --deadline=360s --enable-gc --sort=path --cyclo-over=40 --dupl-threshold=100 --disable=gotype --vendor --enable=goimports ./...
         - ./go.test.sh
       after_success:
         - bash <(curl -s https://codecov.io/bash)
