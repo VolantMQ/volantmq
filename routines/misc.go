@@ -21,7 +21,7 @@ import (
 	"io"
 	"net"
 
-	"github.com/VolantMQ/volantmq/packet"
+	"github.com/VolantMQ/mqttp"
 )
 
 var (
