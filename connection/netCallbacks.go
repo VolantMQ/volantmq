@@ -3,7 +3,7 @@ package connection
 import (
 	"sync/atomic"
 
-	"github.com/VolantMQ/volantmq/packet"
+	"github.com/VolantMQ/mqttp"
 	"go.uber.org/zap"
 )
 

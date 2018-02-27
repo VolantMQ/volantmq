@@ -3,7 +3,7 @@ package connection
 import (
 	"sync"
 
-	"github.com/VolantMQ/volantmq/packet"
+	"github.com/VolantMQ/mqttp"
 )
 
 type onRelease func(o, n packet.Provider)

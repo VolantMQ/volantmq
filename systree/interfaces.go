@@ -1,7 +1,7 @@
 package systree
 
 import (
-	"github.com/VolantMQ/volantmq/packet"
+	"github.com/VolantMQ/mqttp"
 	"github.com/VolantMQ/volantmq/types"
 )
 

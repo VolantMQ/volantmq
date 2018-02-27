@@ -4,7 +4,7 @@ import (
 	"crypto/tls"
 	"io/ioutil"
 
-	"github.com/VolantMQ/volantmq/packet"
+	"github.com/VolantMQ/mqttp"
 	"github.com/pkg/errors"
 )
 

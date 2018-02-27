@@ -2,16 +2,22 @@
 
 
 [[projects]]
-  branch = "master"
-  name = "github.com/VolantMQ/auth"
+  name = "github.com/VolantMQ/mqttp"
   packages = ["."]
-  revision = "7ac8b063c55f3f5671354d5b4f0ad4c10663b397"
+  revision = "e20fb4232051bca65b1d623ef69813ea213b38a0"
+  version = "v0.0.1"
 
 [[projects]]
   branch = "master"
   name = "github.com/VolantMQ/persistence"
   packages = ["."]
   revision = "dc205b068411382ff34fc451a4bf5d3c6e7d9b25"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/VolantMQ/vlauth"
+  packages = ["."]
+  revision = "58fa3533cbf0fa378f6528fc5e05a0e23c8be4a5"
 
 [[projects]]
   branch = "master"
@@ -205,6 +211,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "f39b22f26062882970976cde1477ef18fab57f31d3a4711af7c91b2e89d4e1c6"
+  inputs-digest = "ce87f6d19b34172b251f4d51ffbd0c31e187ed891318c8d341275ae7b87dbc91"
   solver-name = "gps-cdcl"
   solver-version = 1

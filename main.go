@@ -204,7 +204,7 @@ func loadAuth(cfg *configuration.Config, plTypes pluginTypes) (*auth.Manager, er
 		return nil, err
 	}
 
-	logger.Info("\tdefault order: ", cfg.Auth.DefaultOrder)
+	logger.Info("\tdefault auth order: ", cfg.Auth.DefaultOrder)
 
 	return def, nil
 }

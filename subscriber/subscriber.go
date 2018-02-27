@@ -7,8 +7,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/VolantMQ/mqttp"
 	"github.com/VolantMQ/volantmq/configuration"
-	"github.com/VolantMQ/volantmq/packet"
 	"github.com/VolantMQ/volantmq/topics/types"
 )
 

@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/VolantMQ/mqttp"
 	"github.com/VolantMQ/persistence"
 	"github.com/VolantMQ/volantmq/clients"
 	"github.com/VolantMQ/volantmq/configuration"
-	"github.com/VolantMQ/volantmq/packet"
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/topics"
 	"github.com/VolantMQ/volantmq/topics/types"

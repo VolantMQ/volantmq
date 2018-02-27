@@ -27,7 +27,7 @@
 
 [[constraint]]
   branch = "master"
-  name = "github.com/VolantMQ/auth"
+  name = "github.com/VolantMQ/vlauth"
 
 [[constraint]]
   branch = "master"

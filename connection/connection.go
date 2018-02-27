@@ -25,9 +25,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/VolantMQ/mqttp"
 	"github.com/VolantMQ/persistence"
 	"github.com/VolantMQ/volantmq/configuration"
-	"github.com/VolantMQ/volantmq/packet"
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/types"
 	"github.com/troian/easygo/netpoll"

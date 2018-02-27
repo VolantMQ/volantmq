@@ -1,8 +1,8 @@
 package topicsTypes
 
 import (
+	"github.com/VolantMQ/mqttp"
 	"github.com/VolantMQ/persistence"
-	"github.com/VolantMQ/volantmq/packet"
 	"github.com/VolantMQ/volantmq/systree"
 )
 

@@ -5,7 +5,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/VolantMQ/volantmq/packet"
+	"github.com/VolantMQ/mqttp"
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/troian/easygo/netpoll"
 )
