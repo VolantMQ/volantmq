@@ -1,9 +1,9 @@
 language: go
+go:
+  - "1.10"
 sudo: false
 notifications:
   email: false
-go:
-  - 1.10.0
 os:
   - linux
 before_install:
