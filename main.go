@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"io/ioutil"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -30,8 +33,11 @@ func loadMqttListeners(defaultAuth *auth.Manager, lCfg *configuration.ListenersC
 		for port, cfg := range ls {
 			transportAuth := defaultAuth
 
-			if len(cfg.Auth) > 0 {
-				transportAuth, _ = auth.NewManager(cfg.Auth)
+			if len(cfg.Auth.Order) > 0 {
+				var err error
+				if transportAuth, err = auth.NewManager(cfg.Auth.Order, cfg.Auth.Anonymous); err != nil {
+					return nil, err
+				}
 			}
 
 			host := lCfg.DefaultAddr
@@ -142,7 +148,7 @@ func loadAuth(cfg *configuration.Config, plTypes pluginTypes) (*auth.Manager, er
 		return nil, errors.New("")
 	}
 
-	if len(cfg.Auth.DefaultOrder) == 0 {
+	if len(cfg.Auth.Order) == 0 {
 		logger.Fatalf("\tdefault auth order should not be empty auth.defaultOrder")
 		return nil, errors.New("")
 	}
@@ -197,14 +203,15 @@ func loadAuth(cfg *configuration.Config, plTypes pluginTypes) (*auth.Manager, er
 		}
 	}
 
-	def, err := auth.NewManager(cfg.Auth.DefaultOrder)
+	def, err := auth.NewManager(cfg.Auth.Order, cfg.Auth.Anonymous)
 
 	if err != nil {
 		logger.Error("\tcreating default auth:", err.Error())
 		return nil, err
 	}
 
-	logger.Info("\tdefault auth order: ", cfg.Auth.DefaultOrder)
+	logger.Info("\tdefault auth order: ", cfg.Auth.Order)
+	logger.Info("\tdefault auth anonymous: ", cfg.Auth.Anonymous)
 
 	return def, nil
 }
@@ -236,18 +243,21 @@ func loadPersistence(cfg interface{}, plTypes pluginTypes) (persistence.Provider
 			logger.Fatalf("\tplugins.config.persistence[0] must contain map \"config\"")
 		}
 
-		if pl, kk := plTypes["persistence"][backend]; !kk {
-			logger.Fatalf("\tplugins.config.persistence.backend: plugin type [%s] not found", backend)
-			return nil, errors.New("")
-		} else {
-			plObject, err := configurePlugin(pl, config)
-			if err != nil {
-				logger.Fatalf(err.Error())
+		if plTypes != nil {
+			if pl, kk := plTypes["persistence"][backend]; !kk {
+				logger.Fatalf("\tplugins.config.persistence.backend: plugin type [%s] not found", backend)
 				return nil, errors.New("")
-			}
+			} else {
+				plObject, err := configurePlugin(pl, config)
+				if err != nil {
+					logger.Fatalf(err.Error())
+					return nil, errors.New("")
+				}
 
-			persist = plObject.(persistence.Provider)
-			logger.Infof("\tusing persistence provider [%s]", backend)
+				logger.Infof("\tusing persistence provider [%s]", backend)
+
+				persist = plObject.(persistence.Provider)
+			}
 		}
 	}
 
@@ -363,6 +373,9 @@ func main() {
 		MQTT:            config.Mqtt,
 		TransportStatus: listenerStatus,
 		Persistence:     persist,
+		OnDuplicate: func(s string, b bool) {
+			logger.Info("Session duplicate: ClientID: ", s, " allowed: ", b)
+		},
 	}
 
 	if srv, err = server.NewServer(serverConfig); err != nil {
@@ -379,7 +392,21 @@ func main() {
 		}
 	}
 
+	var profServer *http.Server
+
 	if err == nil {
+		if config.System.Profiler.Port != "" {
+			profServer = &http.Server{
+				Addr: "localhost:" + config.System.Profiler.Port,
+			}
+
+			logger.Info("profiler: serving at: ", "http://"+profServer.Addr+"/debug/pprof")
+
+			go func() {
+				profServer.ListenAndServe()
+			}()
+		}
+
 		ch := make(chan os.Signal, 1)
 		signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 		sig := <-ch
@@ -388,6 +415,10 @@ func main() {
 
 	if err = srv.Close(); err != nil {
 		logger.Error("shutdown server", zap.Error(err))
+	}
+
+	if profServer != nil {
+		profServer.Shutdown(context.Background())
 	}
 }
 

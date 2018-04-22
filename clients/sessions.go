@@ -9,15 +9,18 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/VolantMQ/mqttp"
 	"github.com/VolantMQ/persistence"
 	"github.com/VolantMQ/vlauth"
+	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/connection"
 	"github.com/VolantMQ/volantmq/subscriber"
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/topics/types"
+	"github.com/VolantMQ/volantmq/transport"
 	"github.com/VolantMQ/volantmq/types"
 	"github.com/gosuri/uiprogress"
 	"github.com/troian/easygo/netpoll"
@@ -47,13 +50,13 @@ type preloadConfig struct {
 
 // Manager clients manager
 type Manager struct {
-	persistence   persistence.Sessions
-	log           *zap.SugaredLogger
-	quit          chan struct{}
-	sessionsCount sync.WaitGroup
-	sessions      sync.Map
-	ePoll         netpoll.EventPoll
-	delayedWills  []*packet.Publish
+	persistence     persistence.Sessions
+	log             *zap.SugaredLogger
+	quit            chan struct{}
+	ePoll           netpoll.EventPoll
+	sessionsCount   sync.WaitGroup
+	sessions        sync.Map
+	allowedVersions map[packet.ProtocolVersion]bool
 	Config
 }
 
@@ -79,20 +82,50 @@ type loadContext struct {
 
 // NewManager create new clients manager
 func NewManager(c *Config) (*Manager, error) {
-	m := &Manager{
+	var err error
+
+	var m *Manager
+
+	defer func() {
+		if err != nil {
+
+		}
+	}()
+
+	m = &Manager{
 		Config: *c,
 		quit:   make(chan struct{}),
 		log:    configuration.GetLogger().Named("sessions"),
+		allowedVersions: map[packet.ProtocolVersion]bool{
+			packet.ProtocolV31:  false,
+			packet.ProtocolV311: false,
+			packet.ProtocolV50:  false,
+		},
 	}
 
-	m.ePoll, _ = netpoll.New(nil)
 	m.persistence, _ = c.Persist.Sessions()
 
-	var err error
+	for _, v := range m.Version {
+		switch v {
+		case "v3.1":
+			m.allowedVersions[packet.ProtocolV31] = true
+		case "v3.1.1":
+			m.allowedVersions[packet.ProtocolV311] = true
+		case "v5.0":
+			m.allowedVersions[packet.ProtocolV50] = true
+		default:
+			return nil, errors.New("unknown MQTT protocol: " + v)
+		}
+	}
+
+	if m.ePoll, err = netpoll.New(nil); err != nil {
+		m.log.Error("netpoll start: ", zap.Error(err))
+	}
 
 	pCount := m.persistence.Count()
 	if pCount > 0 {
 		m.log.Info("Loading sessions. Might take a while")
+		m.log.Sync()
 
 		uiprogress.Start()
 		bar := uiprogress.AddBar(int(pCount)).AppendCompleted().PrependElapsed()
@@ -116,13 +149,23 @@ func NewManager(c *Config) (*Manager, error) {
 			return nil, err
 		}
 
+		m.configurePersistedSubscribers(context)
+		m.configurePersistedExpiry(context)
+		m.processDelayedWills(context)
+
+		for id, st := range context.preloadConfigs {
+			if st.sub != nil {
+				m.persistence.SubscriptionsDelete([]byte(id))
+			}
+			if st.exp != nil {
+				m.persistence.ExpiryDelete([]byte(id))
+			}
+		}
+
 		m.log.Info("Sessions loaded")
 	} else {
 		m.log.Info("No persisted sessions")
 	}
-
-	m.configurePersistedSubscribers()
-	m.processDelayedWills()
 
 	return m, nil
 }
@@ -145,30 +188,34 @@ func (m *Manager) Shutdown() error {
 
 		if ses != nil {
 			ses.stop(packet.CodeServerShuttingDown)
+		} else {
+			m.sessionsCount.Done()
 		}
-		// m.persistence.StateStore([]byte(k.(string)), state) // nolint: errcheck
-		return true
-	})
 
-	// shutdown subscribers and expiry
-	m.sessions.Range(func(k, v interface{}) bool {
-		wrap := v.(*container)
-
-		exp := wrap.expiry.Load().(*expiry)
+		exp := wrap.expiry.Load()
 		if exp != nil {
-			exp.cancel()
-
+			e := exp.(*expiry)
+			e.cancel()
 		}
 
-		//if wrap.sub != nil {
-		//	wrap.sub.
-		//}
+		//m.persistence.ExpiryStore([]byte(k.(string)), &persistence.SessionDelays{})
+
 		return true
 	})
 
 	m.sessionsCount.Wait()
 
-	m.encodeSubscribers() // nolint: errcheck
+	// shutdown subscribers
+	m.sessions.Range(func(k, v interface{}) bool {
+		wrap := v.(*container)
+		if wrap.sub != nil {
+			if err := m.persistSubscriber(wrap.sub); err != nil {
+				m.log.Error("persist subscriber", zap.Error(err))
+			}
+		}
+
+		return true
+	})
 
 	return nil
 }
@@ -197,7 +244,7 @@ func (m *Manager) LoadSession(context interface{}, id []byte, state *persistence
 	}
 
 	if err = m.decodeSessionExpiry(ctx, sID, state); err != nil {
-		m.log.Error("Decode subscriber", zap.String("ClientID", sID), zap.Error(err))
+		m.log.Error("Decode session expiry", zap.String("ClientID", sID), zap.Error(err))
 	}
 
 	if err = m.decodeSubscriber(ctx, sID, state.Subscriptions); err != nil {
@@ -218,11 +265,15 @@ func (m *Manager) LoadSession(context interface{}, id []byte, state *persistence
 	return nil
 }
 
-// Handle incoming connection
-func (m *Manager) Handle(conn net.Conn, auth vlauth.Permissions) error {
+// OnConnection implements transport.Handler interface and handles incoming connection
+func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) error {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println(r)
+		}
+	}()
 	cn := connection.New(
 		connection.OnAuth(m.onAuth),
-		connection.EPoll(m.ePoll),
 		connection.NetConn(conn),
 		connection.TxQuota(types.DefaultReceiveMax),
 		connection.RxQuota(types.DefaultReceiveMax),
@@ -244,7 +295,7 @@ func (m *Manager) Handle(conn net.Conn, auth vlauth.Permissions) error {
 			switch obj := dl.(type) {
 			case *connection.ConnectParams:
 				connParams = obj
-				resp, err = m.processConnect(cn, connParams)
+				resp, err = m.processConnect(cn, connParams, authMngr)
 			case connection.AuthParams:
 				resp, err = m.processAuth(connParams, obj)
 			case error:
@@ -268,36 +319,35 @@ func (m *Manager) Handle(conn net.Conn, auth vlauth.Permissions) error {
 		}
 	}
 
-	m.newSession(cn, connParams, ack)
+	m.newSession(cn, connParams, ack, authMngr)
 
 	return nil
 }
 
-func (m *Manager) processConnect(cn connection.Initial, params *connection.ConnectParams) (packet.Provider, error) {
+func (m *Manager) processConnect(cn connection.Initial, params *connection.ConnectParams, authMngr *auth.Manager) (packet.Provider, error) {
 	var resp packet.Provider
 
-	//if allowed, ok := m.AllowedVersions[params.Version]; !ok || !allowed {
-	//	reason := packet.CodeRefusedUnacceptableProtocolVersion
-	//	if params.Version == packet.ProtocolV50 {
-	//		reason = packet.CodeUnsupportedProtocol
-	//	}
-	//
-	//	return nil, reason
-	//}
+	if allowed, ok := m.allowedVersions[params.Version]; !ok || !allowed {
+		reason := packet.CodeRefusedUnacceptableProtocolVersion
+		if params.Version == packet.ProtocolV50 {
+			reason = packet.CodeUnsupportedProtocol
+		}
+
+		return nil, reason
+	}
 
 	if len(params.AuthMethod) > 0 {
 		// TODO(troian): verify method is allowed
-		// resp = packet.NewAuth(params.Version)
 	} else {
 		var reason packet.ReasonCode
-		// if status := c.config.AuthManager.Password(string(user), string(pass)); status == auth.StatusAllow {
-		//	reason = packet.CodeSuccess
-		// } else {
-		//	reason = packet.CodeRefusedBadUsernameOrPassword
-		//	if req.Version() == packet.ProtocolV50 {
-		//		reason = packet.CodeBadUserOrPassword
-		//	}
-		// }
+		if status := authMngr.Password(string(params.Username), string(params.Password)); status == vlauth.StatusAllow {
+			reason = packet.CodeSuccess
+		} else {
+			reason = packet.CodeRefusedBadUsernameOrPassword
+			if params.Version == packet.ProtocolV50 {
+				reason = packet.CodeBadUserOrPassword
+			}
+		}
 
 		pkt := packet.NewConnAck(params.Version)
 		pkt.SetReturnCode(reason)
@@ -314,7 +364,7 @@ func (m *Manager) processAuth(params *connection.ConnectParams, auth connection.
 }
 
 // newSession create new session with provided established connection
-func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectParams, ack *packet.ConnAck) {
+func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectParams, ack *packet.ConnAck, authMngr *auth.Manager) {
 	var ses *session
 	var err error
 
@@ -334,11 +384,11 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 				ReceiveMaximum:    uint32(params.SendQuota),
 				MaximumPacketSize: params.MaxTxPacketSize,
 				GeneratedID:       params.IDGen,
-				// SessionPresent:    sessionPresent,
-				// Address:           config.Conn.RemoteAddr().String(),
+				SessionPresent:    ack.SessionPresent(),
+				//Address:           cn.RemoteAddr().String(),
 				KeepAlive:    uint16(keepAlive),
-				Protocol:     params.Version,
 				ConnAckCode:  ack.ReturnCode(),
+				Protocol:     params.Version,
 				CleanSession: params.CleanStart,
 				Durable:      params.Durable,
 			}
@@ -370,7 +420,7 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 	}
 
 	var info *containerInfo
-	if info, err = m.loadContainer(cn.Session(), params); err == nil {
+	if info, err = m.loadContainer(cn.Session(), params, authMngr); err == nil {
 		ses = info.ses
 		config := sessionConfig{
 			sessionEvents: m,
@@ -384,15 +434,9 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 
 		ses.configure(config, params.CleanStart)
 
-		if info.present {
-			// if session has present persistence wipe stored messages to prevent duplicate sending
-			m.persistence.PacketsDelete([]byte(params.ID))
-		}
-
 		ack.SetSessionPresent(info.present)
 	} else {
 		var reason packet.ReasonCode
-
 		if r, ok := err.(packet.ReasonCode); ok {
 			reason = r
 		} else {
@@ -423,23 +467,28 @@ func (m *Manager) checkServerStatus(v packet.ProtocolVersion, resp *packet.ConnA
 		default:
 			reason = packet.CodeRefusedServerUnavailable
 		}
-		resp.SetReturnCode(reason) // nolint: errcheck
+		if err := resp.SetReturnCode(reason); err != nil {
+			m.log.Error("check server status set return code", zap.Error(err))
+		}
 	default:
 	}
 }
 
 // allocContainer
-func (m *Manager) allocContainer(id string, createdAt time.Time, cn connection.Session) *container {
+func (m *Manager) allocContainer(id string, username string, authMngr *auth.Manager, createdAt time.Time, cn connection.Session) *container {
 	ses := newSession(sessionPreConfig{
 		id:          id,
 		createdAt:   createdAt,
 		conn:        cn,
 		messenger:   m.TopicsMgr,
 		persistence: m.persistence,
+		permissions: authMngr,
+		username:    username,
 	})
 
 	cont := &container{
 		removable: true,
+		removed:   false,
 	}
 
 	ses.idLock = &cont.lock
@@ -449,75 +498,75 @@ func (m *Manager) allocContainer(id string, createdAt time.Time, cn connection.S
 	return cont
 }
 
-func (m *Manager) loadContainer(cn connection.Session, params *connection.ConnectParams) (cont *containerInfo, err error) {
-	newContainer := m.allocContainer(params.ID, time.Now(), cn)
-
-	inc := false
+func (m *Manager) loadContainer(cn connection.Session, params *connection.ConnectParams, authMngr *auth.Manager) (cont *containerInfo, err error) {
+	newContainer := m.allocContainer(params.ID, string(params.Username), authMngr, time.Now(), cn)
 
 	// search for existing container with given id
 	if curr, present := m.sessions.LoadOrStore(params.ID, newContainer); present {
-		// container with given id already exists with either active connection or expiry and/or willDelay set
+		// container with given id already exists with either active connection or expiry/willDelay set
 
-		// there is some old session exists, check if it has active network connection then stop if so
-		// if it is offline (either waiting for expiration to fire or will event or) switch back to online
-		// and use this session henceforth
+		// release lock of newly allocated container as lock from old one will be used
+		newContainer.release()
+
 		currContainer := curr.(*container)
 
 		// lock id to prevent other incoming connections with same ID making any changes until we done
 		currContainer.acquire()
-
 		currContainer.setRemovable(false)
 
-		if curr, present = m.sessions.LoadOrStore(params.ID, newContainer); present {
-			// release lock of newly allocated container as lock from old one will be used
-			newContainer.release()
+		if current := currContainer.session(); current != nil {
+			// container has session with active connection
 
-			if current := currContainer.session(); current != nil {
-				// container has session with active connection
-
-				m.OnReplaceAttempt(params.ID, m.Options.SessionDups)
-				if !m.Options.SessionDups {
-					// we do not make any changes to current network connection
-					// response to new one with error and release both new & old sessions
-					err = packet.CodeRefusedIdentifierRejected
-					if params.Version >= packet.ProtocolV50 {
-						err = packet.CodeInvalidClientID
-					}
-
-					currContainer.setRemovable(true)
-
-					currContainer.release()
-					newContainer = nil
-					return
+			m.OnReplaceAttempt(params.ID, m.Options.SessionDups)
+			if !m.Options.SessionDups {
+				// we do not make any changes to current network connection
+				// response to new one with error and release both new & old sessions
+				err = packet.CodeRefusedIdentifierRejected
+				if params.Version >= packet.ProtocolV50 {
+					err = packet.CodeInvalidClientID
 				}
 
-				// session will be replaced with new connection
-				// stop current active connection
-				current.stop(packet.CodeSessionTakenOver)
+				currContainer.setRemovable(true)
+
+				currContainer.release()
+				newContainer = nil
+				return
 			}
 
-			if val := currContainer.expiry.Load(); val != nil {
-				exp := val.(*expiry)
-				exp.cancel()
-				currContainer.expiry = atomic.Value{}
-			}
-
-			newContainer = currContainer.swap(newContainer)
-
-			if _, ok := m.sessions.LoadOrStore(params.ID, currContainer); !ok {
-				inc = true
-			}
-		} else {
-			currContainer.release()
-			inc = true
+			// session will be replaced with new one
+			// stop current active connection
+			current.stop(packet.CodeSessionTakenOver)
 		}
 
-		currContainer.setRemovable(true)
-	} else {
-		inc = true
-	}
+		// MQTT5.0 cancel expiry if set
+		if val := currContainer.expiry.Load(); val != nil {
+			exp := val.(*expiry)
+			exp.cancel()
+			currContainer.expiry = atomic.Value{}
+		}
 
-	if inc {
+		currContainer.rmLock.Lock()
+		removed := currContainer.removed
+		currContainer.rmLock.Unlock()
+
+		if removed {
+			// if current container marked as removed check if concurrent connection has created new entry with same id
+			// and reject current if so
+			if _, present = m.sessions.LoadOrStore(params.ID, newContainer); present {
+				err = packet.CodeRefusedIdentifierRejected
+				if params.Version >= packet.ProtocolV50 {
+					err = packet.CodeInvalidClientID
+				}
+				return
+			} else {
+				m.sessionsCount.Add(1)
+			}
+		} else {
+			newContainer = currContainer.swap(newContainer)
+			newContainer.removed = false
+			currContainer.setRemovable(true)
+		}
+	} else {
 		m.sessionsCount.Add(1)
 	}
 
@@ -541,7 +590,15 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 		present = present || persisted
 
 		if params.Durable && !persisted {
-			// TODO: create persistence entry
+			err = m.persistence.Create([]byte(params.ID),
+				&persistence.SessionBase{
+					Timestamp: time.Now().Format(time.RFC3339),
+					Version:   byte(params.Version),
+				})
+			if err != nil {
+				m.log.Error("Create persistence entry: ", err.Error())
+				err = nil
+			}
 		}
 	}
 
@@ -635,10 +692,45 @@ func (m *Manager) connectionClosed(id string, reason packet.ReasonCode) {
 
 func (m *Manager) subscriberShutdown(id string, sub subscriber.SessionProvider) {
 	sub.Offline(true)
-	val, _ := m.sessions.Load(id)
+	if val, ok := m.sessions.Load(id); ok {
+		wrap := val.(*container)
+		wrap.sub = nil
+	} else {
+		m.log.Error("subscriber shutdown. container not found", zap.String("ClientID", id))
+	}
+}
 
-	wrap := val.(*container)
-	wrap.sub = nil
+func (m *Manager) sessionOffline(id string, keep bool, exp *expiry) {
+	if obj, ok := m.sessions.Load(id); ok {
+		if cont, kk := obj.(*container); kk {
+			cont.rmLock.Lock()
+			cont.ses = nil
+
+			if keep {
+				if exp != nil {
+					cont.expiry.Store(exp)
+					exp.start()
+				}
+			} else {
+				if cont.removable {
+					state := &systree.SessionDeletedStatus{
+						Timestamp: time.Now().Format(time.RFC3339),
+						Reason:    "",
+					}
+
+					m.Systree.Sessions().Removed(id, state)
+					m.sessions.Delete(id)
+					m.sessionsCount.Done()
+					cont.removed = true
+				}
+			}
+			cont.rmLock.Unlock()
+		} else {
+			m.log.Panic("is not a container")
+		}
+	} else {
+		m.log.Error("Couldn't wipe session, object does not exist")
+	}
 }
 
 func (m *Manager) sessionTimer(id string, expired bool) {
@@ -660,68 +752,58 @@ func (m *Manager) sessionTimer(id string, expired bool) {
 	m.Systree.Sessions().Removed(id, state)
 }
 
-func (m *Manager) sessionOffline(id string, keep bool, exp *expiry) {
-	if obj, ok := m.sessions.Load(id); ok {
-		wrap := obj.(*container)
-		wrap.rmLock.Lock()
-		wrap.ses = nil
+func (m *Manager) configurePersistedSubscribers(ctx *loadContext) {
+	for id, t := range ctx.preloadConfigs {
+		sub := subscriber.New(
+			subscriber.Config{
+				ID:             id,
+				Topics:         m.TopicsMgr,
+				OfflinePublish: m,
+				Version:        t.sub.version,
+			})
 
-		if keep {
-			if exp != nil {
-				wrap.expiry.Store(exp)
-				exp.start()
+		for topic, ops := range t.sub.topics {
+			if _, _, err := sub.Subscribe(topic, ops); err != nil {
+				m.log.Error("Couldn't subscribe", zap.Error(err))
 			}
-		} else {
-			if wrap.removable {
-				m.sessions.Delete(id)
-				m.sessionsCount.Done()
-			}
-
-			state := &systree.SessionDeletedStatus{
-				Timestamp: time.Now().Format(time.RFC3339),
-				Reason:    "",
-			}
-
-			m.Systree.Sessions().Removed(id, state)
 		}
 
-		wrap.rmLock.Unlock()
-	} else {
-		m.log.Error("Couldn't wipe session, object does not exist")
+		cont := &container{
+			removable: true,
+			removed:   false,
+			sub:       sub,
+		}
+
+		m.sessions.Store(id, cont)
+		m.sessionsCount.Add(1)
 	}
 }
 
-func (m *Manager) configurePersistedSubscribers() {
-	//for id, t := range m.subscriberConfigs {
-	//	sub := subscriber.New(
-	//		&subscriber.Config{
-	//			ID:               id,
-	//			Topics:           m.TopicsMgr,
-	//			OnOfflinePublish: m.onPublish,
-	//			OfflineQoS0:      m.OfflineQoS0,
-	//			Version:          t.version,
-	//		})
-	//
-	//	for topic, ops := range t.topics {
-	//		if _, _, err := sub.Subscribe(topic, ops); err != nil {
-	//			m.log.Error("Couldn't subscribe", zap.Error(err))
-	//		}
-	//	}
-	//
-	//	m.subscribers.Store(id, sub)
-	//}
-	//
-	//m.subscriberConfigs = make(map[string]*subscriberConfig)
+func (m *Manager) configurePersistedExpiry(ctx *loadContext) {
+	for id, t := range ctx.preloadConfigs {
+		cont := &container{
+			removable: true,
+			removed:   false,
+		}
+
+		exp := newExpiry(*t.exp)
+
+		cont.expiry.Store(exp)
+		if c, present := m.sessions.LoadOrStore(id, cont); present {
+			cnt := c.(*container)
+			cnt.expiry.Store(exp)
+		}
+
+		exp.start()
+	}
 }
 
-func (m *Manager) processDelayedWills() {
-	for _, will := range m.delayedWills {
+func (m *Manager) processDelayedWills(ctx *loadContext) {
+	for _, will := range ctx.delayedWills {
 		if err := m.TopicsMgr.Publish(will); err != nil {
 			m.log.Error("Publish delayed will", zap.Error(err))
 		}
 	}
-
-	m.delayedWills = []*packet.Publish{}
 }
 
 // decodeSessionExpiry
@@ -853,81 +935,73 @@ func (m *Manager) decodeSubscriber(ctx *loadContext, id string, from []byte) err
 	return nil
 }
 
-func (m *Manager) encodeSubscribers() error {
-	// 4. shutdown and persist subscriptions from non-clean session
-	//for id, s := range m.subscribers {
-	//m.subscribers.Range(func(k, v interface{}) bool {
-	//	id := k.(string)
-	//	s := v.(subscriber.SessionProvider)
-	//	s.Offline(true)
-	//
-	//	topics := s.Subscriptions()
-	//
-	//	// calculate size of the encoded entry
-	//	// consist of:
-	//	//  _ _ _ _ _     _ _ _ _ _ _
-	//	// |_|_|_|_|_|...|_|_|_|_|_|_|
-	//	//  ___ _ _________ _ _______
-	//	//   |  |     |     |    |
-	//	//   |  |     |     |    4 bytes - subscription id
-	//	//   |  |     |     | 1 byte - topic options
-	//	//   |  |     | n bytes - topic
-	//	//   |  | 1 bytes - protocol version
-	//	//   | 2 bytes - length prefix
-	//
-	//	size := 0
-	//	for topic := range topics {
-	//		size += 2 + len(topic) + 1 + int(unsafe.Sizeof(uint32(0)))
-	//	}
-	//
-	//	buf := make([]byte, size+1)
-	//	offset := 0
-	//	buf[offset] = byte(s.Version())
-	//	offset++
-	//
-	//	for s, params := range topics {
-	//		total, _ := packet.WriteLPBytes(buf[offset:], []byte(s))
-	//		offset += total
-	//		buf[offset] = byte(params.Ops)
-	//		offset++
-	//		binary.BigEndian.PutUint32(buf[offset:], params.ID)
-	//		offset += 4
-	//	}
-	//
-	//	if err := m.persistence.SubscriptionsStore([]byte(id), buf); err != nil {
-	//		m.log.Error("Couldn't persist subscriptions", zap.String("ClientID", id), zap.Error(err))
-	//	}
-	//
-	//	return true
-	//})
+func (m *Manager) persistSubscriber(s *subscriber.Type) error {
+	topics := s.Subscriptions()
 
+	// calculate size of the encoded entry
+	// consist of:
+	//  _ _ _ _ _     _ _ _ _ _ _
+	// |_|_|_|_|_|...|_|_|_|_|_|_|
+	//  ___ _ _________ _ _______
+	//   |  |     |     |    |
+	//   |  |     |     |    4 bytes - subscription id
+	//   |  |     |     | 1 byte - topic options
+	//   |  |     | n bytes - topic
+	//   |  | 1 bytes - protocol version
+	//   | 2 bytes - length prefix
+
+	size := 0
+	for topic := range topics {
+		size += 2 + len(topic) + 1 + int(unsafe.Sizeof(uint32(0)))
+	}
+
+	buf := make([]byte, size+1)
+	offset := 0
+	buf[offset] = byte(s.GetVersion())
+	offset++
+
+	for topic, params := range topics {
+		total, _ := packet.WriteLPBytes(buf[offset:], []byte(topic))
+		offset += total
+		buf[offset] = byte(params.Ops)
+		offset++
+		binary.BigEndian.PutUint32(buf[offset:], params.ID)
+		offset += 4
+	}
+
+	if err := m.persistence.SubscriptionsStore([]byte(s.ID), buf); err != nil {
+		m.log.Error("Couldn't persist subscriptions", zap.String("ClientID", s.ID), zap.Error(err))
+	}
+
+	s.Offline(true)
 	return nil
 }
 
 func (m *Manager) Publish(id string, p *packet.Publish) {
-	//pkt := &persistence.PersistedPacket{UnAck: false}
-	//
-	//var expired bool
-	//var expireAt time.Time
-	//
-	//if expireAt, _, expired = p.Expired(); expired {
-	//	return
-	//}
-	//
-	//if !expireAt.IsZero() {
-	//	pkt.ExpireAt = expireAt.Format(time.RFC3339)
-	//}
-	//
-	//p.SetPacketID(0)
-	//
-	//var err error
-	//pkt.Data, err = packet.Encode(p)
-	//if err != nil {
-	//	m.log.Error("Couldn't encode packet", zap.String("ClientID", id), zap.Error(err))
-	//	return
-	//}
-	//
-	//if err = m.persistence.PacketStore([]byte(id), pkt); err != nil {
-	//	m.log.Error("Couldn't persist message", zap.String("ClientID", id), zap.Error(err))
-	//}
+	pkt := &persistence.PersistedPacket{}
+	pkt.Flags.UnAck = false
+
+	var expired bool
+	var expireAt time.Time
+
+	if expireAt, _, expired = p.Expired(); expired {
+		return
+	}
+
+	if !expireAt.IsZero() {
+		pkt.ExpireAt = expireAt.Format(time.RFC3339)
+	}
+
+	p.SetPacketID(0)
+
+	var err error
+	pkt.Data, err = packet.Encode(p)
+	if err != nil {
+		m.log.Error("Couldn't encode packet", zap.String("ClientID", id), zap.Error(err))
+		return
+	}
+
+	if err = m.persistence.PacketStore([]byte(id), pkt); err != nil {
+		m.log.Error("Couldn't persist message", zap.String("ClientID", id), zap.Error(err))
+	}
 }

@@ -83,7 +83,7 @@ func (s *Type) Hash() uintptr {
 
 // HasSubscriptions either has active subscriptions or not
 func (s *Type) HasSubscriptions() bool {
-	return len(s.subscriptions) != 0
+	return len(s.subscriptions) > 0
 }
 
 // Acquire prevent subscriber being deleted before active writes finished

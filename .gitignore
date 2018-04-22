@@ -34,11 +34,7 @@ _testmain.go
 *.test
 *.out
 
-*.sublime-project
-*.sublime-workspace
-
-persistence/examples/bolt/test.db
-examples/tcp/persist.db
+persistence
 coverage.txt
 vendor
 

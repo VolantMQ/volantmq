@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 
 	"github.com/VolantMQ/vlauth"
 )
@@ -25,7 +26,9 @@ func (a *simpleAuth) addUser(u, p string) {
 // nolint: golint
 func (a *simpleAuth) Password(user, password string) error {
 	if hash, ok := a.creds[user]; ok {
-		if string(sha256.New().Sum([]byte(password))) == hash {
+		algo := sha256.New()
+		algo.Write([]byte(password))
+		if hex.EncodeToString(algo.Sum(nil)) == hash {
 			return vlauth.StatusAllow
 		}
 	}

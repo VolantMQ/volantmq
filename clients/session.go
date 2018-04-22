@@ -7,6 +7,7 @@ import (
 
 	"github.com/VolantMQ/mqttp"
 	"github.com/VolantMQ/persistence"
+	"github.com/VolantMQ/vlauth"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/connection"
 	"github.com/VolantMQ/volantmq/subscriber"
@@ -27,6 +28,8 @@ type sessionPreConfig struct {
 	messenger   types.TopicMessenger
 	conn        connection.Session
 	persistence persistence.Packets
+	permissions vlauth.Permissions
+	username    string
 }
 
 type sessionConfig struct {
@@ -87,6 +90,7 @@ func (s *session) configure(c sessionConfig, clean bool) {
 		s.subscriber.Online(tmp)
 		s.persistence.PacketsForEach([]byte(s.id), s.conn)
 		s.subscriber.Online(s.conn)
+		s.persistence.PacketsDelete([]byte(s.id))
 		s.conn.LoadRemaining(tmp.gList, tmp.qList)
 	} else {
 		s.subscriber.Online(s.conn)
@@ -94,6 +98,7 @@ func (s *session) configure(c sessionConfig, clean bool) {
 }
 
 func (s *session) start() {
+	s.conn.Start()
 	s.idLock.Unlock()
 }
 
@@ -101,37 +106,6 @@ func (s *session) stop(reason packet.ReasonCode) {
 	s.stopReq.Do(func() {
 		s.conn.Stop(reason)
 	})
-
-	//s.wgDisconnected.Wait()
-
-	//state := &persistence.SessionState{
-	//	Timestamp: s.createdAt.Format(time.RFC3339),
-	//}
-
-	//if s.expireIn != nil || (s.willDelay > 0 && s.will != nil) {
-	//	state.Expire = &persistence.SessionDelays{
-	//		Since: s.expiringSince.Format(time.RFC3339),
-	//	}
-	//
-	//	elapsed := uint32(time.Since(s.expiringSince) / time.Second)
-	//
-	//	if (s.willDelay > 0 && s.will != nil) && (s.willDelay-elapsed) > 0 {
-	//		s.willDelay = s.willDelay - elapsed
-	//		s.will.SetPacketID(0)
-	//		if buf, err := packet.Encode(s.will); err != nil {
-	//
-	//		} else {
-	//			state.Expire.WillIn = strconv.Itoa(int(s.willDelay))
-	//			state.Expire.WillData = buf
-	//		}
-	//	}
-	//
-	//	if s.expireIn != nil && *s.expireIn > 0 && (*s.expireIn-elapsed) > 0 {
-	//		*s.expireIn = *s.expireIn - elapsed
-	//	}
-	//}
-
-	//return state
 }
 
 // SignalPublish process PUBLISH packet from client
@@ -147,9 +121,12 @@ func (s *session) SignalPublish(pkt *packet.Publish) error {
 		// [MQTT-3.3.1-7]
 		if pkt.QoS() == packet.QoS0 {
 			retained := packet.NewPublish(s.version)
-			retained.SetQoS(pkt.QoS())     // nolint: errcheck
-			retained.SetTopic(pkt.Topic()) // nolint: errcheck
-			//s.retained.list = append(s.retained.list, m)
+			if err := retained.SetQoS(pkt.QoS()); err != nil {
+				s.log.Error("set retained QoS", zap.String("ClientID", s.id), zap.Error(err))
+			}
+			if err := retained.SetTopic(pkt.Topic()); err != nil {
+				s.log.Error("set retained topic", zap.String("ClientID", s.id), zap.Error(err))
+			}
 		}
 	}
 
@@ -173,34 +150,35 @@ func (s *session) SignalSubscribe(pkt *packet.Subscribe) (packet.Provider, error
 
 	pkt.RangeTopics(func(t string, ops packet.SubscriptionOptions) {
 		reason := packet.CodeSuccess // nolint: ineffassign
-		//authorized := true
-		// TODO: check permissions here
 
-		//if authorized {
-		subsID := uint32(0)
+		if err := s.permissions.ACL(s.id, s.username, t, vlauth.AccessRead); err == vlauth.StatusAllow {
+			subsID := uint32(0)
 
-		// V5.0 [MQTT-3.8.2.1.2]
-		if prop := pkt.PropertyGet(packet.PropertySubscriptionIdentifier); prop != nil {
-			if v, e := prop.AsInt(); e == nil {
-				subsID = v
+			// V5.0 [MQTT-3.8.2.1.2]
+			if prop := pkt.PropertyGet(packet.PropertySubscriptionIdentifier); prop != nil {
+				if v, e := prop.AsInt(); e == nil {
+					subsID = v
+				}
 			}
-		}
 
-		subsParams := topicsTypes.SubscriptionParams{
-			ID:  subsID,
-			Ops: ops,
-		}
+			subsParams := topicsTypes.SubscriptionParams{
+				ID:  subsID,
+				Ops: ops,
+			}
 
-		if grantedQoS, retained, err := s.subscriber.Subscribe(t, &subsParams); err != nil {
+			if grantedQoS, retained, err := s.subscriber.Subscribe(t, &subsParams); err != nil {
+				reason = packet.QosFailure
+			} else {
+				reason = packet.ReasonCode(grantedQoS)
+				retainedPublishes = append(retainedPublishes, retained...)
+			}
+		} else {
 			// [MQTT-3.9.3]
 			if s.version == packet.ProtocolV50 {
-				reason = packet.CodeUnspecifiedError
+				reason = packet.CodeNotAuthorized
 			} else {
 				reason = packet.QosFailure
 			}
-		} else {
-			reason = packet.ReasonCode(grantedQoS)
-			retainedPublishes = append(retainedPublishes, retained...)
 		}
 
 		retCodes = append(retCodes, reason)
@@ -212,9 +190,9 @@ func (s *session) SignalSubscribe(pkt *packet.Subscribe) (packet.Provider, error
 
 	// Now put retained messages into publish queue
 	for _, rp := range retainedPublishes {
-		if pkt, err := rp.Clone(s.version); err == nil {
-			pkt.SetRetain(true)
-			s.conn.Publish(s.id, pkt)
+		if p, err := rp.Clone(s.version); err == nil {
+			p.SetRetain(true)
+			s.conn.Publish(s.id, p)
 		} else {
 			s.log.Error("Couldn't clone PUBLISH message", zap.String("ClientID", s.id), zap.Error(err))
 		}
@@ -228,12 +206,9 @@ func (s *session) SignalUnSubscribe(pkt *packet.UnSubscribe) (packet.Provider, e
 	var retCodes []packet.ReasonCode
 
 	for _, t := range pkt.Topics() {
-		// TODO: check permissions here
-		authorized := true
 		reason := packet.CodeSuccess
-
-		if authorized {
-			if err := s.subscriber.UnSubscribe(t); err != nil {
+		if err := s.permissions.ACL(s.id, s.username, t, vlauth.AccessRead); err == vlauth.StatusAllow {
+			if err = s.subscriber.UnSubscribe(t); err != nil {
 				s.log.Error("Couldn't unsubscribe from topic", zap.Error(err))
 				reason = packet.CodeNoSubscriptionExisted
 			}
@@ -249,7 +224,9 @@ func (s *session) SignalUnSubscribe(pkt *packet.UnSubscribe) (packet.Provider, e
 
 	id, _ := pkt.ID()
 	resp.SetPacketID(id)
-	resp.AddReturnCodes(retCodes) // nolint: errcheck
+	if err := resp.AddReturnCodes(retCodes); err != nil {
+		s.log.Error("unsubscribe set return codes", zap.String("ClientID", s.id), zap.Error(err))
+	}
 
 	return resp, nil
 }
@@ -310,12 +287,14 @@ func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 	s.connectionClosed(s.id, params.Reason)
 
 	if s.durable && len(params.Packets) > 0 {
-		s.persistence.PacketsStore([]byte(s.id), params.Packets)
+		if err := s.persistence.PacketsStore([]byte(s.id), params.Packets); err != nil {
+			s.log.Error("persisting packets", zap.String("ClientID", s.id), zap.Error(err))
+		}
 	}
 
 	keepContainer := s.durable && s.subscriber.HasSubscriptions()
 
-	if !s.durable || !s.subscriber.HasSubscriptions() {
+	if !keepContainer {
 		s.subscriberShutdown(s.id, s.subscriber)
 		s.subscriber = nil
 	}

@@ -12,21 +12,11 @@ import (
 type connWs struct {
 	conn *websocket.Conn
 	stat systree.BytesMetric
-
 	prev io.Reader
+	pollDesc
 }
 
-var _ conn = (*connWs)(nil)
-
-// NewConnWs initiate connection with websocket.Conn ws object and stat
-func newConnWs(conn *websocket.Conn, stat systree.BytesMetric) (conn, error) {
-	c := &connWs{
-		conn: conn,
-		stat: stat,
-	}
-
-	return c, nil
-}
+var _ Conn = (*connWs)(nil)
 
 // Read
 // FIXME: looks ugly

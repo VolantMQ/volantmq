@@ -41,9 +41,15 @@ type LogConfig struct {
 	File      *FileLogConfig   `yaml:"file,omitempty"`
 }
 
+// ProfilerConfig configure pprof
+type ProfilerConfig struct {
+	Port string `yaml:"port,omitempty" json:"port,omitempty"`
+}
+
 // SystemConfig entry in system
 type SystemConfig struct {
-	Log LogConfig `yaml:"log,omitempty"`
+	Log      LogConfig      `yaml:"log,omitempty"`
+	Profiler ProfilerConfig `json:"profiler" yaml:"profiler"`
 }
 
 // TLSConfig used by SecurityConfig or ssl/ws listeners
@@ -57,12 +63,17 @@ type SecurityConfig struct {
 	TLS TLSConfig `yaml:"tls,omitempty"`
 }
 
+type AuthConfig struct {
+	Anonymous bool     `yaml:"anonymous,omitempty" default:"false"`
+	Order     []string `yaml:"order"`
+}
+
 // PortConfig configuration of tcp/ssl/ws(s) listeners
 type PortConfig struct {
-	Host string    `yaml:"host,omitempty"`
-	Auth []string  `yaml:"auth,omitempty"`
-	TLS  TLSConfig `yaml:"tls,omitempty"`
-	Path string    `yaml:"path,omitempty"`
+	Host string     `yaml:"host,omitempty"`
+	Auth AuthConfig `yaml:"auth"`
+	TLS  TLSConfig  `yaml:"tls,omitempty"`
+	Path string     `yaml:"path,omitempty"`
 }
 
 // MqttConfig server config
@@ -96,10 +107,6 @@ type MqttConfig struct {
 type ListenersConfig struct {
 	DefaultAddr string                           `yaml:"defaultAddr,omitempty"`
 	MQTT        map[string]map[string]PortConfig `yaml:"mqtt,omitempty"`
-}
-
-type AuthConfig struct {
-	DefaultOrder []string `yaml:"defaultOrder"`
 }
 
 // Config system-wide config

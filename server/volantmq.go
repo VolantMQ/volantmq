@@ -80,7 +80,8 @@ type server struct {
 	}
 	systree struct {
 		publishes []systree.DynamicValue
-		timer     *time.Timer
+		timer     *time.Ticker
+		wg        sync.WaitGroup
 	}
 }
 
@@ -166,7 +167,10 @@ func NewServer(config Config) (Server, error) {
 		}
 
 		if s.MQTT.Systree.UpdateInterval > 0 {
-			s.systree.timer = time.AfterFunc(time.Duration(s.MQTT.Systree.UpdateInterval)*time.Second, s.systreeUpdater)
+			//s.systree.timer = time.AfterFunc(time.Duration(s.MQTT.Systree.UpdateInterval)*time.Second, s.systreeUpdater)
+			s.systree.timer = time.NewTicker(time.Duration(s.MQTT.Systree.UpdateInterval) * time.Second)
+			s.systree.wg.Add(1)
+			go s.systreeUpdater()
 		}
 	}
 
@@ -189,13 +193,12 @@ func NewServer(config Config) (Server, error) {
 // ListenAndServe start listener
 func (s *server) ListenAndServe(config interface{}) error {
 	var l transport.Provider
+
 	var err error
 
 	internalConfig := transport.InternalConfig{
-		Metric:         s.sysTree.Metric(),
-		Sessions:       s.sessionsMgr,
-		ConnectTimeout: s.MQTT.Options.ConnectTimeout,
-		KeepAlive:      s.MQTT.KeepAlive.Period,
+		Handler: s.sessionsMgr,
+		Metric:  s.sysTree.Metric(),
 	}
 
 	switch c := config.(type) {
@@ -262,34 +265,38 @@ func (s *server) Close() error {
 		}
 
 		if s.sessionsMgr != nil {
-			if s.Persistence != nil {
-				s.sessionsMgr.Shutdown() // nolint: errcheck, gas
-			}
+			s.sessionsMgr.Shutdown() // nolint: errcheck, gas
 		}
 
 		// shutdown systree updater
 		if s.systree.timer != nil {
 			s.systree.timer.Stop()
+			s.systree.wg.Wait()
 		}
 
-		if s.topicsMgr != nil {
-			s.topicsMgr.Close() // nolint: errcheck, gas
-		}
+		s.topicsMgr.Close() // nolint: errcheck, gas
 	})
 
 	return nil
 }
 
 func (s *server) systreeUpdater() {
-	for _, val := range s.systree.publishes {
-		p := val.Publish()
-		pkt := packet.NewPublish(packet.ProtocolV311)
+	defer func() {
+		s.systree.wg.Done()
+	}()
 
-		pkt.SetPayload(p.Payload())
-		pkt.SetTopic(p.Topic())  // nolint: errcheck
-		pkt.SetQoS(p.QoS())      // nolint: errcheck
-		s.topicsMgr.Publish(pkt) // nolint: errcheck
+	select {
+	case <-s.systree.timer.C:
+		for _, val := range s.systree.publishes {
+			p := val.Publish()
+			pkt := packet.NewPublish(packet.ProtocolV311)
+
+			pkt.SetPayload(p.Payload())
+			pkt.SetTopic(p.Topic())  // nolint: errcheck
+			pkt.SetQoS(p.QoS())      // nolint: errcheck
+			s.topicsMgr.Publish(pkt) // nolint: errcheck
+		}
+	case <-s.quit:
+		return
 	}
-
-	s.systree.timer.Reset(time.Duration(s.MQTT.Systree.UpdateInterval) * time.Second)
 }

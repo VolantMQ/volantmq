@@ -12,6 +12,21 @@ import (
 	"go.uber.org/zap"
 )
 
+func (s *impl) txShutdown() {
+	defer s.txLock.Unlock()
+	s.txLock.Lock()
+
+	atomic.StoreUint32(&s.txRunning, 0)
+	s.txTimer.Stop()
+	s.txWg.Wait()
+
+	select {
+	case <-s.txAvailable:
+	default:
+		close(s.txAvailable)
+	}
+}
+
 func (s *impl) gPushFront(pkt packet.Provider) {
 	s.txGLock.Lock()
 	s.txGMessages.PushFront(pkt)

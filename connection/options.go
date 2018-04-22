@@ -2,12 +2,11 @@ package connection
 
 import (
 	"errors"
-	"net"
 	"time"
 
 	"github.com/VolantMQ/mqttp"
 	"github.com/VolantMQ/volantmq/systree"
-	"github.com/troian/easygo/netpoll"
+	"github.com/VolantMQ/volantmq/transport"
 )
 
 type OnAuthCb func(string, *AuthParams) (packet.Provider, error)
@@ -33,8 +32,7 @@ func OfflineQoS0(val bool) Option {
 func KeepAlive(val int) Option {
 	return func(t *impl) error {
 		vl := time.Duration(val) * time.Second
-		vl = vl + (vl / 2)
-		t.keepAlive = vl
+		t.keepAlive = vl + (vl / 2)
 		return nil
 	}
 }
@@ -42,13 +40,6 @@ func KeepAlive(val int) Option {
 func Metric(val systree.PacketsMetric) Option {
 	return func(t *impl) error {
 		t.metric = val
-		return nil
-	}
-}
-
-func EPoll(val netpoll.EventPoll) Option {
-	return func(t *impl) error {
-		t.ePoll = val
 		return nil
 	}
 }
@@ -111,7 +102,7 @@ func OnAuth(val OnAuthCb) Option {
 	}
 }
 
-func NetConn(val net.Conn) Option {
+func NetConn(val transport.Conn) Option {
 	return func(t *impl) error {
 		if t.conn != nil {
 			return errors.New("already set")

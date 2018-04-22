@@ -16,6 +16,7 @@ type container struct {
 	expiry    atomic.Value
 	sub       *subscriber.Type
 	removable bool
+	removed   bool
 }
 
 //func (s *container) shutdown() bool {
@@ -37,11 +38,14 @@ func (s *container) release() {
 }
 
 func (s *container) session() *session {
+	defer s.rmLock.Unlock()
+	s.rmLock.Lock()
 	return s.ses
 }
 
 func (s *container) swap(from *container) *container {
 	s.ses = from.ses
+	//s.sub = from.sub
 
 	s.ses.idLock = &s.lock
 

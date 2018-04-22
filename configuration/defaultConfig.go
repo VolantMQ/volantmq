@@ -16,7 +16,7 @@ plugins:
         backend: simpleAuth
         config:
           users:
-            testuser: "e0d7d338cb1259086d775c964fba50b2a84244ba4cd2815e9f6f4a8d9daaa656" # password must be sha-256 hashed
+            testuser: "9f735e0df9a1ddc702bf0a1a7b83033f9f7153a00c29de82cedadc9957289b05" # password must be sha-256 hashed
 auth:
   defaultOrder:
     - internal
@@ -42,6 +42,8 @@ mqtt:
     maxPacketSize: 268435455
     maxTopicAlias: 65535
     maxQoS: 2
+  clientId:
+    regex: 
 listeners:
   defaultAddr: ""
   mqtt:

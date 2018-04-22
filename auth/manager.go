@@ -9,7 +9,8 @@ import (
 
 // Manager auth
 type Manager struct {
-	p []vlauth.Iface
+	p         []vlauth.Iface
+	anonymous bool
 }
 
 var providers = make(map[string]vlauth.Iface)
@@ -35,8 +36,10 @@ func UnRegister(name string) {
 }
 
 // NewManager new auth manager
-func NewManager(p []string) (*Manager, error) {
-	m := Manager{}
+func NewManager(p []string, allowAnonymous bool) (*Manager, error) {
+	m := Manager{
+		anonymous: allowAnonymous,
+	}
 
 	for _, pa := range p {
 		pvd, ok := providers[pa]
@@ -50,11 +53,23 @@ func NewManager(p []string) (*Manager, error) {
 	return &m, nil
 }
 
+func (m *Manager) AllowAnonymous() error {
+	if m.anonymous {
+		return vlauth.StatusAllow
+	}
+
+	return vlauth.StatusDeny
+}
+
 // Password authentication
 func (m *Manager) Password(user, password string) error {
-	for _, p := range m.p {
-		if status := p.Password(user, password); status == vlauth.StatusAllow {
-			return status
+	if user == "" && m.anonymous {
+		return vlauth.StatusAllow
+	} else {
+		for _, p := range m.p {
+			if status := p.Password(user, password); status == vlauth.StatusAllow {
+				return status
+			}
 		}
 	}
 

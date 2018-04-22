@@ -1,41 +1,22 @@
 package connection
 
 import (
-	"sync/atomic"
+	"time"
 
 	"github.com/VolantMQ/mqttp"
 	"go.uber.org/zap"
 )
 
-func (s *impl) txShutdown() {
-	atomic.StoreUint32(&s.txRunning, 2)
-	s.txTimer.Stop()
-	s.txWg.Wait()
-
-	select {
-	case <-s.txAvailable:
-	default:
-		close(s.txAvailable)
-	}
-}
-
-func (s *impl) rxShutdown() {
-	atomic.StoreUint32(&s.rxRunning, 0)
-	s.rxWg.Wait()
-}
-
 func (s *impl) onConnectionClose(status error) bool {
 	return s.onConnDisconnect.Do(func() {
-		s.keepAliveTimer.Stop()
 		// shutdown quit channel tells all routines finita la commedia
 		close(s.quit)
 
 		var err error
-		s.ePoll.Stop(s.desc)
+		//s.conn.Stop()
+		s.conn.SetReadDeadline(time.Time{})
 
-		if s.state != stateConnecting && s.state != stateAuth && s.state != stateConnectFailed {
-			s.SignalOffline()
-		} else if s.state == stateConnecting || s.state == stateAuth {
+		if s.state == stateConnecting || s.state == stateAuth {
 			select {
 			case <-s.connect:
 			default:
@@ -43,47 +24,43 @@ func (s *impl) onConnectionClose(status error) bool {
 			}
 		}
 
-		if err = s.conn.Close(); err != nil {
-			s.log.Error("close connection", zap.String("ClientID", s.id), zap.Error(err))
-		}
-
 		// clean up transmitter to allow send disconnect command to client if needed
 		s.txShutdown()
 
-		//if reason, ok := status.(packet.ReasonCode); ok &&
-		//	reason != packet.CodeSuccess && s.version >= packet.ProtocolV50 &&
-		//	s.state != stateConnecting && s.state != stateAuth && s.state != stateConnectFailed {
-		//	// server wants to tell client disconnect reason
-		//	pkt := packet.NewDisconnect(s.version)
-		//	pkt.SetReasonCode(reason)
-		//
-		//	var buf []byte
-		//	if buf, err = packet.Encode(pkt); err != nil {
-		//		s.log.Error("encode disconnect packet", zap.String("ClientID", s.id), zap.Error(err))
-		//	} else {
-		//		var written int
-		//		if written, err = s.conn.Write(buf); written != len(buf) {
-		//			s.log.Error("Couldn't write disconnect message",
-		//				zap.String("ClientID", s.id),
-		//				zap.Int("packet size", len(buf)),
-		//				zap.Int("written", written))
-		//		} else if err != nil {
-		//			s.log.Debug("Couldn't write disconnect message",
-		//				zap.String("ClientID", s.id),
-		//				zap.Error(err))
-		//		}
-		//	}
-		//}
+		if reason, ok := status.(packet.ReasonCode); ok &&
+			reason != packet.CodeSuccess && s.version >= packet.ProtocolV50 &&
+			s.state != stateConnecting && s.state != stateAuth && s.state != stateConnectFailed {
+			// server wants to tell client disconnect reason
+			pkt := packet.NewDisconnect(s.version)
+			pkt.SetReasonCode(reason)
 
-		if err = s.desc.Close(); err != nil {
-			s.log.Error("Close polling descriptor", zap.String("ClientID", s.id), zap.Error(err))
+			var buf []byte
+			if buf, err = packet.Encode(pkt); err != nil {
+				s.log.Error("encode disconnect packet", zap.String("ClientID", s.id), zap.Error(err))
+			} else {
+				var written int
+				if written, err = s.conn.Write(buf); written != len(buf) {
+					s.log.Error("Couldn't write disconnect message",
+						zap.String("ClientID", s.id),
+						zap.Int("packet size", len(buf)),
+						zap.Int("written", written))
+				} else if err != nil {
+					s.log.Debug("Couldn't write disconnect message",
+						zap.String("ClientID", s.id),
+						zap.Error(err))
+				}
+			}
 		}
 
+		if err = s.conn.Close(); err != nil {
+			s.log.Error("close connection", zap.String("ClientID", s.id), zap.Error(err))
+		}
 		s.rxShutdown()
 
 		s.conn = nil
 
 		if s.state != stateConnecting && s.state != stateAuth && s.state != stateConnectFailed {
+			s.SignalOffline()
 			params := DisconnectParams{
 				Packets: s.getQueuedPackets(),
 				Reason:  packet.CodeSuccess,

@@ -12,19 +12,11 @@ import (
 type connTCP struct {
 	conn net.Conn
 	stat systree.BytesMetric
+	//pollDesc
+	//timer *time.Timer
 }
 
-var _ conn = (*connTCP)(nil)
-
-// NewConnTCP initiate connection with net.Conn tcp object and stat
-func newConnTCP(conn net.Conn, stat systree.BytesMetric) (conn, error) {
-	c := &connTCP{
-		conn: conn,
-		stat: stat,
-	}
-
-	return c, nil
-}
+var _ Conn = (*connTCP)(nil)
 
 func (c *connTCP) Read(b []byte) (int, error) {
 	n, err := c.conn.Read(b)
@@ -42,6 +34,8 @@ func (c *connTCP) Write(b []byte) (int, error) {
 }
 
 func (c *connTCP) Close() error {
+	//c.ePoll.Stop(c.desc)
+	//c.desc.Close()
 	return c.conn.Close()
 }
 
@@ -58,7 +52,22 @@ func (c *connTCP) SetDeadline(t time.Time) error {
 }
 
 func (c *connTCP) SetReadDeadline(t time.Time) error {
+	//if t.IsZero() && c.timer != nil {
+	//	if !c.timer.Stop() {
+	//		return errors.New("keepAlive expired")
+	//	}
+	//} else {
+	//	if c.timer == nil {
+	//		c.timer = time.AfterFunc(t.Sub(time.Now()), c.keepAlive)
+	//	} else {
+	//		c.timer.Reset(t.Sub(time.Now()))
+	//	}
+	//}
 	return c.conn.SetReadDeadline(t)
+}
+
+func (c *connTCP) keepAlive() {
+	c.conn.Close()
 }
 
 func (c *connTCP) SetWriteDeadline(t time.Time) error {
@@ -66,8 +75,9 @@ func (c *connTCP) SetWriteDeadline(t time.Time) error {
 }
 
 func (c *connTCP) File() (*os.File, error) {
-	if conn, ok := c.conn.(*net.TCPConn); ok {
-		return conn.File()
+	switch t := c.conn.(type) {
+	case *net.TCPConn:
+		return t.File()
 	}
 
 	return nil, errors.New("not implemented")

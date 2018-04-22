@@ -29,8 +29,8 @@ import (
 	"github.com/VolantMQ/persistence"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/systree"
+	"github.com/VolantMQ/volantmq/transport"
 	"github.com/VolantMQ/volantmq/types"
-	"github.com/troian/easygo/netpoll"
 	"go.uber.org/zap"
 )
 
@@ -126,12 +126,14 @@ type WillConfig struct {
 	QoS     packet.QosType
 }
 
+// AuthParams ...
 type AuthParams struct {
 	AuthMethod string
 	AuthData   []byte
 	Reason     packet.ReasonCode
 }
 
+// ConnectParams ...
 type ConnectParams struct {
 	AuthParams
 	ID              string
@@ -150,6 +152,7 @@ type ConnectParams struct {
 	Version         packet.ProtocolVersion
 }
 
+// SessionCallbacks ...
 type SessionCallbacks interface {
 	SignalPublish(*packet.Publish) error
 	SignalSubscribe(*packet.Subscribe) (packet.Provider, error)
@@ -177,6 +180,7 @@ type tx struct {
 	txQMessages     list.List
 	txGLock         sync.Mutex
 	txQLock         sync.Mutex
+	txLock          sync.Mutex
 	txTopicAlias    map[string]uint16
 	txWg            sync.WaitGroup
 	txTimer         *time.Timer
@@ -184,16 +188,13 @@ type tx struct {
 	txAvailable     chan int
 	txQuotaExceeded bool
 }
-
 type rx struct {
-	desc           *netpoll.Desc
-	rxWg           sync.WaitGroup
-	rxTopicAlias   map[uint16]string
-	rxRecv         []byte
-	keepAlive      time.Duration
-	keepAliveTimer *time.Timer
-	rxRunning      uint32
-	rxRemaining    int
+	rxWg         sync.WaitGroup
+	connWg       sync.WaitGroup
+	rxTopicAlias map[uint16]string
+	rxRecv       []byte
+	keepAlive    time.Duration
+	rxRemaining  int
 }
 
 // impl of the connection
@@ -201,8 +202,7 @@ type impl struct {
 	SessionCallbacks
 	id         string
 	metric     systree.PacketsMetric
-	conn       net.Conn
-	ePoll      netpoll.EventPoll
+	conn       transport.Conn
 	signalAuth OnAuthCb
 	ackQueues
 	tx
@@ -214,7 +214,6 @@ type impl struct {
 	onConnDisconnect  types.OnceWait
 	started           sync.WaitGroup
 	log               *zap.SugaredLogger
-	keepAlive         time.Duration
 	authMethod        string
 	connectProcessed  uint32
 	maxRxPacketSize   uint32
@@ -234,6 +233,7 @@ type unacknowledged struct {
 	packet packet.Provider
 }
 
+// Size ...
 func (u *unacknowledged) Size() (int, error) {
 	return u.packet.Size()
 }
@@ -246,20 +246,23 @@ type baseAPI interface {
 	Stop(error) bool
 }
 
+// Initial ...
 type Initial interface {
 	baseAPI
 	Accept() (chan interface{}, error)
-	Send(packet.Provider)
+	Send(packet.Provider) error
 	Acknowledge(p *packet.ConnAck, opts ...Option) bool
 	Session() Session
 }
 
+// Session ...
 type Session interface {
 	baseAPI
 	persistence.PacketLoader
 	Publish(string, *packet.Publish)
 	LoadRemaining(g, q *list.List)
 	SetOptions(opts ...Option) error
+	Start() error
 }
 
 var _ Initial = (*impl)(nil)
@@ -293,40 +296,93 @@ func New(opts ...Option) Initial {
 
 // Accept start handling incoming connection
 func (s *impl) Accept() (chan interface{}, error) {
+	var err error
+
+	defer func() {
+		if err != nil {
+			close(s.connect)
+			s.conn.Close()
+		}
+	}()
 	s.connect = make(chan interface{})
 
-	s.desc = netpoll.Must(netpoll.HandleReadOnce(s.conn))
-	s.keepAliveTimer = time.AfterFunc(time.Duration(s.keepAlive), s.keepAliveFired)
-
-	if err := s.ePoll.Start(s.desc, s.rxConnection); err != nil {
-		close(s.connect)
-		return nil, err
-	}
+	s.rxConnection()
 
 	return s.connect, nil
 }
+
+//func (s *impl) Accept() (chan interface{}, error) {
+//	var err error
+//
+//	defer func() {
+//		if err != nil {
+//			close(s.connect)
+//			s.conn.Close()
+//		}
+//	}()
+//	s.connect = make(chan interface{})
+//
+//	if s.keepAlive > 0 {
+//		if err = s.conn.SetReadDeadline(time.Now().Add(s.keepAlive)); err != nil {
+//			return nil, err
+//		}
+//	}
+//
+//	if err = s.conn.Start(s.rxConnection); err != nil {
+//		return nil, err
+//	}
+//
+//	return s.connect, nil
+//}
 
 // Session object
 func (s *impl) Session() Session {
 	return s
 }
 
+func (s *impl) Start() error {
+	defer s.txLock.Unlock()
+	s.txLock.Lock()
+
+	s.txRun()
+
+	return nil
+}
+
 // Send packet to connection
-func (s *impl) Send(pkt packet.Provider) {
+func (s *impl) Send(pkt packet.Provider) (err error) {
+	defer func() {
+		if err != nil {
+			close(s.connect)
+			s.conn.Close()
+		}
+	}()
+
 	if pkt.Type() == packet.AUTH {
 		s.state = stateAuth
 	}
 
-	s.runKeepAlive()
 	s.gPush(pkt)
 
-	s.ePoll.Resume(s.desc)
+	s.rxConnection()
+
+	//if s.keepAlive.Nanoseconds() > 0 {
+	//	if err = s.conn.SetReadDeadline(time.Now().Add(s.keepAlive)); err != nil {
+	//		s.connect <- err
+	//		return
+	//	}
+	//}
+	//
+	//return s.conn.Resume()
+	return nil
 }
 
 // Acknowledge incoming connection
 func (s *impl) Acknowledge(p *packet.ConnAck, opts ...Option) bool {
 	ack := true
-	s.ePoll.Stop(s.desc)
+	s.conn.SetReadDeadline(time.Time{})
+	//s.conn.Stop()
+	s.connWg.Wait()
 
 	close(s.connect)
 
@@ -337,21 +393,27 @@ func (s *impl) Acknowledge(p *packet.ConnAck, opts ...Option) bool {
 			opt(s)
 		}
 
-		s.runKeepAlive()
-		if err := s.ePoll.Start(s.desc, s.rxRun); err != nil {
-			s.log.Error("Cannot start receiver", zap.String("ClientID", s.id), zap.Error(err))
-			s.state = stateConnectFailed
-			ack = false
-		}
+		//if s.keepAlive > 0 {
+		//	s.conn.SetReadDeadline(time.Now().Add(s.keepAlive))
+		//}
+		//if err := s.conn.Start(s.rxRun); err != nil {
+		//	s.log.Error("Cannot start receiver", zap.String("ClientID", s.id), zap.Error(err))
+		//	s.state = stateConnectFailed
+		//	ack = false
+		//}
 	} else {
 		s.state = stateConnectFailed
 		ack = false
 	}
 
-	s.gPushFront(p)
+	buf, _ := packet.Encode(p)
+	bufs := net.Buffers{buf}
+	bufs.WriteTo(s.conn)
 
 	if !ack {
 		s.Stop(nil)
+	} else {
+		s.rxRun()
 	}
 
 	return ack
@@ -364,6 +426,7 @@ func (s *impl) Stop(reason error) bool {
 	return s.onConnectionClose(reason)
 }
 
+// LoadRemaining ...
 func (s *impl) LoadRemaining(g, q *list.List) {
 	select {
 	case <-s.quit:
@@ -374,48 +437,50 @@ func (s *impl) LoadRemaining(g, q *list.List) {
 	s.qLoadList(q)
 }
 
+// LoadPersistedPacket ...
 func (s *impl) LoadPersistedPacket(entry *persistence.PersistedPacket) error {
-	//var err error
-	//var pkt packet.Provider
-	//
-	//if pkt, _, err = packet.Decode(s.version, entry.Data); err != nil {
-	//	s.log.Error("Couldn't decode persisted message", zap.Error(err))
-	//	return ErrPersistence
-	//}
+	var err error
+	var pkt packet.Provider
 
-	//if entry.UnAck {
-	//	switch p := pkt.(type) {
-	//	case *packet.Publish:
-	//		id, _ := p.ID()
-	//		s.flowReAcquire(id)
-	//	case *packet.Ack:
-	//		id, _ := p.ID()
-	//		s.flowReAcquire(id)
-	//	}
-	//
-	//	s.qLoad(&unacknowledged{packet: pkt})
-	//} else {
-	//	if p, ok := pkt.(*packet.Publish); ok {
-	//		if len(entry.ExpireAt) > 0 {
-	//			var tm time.Time
-	//			if tm, err = time.Parse(time.RFC3339, entry.ExpireAt); err == nil {
-	//				p.SetExpireAt(tm)
-	//			} else {
-	//				s.log.Error("Parse publish expiry", zap.String("ClientID", s.id), zap.Error(err))
-	//			}
-	//		}
-	//
-	//		if p.QoS() == packet.QoS0 {
-	//			s.gLoad(pkt)
-	//		} else {
-	//			s.qLoad(pkt)
-	//		}
-	//	}
-	//}
+	if pkt, _, err = packet.Decode(s.version, entry.Data); err != nil {
+		s.log.Error("Couldn't decode persisted message", zap.Error(err))
+		return ErrPersistence
+	}
+
+	if entry.Flags.UnAck {
+		switch p := pkt.(type) {
+		case *packet.Publish:
+			id, _ := p.ID()
+			s.flowReAcquire(id)
+		case *packet.Ack:
+			id, _ := p.ID()
+			s.flowReAcquire(id)
+		}
+
+		s.qLoad(&unacknowledged{packet: pkt})
+	} else {
+		if p, ok := pkt.(*packet.Publish); ok {
+			if len(entry.ExpireAt) > 0 {
+				var tm time.Time
+				if tm, err = time.Parse(time.RFC3339, entry.ExpireAt); err == nil {
+					p.SetExpireAt(tm)
+				} else {
+					s.log.Error("Parse publish expiry", zap.String("ClientID", s.id), zap.Error(err))
+				}
+			}
+
+			if p.QoS() == packet.QoS0 {
+				s.gLoad(pkt)
+			} else {
+				s.qLoad(pkt)
+			}
+		}
+	}
 
 	return nil
 }
 
+// Publish ...
 func (s *impl) Publish(id string, pkt *packet.Publish) {
 	if pkt.QoS() == packet.QoS0 {
 		s.gPush(pkt)
@@ -468,6 +533,7 @@ func (s *impl) onConnect(pkt *packet.Connect) (packet.Provider, error) {
 			Durable:    true,
 		}
 
+		params.Username, params.Password = pkt.Credentials()
 		s.version = params.Version
 
 		s.readConnProperties(pkt, params)
@@ -617,7 +683,7 @@ func (s *impl) processIncoming(p packet.Provider) error {
 	//                   the Client MUST NOT send any packets other than AUTH or DISCONNECT packets
 	//                   until it has received a CONNACK packet
 	if _, ok := expectedPacketType[s.state][p.Type()]; !ok {
-		s.log.Info("Unexpected packet for current state",
+		s.log.Debug("Unexpected packet for current state",
 			zap.String("ClientID", s.id),
 			zap.String("state", s.state.desc()),
 			zap.String("packet", p.Type().Name()))
@@ -654,70 +720,72 @@ func (s *impl) processIncoming(p packet.Provider) error {
 func (s *impl) getQueuedPackets() persistence.PersistedPackets {
 	var packets persistence.PersistedPackets
 
-	//packetEncode := func(p interface{}) {
-	//	var pkt packet.Provider
-	//	pPkt := &persistence.PersistedPacket{UnAck: false}
-	//
-	//	switch tp := p.(type) {
-	//	case *packet.Publish:
-	//		if expireAt, _, expired := tp.Expired(); expired && (s.offlineQoS0 || tp.QoS() != packet.QoS0) {
-	//			if !expireAt.IsZero() {
-	//				pPkt.ExpireAt = expireAt.Format(time.RFC3339)
-	//			}
-	//
-	//			if tp.QoS() != packet.QoS0 {
-	//				// make sure message has some IDType to prevent encode error
-	//				tp.SetPacketID(0)
-	//			}
-	//
-	//			pkt = tp
-	//		}
-	//	case *unacknowledged:
-	//		if pb, ok := tp.packet.(*packet.Publish); ok && pb.QoS() == packet.QoS1 {
-	//			pb.SetDup(true)
-	//		}
-	//
-	//		pkt = tp.packet
-	//		pPkt.UnAck = true
-	//	}
-	//
-	//	if pkt != nil {
-	//		var err error
-	//		if pPkt.Data, err = packet.Encode(pkt); err != nil {
-	//			s.log.Error("Couldn't encode message for persistence", zap.Error(err))
-	//		} else {
-	//			packets = append(packets, pPkt)
-	//		}
-	//	}
-	//}
+	packetEncode := func(p interface{}) {
+		var pkt packet.Provider
+		pPkt := &persistence.PersistedPacket{}
 
-	//var next *list.Element
-	//for elem := s.txQMessages.Front(); elem != nil; elem = next {
-	//	next = elem.Next()
-	//	packetEncode(s.txQMessages.Remove(elem))
-	//}
-	//
-	//for elem := s.txGMessages.Front(); elem != nil; elem = next {
-	//	next = elem.Next()
-	//	switch tp := s.txGMessages.Remove(elem).(type) {
-	//	case *packet.Publish:
-	//		packetEncode(tp)
-	//	}
-	//}
-	//
-	//s.pubOut.messages.Range(func(k, v interface{}) bool {
-	//	if pkt, ok := v.(packet.Provider); ok {
-	//		packetEncode(&unacknowledged{packet: pkt})
-	//	}
-	//
-	//	s.pubOut.messages.Delete(k)
-	//	return true
-	//})
-	//
-	//s.pubIn.messages.Range(func(k, v interface{}) bool {
-	//	s.pubIn.messages.Delete(k)
-	//	return true
-	//})
+		pPkt.Flags.UnAck = false
+
+		switch tp := p.(type) {
+		case *packet.Publish:
+			if expireAt, _, expired := tp.Expired(); expired && (s.offlineQoS0 || tp.QoS() != packet.QoS0) {
+				if !expireAt.IsZero() {
+					pPkt.ExpireAt = expireAt.Format(time.RFC3339)
+				}
+
+				if tp.QoS() != packet.QoS0 {
+					// make sure message has some IDType to prevent encode error
+					tp.SetPacketID(0)
+				}
+
+				pkt = tp
+			}
+		case *unacknowledged:
+			if pb, ok := tp.packet.(*packet.Publish); ok && pb.QoS() == packet.QoS1 {
+				pb.SetDup(true)
+			}
+
+			pkt = tp.packet
+			pPkt.Flags.UnAck = true
+		}
+
+		if pkt != nil {
+			var err error
+			if pPkt.Data, err = packet.Encode(pkt); err != nil {
+				s.log.Error("Couldn't encode message for persistence", zap.Error(err))
+			} else {
+				packets = append(packets, pPkt)
+			}
+		}
+	}
+
+	var next *list.Element
+	for elem := s.txQMessages.Front(); elem != nil; elem = next {
+		next = elem.Next()
+		packetEncode(s.txQMessages.Remove(elem))
+	}
+
+	for elem := s.txGMessages.Front(); elem != nil; elem = next {
+		next = elem.Next()
+		switch tp := s.txGMessages.Remove(elem).(type) {
+		case *packet.Publish:
+			packetEncode(tp)
+		}
+	}
+
+	s.pubOut.messages.Range(func(k, v interface{}) bool {
+		if pkt, ok := v.(packet.Provider); ok {
+			packetEncode(&unacknowledged{packet: pkt})
+		}
+
+		s.pubOut.messages.Delete(k)
+		return true
+	})
+
+	s.pubIn.messages.Range(func(k, v interface{}) bool {
+		s.pubIn.messages.Delete(k)
+		return true
+	})
 
 	return packets
 }
@@ -738,7 +806,12 @@ func (s *impl) publishToTopic(p *packet.Publish) error {
 				} else {
 					if topic, kk := s.rxTopicAlias[val]; kk {
 						// do not check for error as topic has been validated when arrived
-						p.SetTopic(topic) // nolint: errcheck
+						if err = p.SetTopic(topic); err != nil {
+							s.log.Error("publish to topic",
+								zap.String("ClientID", s.id),
+								zap.String("topic", topic),
+								zap.Error(err))
+						}
 					} else {
 						return packet.CodeInvalidTopicAlias
 					}

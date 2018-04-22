@@ -3,82 +3,125 @@ package connection
 import (
 	"bufio"
 	"encoding/binary"
-	"errors"
-	"sync/atomic"
+	"time"
 
 	"github.com/VolantMQ/mqttp"
-	"github.com/troian/easygo/netpoll"
 )
 
-func (s *impl) rxRun(event netpoll.Event) {
-	if atomic.CompareAndSwapUint32(&s.rxRunning, 0, 1) {
-		mask := netpoll.EventHup | netpoll.EventReadHup | netpoll.EventWriteHup | netpoll.EventErr | netpoll.EventPollClosed
-		if (event & mask) != 0 {
-			go s.onConnectionClose(nil)
-		} else {
-			go func() {
-				s.rxWg.Wait()
-				s.rxWg.Add(1)
-				s.rxRoutine()
-			}()
-		}
-	}
+func (s *impl) rxShutdown() {
+	s.rxWg.Wait()
 }
 
-func (s *impl) rxConnection(event netpoll.Event) {
-	mask := netpoll.EventHup | netpoll.EventReadHup | netpoll.EventWriteHup | netpoll.EventErr | netpoll.EventPollClosed
-	if (event & mask) != 0 {
-		go func() {
-			s.connect <- errors.New("disconnected")
-		}()
-	} else {
-		go func() {
-			s.connectionRoutine()
-		}()
-	}
+func (s *impl) rxRun() {
+	s.rxWg.Add(1)
+	go s.rxRoutine()
 }
+
+//func (s *impl) rxRun(events netpoll.Event) {
+//	mask := netpoll.EventHup | netpoll.EventReadHup | netpoll.EventWriteHup | netpoll.EventErr | netpoll.EventPollClosed
+//	if (events & mask) != 0 {
+//		go s.onConnectionClose(nil)
+//	} else {
+//		s.rxWg.Wait()
+//		s.rxWg.Add(1)
+//		go s.rxRoutine()
+//	}
+//}
+
+func (s *impl) rxConnection() {
+	s.connWg.Wait()
+	s.connWg.Add(1)
+	go s.connectionRoutine()
+}
+
+//func (s *impl) rxConnection(events netpoll.Event) {
+//	mask := netpoll.EventHup | netpoll.EventReadHup | netpoll.EventWriteHup | netpoll.EventErr | netpoll.EventPollClosed
+//	if (events & mask) != 0 {
+//		go func() {
+//			s.connect <- errors.New("disconnected")
+//		}()
+//	} else {
+//		s.connWg.Wait()
+//		s.connWg.Add(1)
+//		go s.connectionRoutine()
+//	}
+//}
 
 func (s *impl) rxRoutine() {
 	var err error
 
 	defer func() {
 		s.rxWg.Done()
-		if err != nil {
-			s.onConnectionClose(err)
-		}
+		s.onConnectionClose(err)
 	}()
 
 	buf := bufio.NewReader(s.conn)
 
-	for atomic.LoadUint32(&s.rxRunning) == 1 {
-		s.runKeepAlive()
-
+	for {
 		var pkt packet.Provider
-		if pkt, err = s.readPacket(buf); err == nil {
-			s.metric.Received(pkt.Type())
-			err = s.processIncoming(pkt)
+
+		if s.keepAlive.Nanoseconds() > 0 {
+			if err = s.conn.SetReadDeadline(time.Now().Add(s.keepAlive)); err != nil {
+				return
+			}
 		}
 
-		if err != nil {
-			atomic.StoreUint32(&s.rxRunning, 0)
-			break
+		if pkt, err = s.readPacket(buf); err != nil {
+			return
+		}
+
+		s.metric.Received(pkt.Type())
+		if err = s.processIncoming(pkt); err != nil {
+			return
 		}
 	}
-
-	if _, ok := err.(packet.ReasonCode); ok {
-		return
-	}
-
-	err = s.ePoll.Resume(s.desc)
 }
 
+//func (s *impl) rxRoutine() {
+//	var err error
+//
+//	defer func() {
+//		s.rxWg.Done()
+//		if err != nil {
+//			s.onConnectionClose(err)
+//		}
+//	}()
+//
+//	buf := bufio.NewReader(s.conn)
+//
+//	var pkt packet.Provider
+//
+//	if pkt, err = s.readPacket(buf); err != nil {
+//		return
+//	}
+//
+//	s.metric.Received(pkt.Type())
+//	if err = s.processIncoming(pkt); err != nil {
+//		return
+//	}
+//
+//	if s.keepAlive > 0 {
+//		if err = s.conn.SetReadDeadline(time.Now().Add(s.keepAlive)); err != nil {
+//			return
+//		}
+//	}
+//
+//	err = s.conn.Resume()
+//}
+
 func (s *impl) connectionRoutine() {
+	defer s.connWg.Done()
+
+	if s.keepAlive.Nanoseconds() > 0 {
+		if err := s.conn.SetReadDeadline(time.Now().Add(s.keepAlive)); err != nil {
+			s.connect <- err
+			return
+		}
+	}
+
 	buf := bufio.NewReader(s.conn)
 
-	pkt, err := s.readPacket(buf)
-
-	s.keepAliveTimer.Stop()
-	if err == nil {
+	if pkt, err := s.readPacket(buf); err == nil {
 		s.metric.Received(pkt.Type())
 		err = s.processIncoming(pkt)
 	} else {

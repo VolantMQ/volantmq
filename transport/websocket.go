@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/VolantMQ/volantmq/configuration"
+	"github.com/VolantMQ/volantmq/systree"
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
 )
@@ -91,6 +92,16 @@ func (s *httpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
+// NewConnWs initiate connection with websocket.Conn ws object and stat
+func (l *ws) newConnWs(conn *websocket.Conn, stat systree.BytesMetric) (Conn, error) {
+	c := &connWs{
+		conn: conn,
+		stat: stat,
+	}
+
+	return c, nil
+}
+
 func (l *ws) serveWs(w http.ResponseWriter, r *http.Request) {
 	cn, err := l.up.Upgrade(w, r, nil)
 	if err != nil {
@@ -100,12 +111,12 @@ func (l *ws) serveWs(w http.ResponseWriter, r *http.Request) {
 
 	l.onConnection.Add(1)
 	go func(cn *websocket.Conn) {
-		defer l.onConnection.Done()
-		if inConn, e := newConnWs(cn, l.Metric.Bytes()); e != nil {
-			l.log.Error("Couldn't create connection interface", zap.Error(e))
-		} else {
-			l.handleConnection(inConn)
-		}
+		//defer l.onConnection.Done()
+		//if inConn, e := newConnWs(cn, l.Metric.Bytes()); e != nil {
+		//	l.log.Error("Couldn't create connection interface", zap.Error(e))
+		//} else {
+		//	l.handleConnection(inConn)
+		//}
 	}(cn)
 }
 

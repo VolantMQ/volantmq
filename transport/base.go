@@ -4,8 +4,8 @@ import (
 	"sync"
 
 	"github.com/VolantMQ/volantmq/auth"
-	"github.com/VolantMQ/volantmq/clients"
 	"github.com/VolantMQ/volantmq/systree"
+	"github.com/troian/easygo/netpoll"
 	"go.uber.org/zap"
 )
 
@@ -21,17 +21,9 @@ type Config struct {
 
 // InternalConfig used by server implementation to configure internal specific needs
 type InternalConfig struct {
-	Sessions *clients.Manager
-
+	Handler
+	netpoll.EventPoll
 	Metric systree.Metric
-
-	// ConnectTimeout The number of seconds to wait for the CONNACK message before disconnecting.
-	// If not set then default to 2 seconds.
-	ConnectTimeout int
-
-	// KeepAlive The number of seconds to keep the connection live if there's no data.
-	// If not set then defaults to 5 minutes.
-	KeepAlive int
 }
 
 type baseConfig struct {
@@ -63,12 +55,19 @@ func (c *baseConfig) Protocol() string {
 }
 
 // handleConnection is for the broker to handle an incoming connection from a client
-func (c *baseConfig) handleConnection(conn conn) {
+func (c *baseConfig) handleConnection(conn Conn) {
 	if c == nil {
 		c.log.Error("Invalid connection type")
 		return
 	}
 
+	var err error
+
+	defer func() {
+		if err != nil {
+			conn.Close()
+		}
+	}()
 	// To establish a connection, we must
 	// 1. Read and decode the message.ConnectMessage from the wire
 	// 2. If no decoding errors, then authenticate using username and password.
@@ -81,9 +80,7 @@ func (c *baseConfig) handleConnection(conn conn) {
 	// Read the CONNECT message from the wire, if error, then check to see if it's
 	// a CONNACK error. If it's CONNACK error, send the proper CONNACK error back
 	// to client. Exit regardless of error type.
-	// conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(c.ConnectTimeout))) // nolint: errcheck, gas
+	//conn.Conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(c.ConnectTimeout))) // nolint: errcheck, gas
 
-	if err := c.Sessions.Handle(conn, c.config.AuthManager); err != nil {
-		conn.Close() // nolint: errcheck, gas
-	}
+	err = c.OnConnection(conn, c.config.AuthManager)
 }

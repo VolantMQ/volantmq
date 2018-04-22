@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/VolantMQ/volantmq/configuration"
+	"github.com/VolantMQ/volantmq/systree"
 	"go.uber.org/zap"
 )
 
@@ -18,7 +19,7 @@ type ConfigTCP struct {
 
 type tcp struct {
 	baseConfig
-
+	tls      *tls.Config
 	listener net.Listener
 }
 
@@ -38,20 +39,19 @@ func NewTCP(config *ConfigTCP, internal *InternalConfig) (Provider, error) {
 	l.quit = make(chan struct{})
 	l.InternalConfig = *internal
 	l.config = *config.transport
+	l.tls = config.TLS
 
 	var err error
-	var ln net.Listener
 
-	if ln, err = net.Listen(config.Scheme, config.transport.Host+":"+config.transport.Port); err != nil {
+	if l.listener, err = net.Listen(config.Scheme, config.transport.Host+":"+config.transport.Port); err != nil {
 		return nil, err
 	}
 
-	if config.TLS != nil {
+	if l.tls != nil {
 		l.protocol = "ssl"
-		l.listener = tls.NewListener(ln, config.TLS)
 	} else {
 		l.protocol = "tcp"
-		l.listener = ln
+
 	}
 
 	l.log = configuration.GetLogger().Named("listener: " + l.protocol + "://:" + config.transport.Port)
@@ -74,6 +74,29 @@ func (l *tcp) Close() error {
 	})
 
 	return err
+}
+
+// newConnTCP initiate connection with net.Conn tcp object and stat
+func (l *tcp) newConnTCP(conn net.Conn, stat systree.BytesMetric) (Conn, error) {
+	//desc, err := netpoll.HandleReadOnce(conn)
+	//if err != nil {
+	//	return nil, err
+	//}
+
+	newConn := &connTCP{
+		conn: conn,
+		stat: stat,
+		//pollDesc: pollDesc{
+		//	desc:  desc,
+		//	ePoll: l.EventPoll,
+		//},
+	}
+
+	if l.tls != nil {
+		newConn.conn = tls.Server(conn, l.tls)
+	}
+
+	return newConn, nil
 }
 
 // Serve start serving connections
@@ -116,7 +139,7 @@ func (l *tcp) Serve() error {
 		go func(cn net.Conn) {
 			defer l.onConnection.Done()
 
-			if inConn, e := newConnTCP(cn, l.Metric.Bytes()); e != nil {
+			if inConn, e := l.newConnTCP(cn, l.Metric.Bytes()); e != nil {
 				l.log.Error("Couldn't create connection interface", zap.Error(e))
 			} else {
 				l.handleConnection(inConn)
