@@ -340,6 +340,7 @@ func (m *Manager) processConnect(cn connection.Initial, params *connection.Conne
 		// TODO(troian): verify method is allowed
 	} else {
 		var reason packet.ReasonCode
+
 		if status := authMngr.Password(string(params.Username), string(params.Password)); status == vlauth.StatusAllow {
 			reason = packet.CodeSuccess
 		} else {

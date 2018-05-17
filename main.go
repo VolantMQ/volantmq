@@ -149,7 +149,7 @@ func loadAuth(cfg *configuration.Config, plTypes pluginTypes) (*auth.Manager, er
 	}
 
 	if len(cfg.Auth.Order) == 0 {
-		logger.Fatalf("\tdefault auth order should not be empty auth.defaultOrder")
+		logger.Fatalf("\tdefault auth order should not be empty auth.Order")
 		return nil, errors.New("")
 	}
 
@@ -397,7 +397,7 @@ func main() {
 	if err == nil {
 		if config.System.Profiler.Port != "" {
 			profServer = &http.Server{
-				Addr: "localhost:" + config.System.Profiler.Port,
+				Addr: ":" + config.System.Profiler.Port,
 			}
 
 			logger.Info("profiler: serving at: ", "http://"+profServer.Addr+"/debug/pprof")
