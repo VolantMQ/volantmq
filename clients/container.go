@@ -45,7 +45,7 @@ func (s *container) session() *session {
 
 func (s *container) swap(from *container) *container {
 	s.ses = from.ses
-	//s.sub = from.sub
+	s.sub = from.sub
 
 	s.ses.idLock = &s.lock
 

@@ -45,6 +45,7 @@ func loadMqttListeners(defaultAuth *auth.Manager, lCfg *configuration.ListenersC
 				host = cfg.Host
 			}
 
+			logger.Infof("host: %s", host)
 			tCfg := &transport.Config{
 				Host:        host,
 				Port:        port,

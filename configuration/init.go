@@ -5,8 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 type config struct {
@@ -37,10 +39,13 @@ func init() {
 
 	logCfg.DisableStacktrace = true
 	logCfg.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
-	logCfg.EncoderConfig.TimeKey = ""
 	logCfg.EncoderConfig.LevelKey = ""
 	logCfg.EncoderConfig.CallerKey = ""
 	logCfg.Encoding = "console"
+	logCfg.EncoderConfig.EncodeTime = func(t time.Time, encoder zapcore.PrimitiveArrayEncoder) {
+		encoder.AppendString(t.Format(time.RFC3339))
+	}
+
 	log, _ := logCfg.Build()
 
 	cfg.humanLog = log.Sugar()
@@ -49,7 +54,10 @@ func init() {
 
 	logCfg.DisableStacktrace = true
 	logCfg.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
-	logCfg.EncoderConfig.TimeKey = ""
+	logCfg.EncoderConfig.EncodeTime = func(t time.Time, encoder zapcore.PrimitiveArrayEncoder) {
+		encoder.AppendString(t.Format(time.RFC3339))
+	}
+
 	logCfg.Encoding = "console"
 	log, _ = logCfg.Build()
 
