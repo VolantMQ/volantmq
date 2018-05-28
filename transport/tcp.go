@@ -43,7 +43,7 @@ func NewTCP(config *ConfigTCP, internal *InternalConfig) (Provider, error) {
 
 	var err error
 
-	if l.listener, err = net.Listen(config.Scheme, ":"+config.transport.Port); err != nil {
+	if l.listener, err = net.Listen(config.Scheme, config.transport.Host+":"+config.transport.Port); err != nil {
 		return nil, err
 	}
 

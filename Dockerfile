@@ -1,4 +1,4 @@
-FROM golang:1.10.0
+FROM golang:1.10.2
 
 ENV \
     VOLANTMQ_WORK_DIR=/var/lib/volantmq \
@@ -8,10 +8,10 @@ ENV \
 RUN groupadd -r volantmq && useradd -r -d $VOLANTMQ_WORK_DIR -m -g volantmq volantmq
 
 # Create environment directory
-ENV PATH /usr/lib/rabbitmq/bin:$PATH
+ENV PATH /usr/lib/volantmq/bin:$PATH
 
 RUN mkdir -p $VOLANTMQ_WORK_DIR/{plugins,logs}; \
-    mkdir -p /usr/lib/rabbitmq/bin
+    mkdir -p /usr/lib/volantmq/bin
 
 # install dep tool
 RUN curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
@@ -19,7 +19,7 @@ RUN curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
 RUN go get github.com/VolantMQ/volantmq && \
     cd $GOPATH/src/github.com/VolantMQ/volantmq && \
     go build $VOLANTMQ_BUILD_FLAGS && \
-    cp volantmq /usr/lib/rabbitmq/bin/ && \
+    cp volantmq /usr/lib/volantmq/bin/ && \
     go get github.com/VolantMQ/persistence-boltdb && \
     cd $GOPATH/src/github.com/VolantMQ/persistence-boltdb && \
     go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -o $VOLANTMQ_WORK_DIR/plugins/persistence_boltdb.so && \
