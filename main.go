@@ -9,6 +9,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/VolantMQ/persistence"
@@ -113,7 +114,7 @@ func configureSimpleAuth(cfg interface{}) (vlauth.Iface, error) {
 
 	if list, kk := authConfig["users"].(map[interface{}]interface{}); kk {
 		for u, p := range list {
-			sAuth.addUser(u.(string), p.(string))
+			sAuth.addUser(u.(string), strings.ToLower(p.(string)))
 		}
 	}
 

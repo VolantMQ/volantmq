@@ -88,8 +88,8 @@
 [[projects]]
   name = "go.uber.org/atomic"
   packages = ["."]
-  revision = "8474b86a5a6f79c443ce4b2992817ff32cf208b8"
-  version = "v1.3.1"
+  revision = "1ea20fb1cbb1cc08cbd0d913a96dead89aa18289"
+  version = "v1.3.2"
 
 [[projects]]
   name = "go.uber.org/multierr"
@@ -114,7 +114,7 @@
   branch = "master"
   name = "golang.org/x/sys"
   packages = ["unix"]
-  revision = "a2a45943ae67364d56c5d7d62dee78cff16c8dc8"
+  revision = "c11f84a56e43e20a78cee75a7c034031ecf57d1f"
 
 [[projects]]
   name = "gopkg.in/yaml.v2"
@@ -125,6 +125,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "fb66031f4d90a2b06fa1def3e7f91acb615d63027424c75bddff114aa9b75c05"
+  inputs-digest = "e6bc98856cd72cc36715cf5c9ca106f1ebdff9661780051ae93b5f5a6b1b3bda"
   solver-name = "gps-cdcl"
   solver-version = 1
