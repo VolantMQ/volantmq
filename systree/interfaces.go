@@ -1,7 +1,7 @@
 package systree
 
 import (
-	"github.com/VolantMQ/mqttp"
+	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/VolantMQ/volantmq/types"
 )
 
@@ -23,8 +23,8 @@ type Metric interface {
 
 // PacketsMetric packets metric
 type PacketsMetric interface {
-	Sent(t packet.Type)
-	Received(t packet.Type)
+	Sent(t mqttp.Type)
+	Received(t mqttp.Type)
 }
 
 // BytesMetric bytes metric
@@ -42,7 +42,7 @@ type Sessions interface {
 // Clients Statistic of sessions
 type Clients interface {
 	Connected(id string, status *ClientConnectStatus)
-	Disconnected(id string, reason packet.ReasonCode)
+	Disconnected(id string, reason mqttp.ReasonCode)
 }
 
 // TopicsStat statistic of topics

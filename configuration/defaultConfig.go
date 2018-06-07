@@ -9,6 +9,8 @@ system:
     console:
       config:
         level: info # available levels: debug, info, warn, error, dpanic, panic, fatal
+  http:
+    defaultPort: 8086
 plugins:
   config:
     auth: # plugin type

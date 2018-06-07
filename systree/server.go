@@ -3,7 +3,7 @@ package systree
 import (
 	"encoding/json"
 
-	"github.com/VolantMQ/mqttp"
+	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/VolantMQ/volantmq/types"
 )
 
@@ -12,7 +12,7 @@ type server struct {
 	upTime       *dynamicValueUpTime
 	currTime     *dynamicValueCurrentTime
 	capabilities struct {
-		SupportedVersions             []packet.ProtocolVersion
+		SupportedVersions             []mqttp.ProtocolVersion
 		MaxQoS                        string
 		MaxConnections                uint64
 		MaximumPacketSize             uint32
@@ -32,9 +32,9 @@ func newServer(topicPrefix string, dynRetains, staticRetains *[]types.RetainObje
 		version:  "1.0.0",
 	}
 
-	m, _ := packet.New(packet.ProtocolV311, packet.PUBLISH)
-	msg, _ := m.(*packet.Publish)
-	msg.SetQoS(packet.QoS0)                // nolint: errcheck
+	m, _ := mqttp.New(mqttp.ProtocolV311, mqttp.PUBLISH)
+	msg, _ := m.(*mqttp.Publish)
+	msg.SetQoS(mqttp.QoS0)                 // nolint: errcheck
 	msg.SetTopic(topicPrefix + "/version") // nolint: errcheck
 	msg.SetPayload([]byte(b.version))
 
@@ -42,9 +42,9 @@ func newServer(topicPrefix string, dynRetains, staticRetains *[]types.RetainObje
 	*dynRetains = append(*dynRetains, b.currTime)
 	*staticRetains = append(*staticRetains, msg)
 
-	m, _ = packet.New(packet.ProtocolV311, packet.PUBLISH)
-	msg, _ = m.(*packet.Publish)
-	msg.SetQoS(packet.QoS0)                     // nolint: errcheck
+	m, _ = mqttp.New(mqttp.ProtocolV311, mqttp.PUBLISH)
+	msg, _ = m.(*mqttp.Publish)
+	msg.SetQoS(mqttp.QoS0)                      // nolint: errcheck
 	msg.SetTopic(topicPrefix + "/capabilities") // nolint: errcheck
 
 	if data, err := json.Marshal(&b.capabilities); err == nil {

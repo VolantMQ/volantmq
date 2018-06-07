@@ -120,6 +120,14 @@ func (l *ws) serveWs(w http.ResponseWriter, r *http.Request) {
 	}(cn)
 }
 
+func (l *ws) Ready() error {
+	return nil
+}
+
+func (l *ws) Alive() error {
+	return nil
+}
+
 func (l *ws) Serve() error {
 	var e error
 	if len(l.certFile) != 0 && len(l.keyFile) != 0 {

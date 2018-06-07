@@ -11,9 +11,10 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/VolantMQ/mqttp"
-	"github.com/VolantMQ/persistence"
-	"github.com/VolantMQ/vlauth"
+	"github.com/VolantMQ/vlapi/mqttp"
+	"github.com/VolantMQ/vlapi/plugin/auth"
+	"github.com/VolantMQ/vlapi/plugin/persistence"
+	"github.com/VolantMQ/vlapi/subscriber"
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/connection"
@@ -29,8 +30,8 @@ import (
 
 // load sessions owning subscriptions
 type subscriberConfig struct {
-	version packet.ProtocolVersion
-	topics  subscriber.Subscriptions
+	version mqttp.ProtocolVersion
+	topics  vlsubscriber.Subscriptions
 }
 
 // Config manager configuration
@@ -56,14 +57,15 @@ type Manager struct {
 	ePoll           netpoll.EventPoll
 	sessionsCount   sync.WaitGroup
 	sessions        sync.Map
-	allowedVersions map[packet.ProtocolVersion]bool
+	plSubscribers   map[string]vlsubscriber.IFace
+	allowedVersions map[mqttp.ProtocolVersion]bool
 	Config
 }
 
 // StartConfig used to reconfigure session after connection is created
 type StartConfig struct {
-	Req  *packet.Connect
-	Resp *packet.ConnAck
+	Req  *mqttp.Connect
+	Resp *mqttp.ConnAck
 	Conn net.Conn
 	Auth vlauth.Permissions
 }
@@ -77,7 +79,7 @@ type containerInfo struct {
 type loadContext struct {
 	bar            *uiprogress.Bar
 	preloadConfigs map[string]*preloadConfig
-	delayedWills   []packet.Provider
+	delayedWills   []mqttp.Provider
 }
 
 // NewManager create new clients manager
@@ -96,11 +98,12 @@ func NewManager(c *Config) (*Manager, error) {
 		Config: *c,
 		quit:   make(chan struct{}),
 		log:    configuration.GetLogger().Named("sessions"),
-		allowedVersions: map[packet.ProtocolVersion]bool{
-			packet.ProtocolV31:  false,
-			packet.ProtocolV311: false,
-			packet.ProtocolV50:  false,
+		allowedVersions: map[mqttp.ProtocolVersion]bool{
+			mqttp.ProtocolV31:  false,
+			mqttp.ProtocolV311: false,
+			mqttp.ProtocolV50:  false,
 		},
+		plSubscribers: make(map[string]vlsubscriber.IFace),
 	}
 
 	m.persistence, _ = c.Persist.Sessions()
@@ -108,11 +111,11 @@ func NewManager(c *Config) (*Manager, error) {
 	for _, v := range m.Version {
 		switch v {
 		case "v3.1":
-			m.allowedVersions[packet.ProtocolV31] = true
+			m.allowedVersions[mqttp.ProtocolV31] = true
 		case "v3.1.1":
-			m.allowedVersions[packet.ProtocolV311] = true
+			m.allowedVersions[mqttp.ProtocolV311] = true
 		case "v5.0":
-			m.allowedVersions[packet.ProtocolV50] = true
+			m.allowedVersions[mqttp.ProtocolV50] = true
 		default:
 			return nil, errors.New("unknown MQTT protocol: " + v)
 		}
@@ -187,7 +190,7 @@ func (m *Manager) Shutdown() error {
 		wrap.rmLock.Unlock()
 
 		if ses != nil {
-			ses.stop(packet.CodeServerShuttingDown)
+			ses.stop(mqttp.CodeServerShuttingDown)
 		} else {
 			m.sessionsCount.Done()
 		}
@@ -218,6 +221,21 @@ func (m *Manager) Shutdown() error {
 	})
 
 	return nil
+}
+
+// GetSubscriber ...
+func (m *Manager) GetSubscriber(id string) (vlsubscriber.IFace, error) {
+	sub, ok := m.plSubscribers[id]
+
+	if !ok {
+		sub = subscriber.New(subscriber.Config{
+			ID:             id,
+			OfflinePublish: m.pluginPublish,
+		})
+		m.plSubscribers[id] = sub
+	}
+
+	return sub, nil
 }
 
 // LoadSession load persisted session. Invoked by persistence provider
@@ -288,10 +306,10 @@ func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) erro
 	)
 
 	var connParams *connection.ConnectParams
-	var ack *packet.ConnAck
+	var ack *mqttp.ConnAck
 	if ch, err := cn.Accept(); err == nil {
 		for dl := range ch {
-			var resp packet.Provider
+			var resp mqttp.Provider
 			switch obj := dl.(type) {
 			case *connection.ConnectParams:
 				connParams = obj
@@ -309,10 +327,10 @@ func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) erro
 				cn = nil
 				return nil
 			} else {
-				if resp.Type() == packet.AUTH {
+				if resp.Type() == mqttp.AUTH {
 					cn.Send(resp)
 				} else {
-					ack = resp.(*packet.ConnAck)
+					ack = resp.(*mqttp.ConnAck)
 					break
 				}
 			}
@@ -324,13 +342,13 @@ func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) erro
 	return nil
 }
 
-func (m *Manager) processConnect(cn connection.Initial, params *connection.ConnectParams, authMngr *auth.Manager) (packet.Provider, error) {
-	var resp packet.Provider
+func (m *Manager) processConnect(cn connection.Initial, params *connection.ConnectParams, authMngr *auth.Manager) (mqttp.Provider, error) {
+	var resp mqttp.Provider
 
 	if allowed, ok := m.allowedVersions[params.Version]; !ok || !allowed {
-		reason := packet.CodeRefusedUnacceptableProtocolVersion
-		if params.Version == packet.ProtocolV50 {
-			reason = packet.CodeUnsupportedProtocol
+		reason := mqttp.CodeRefusedUnacceptableProtocolVersion
+		if params.Version == mqttp.ProtocolV50 {
+			reason = mqttp.CodeUnsupportedProtocol
 		}
 
 		return nil, reason
@@ -339,18 +357,18 @@ func (m *Manager) processConnect(cn connection.Initial, params *connection.Conne
 	if len(params.AuthMethod) > 0 {
 		// TODO(troian): verify method is allowed
 	} else {
-		var reason packet.ReasonCode
+		var reason mqttp.ReasonCode
 
 		if status := authMngr.Password(string(params.Username), string(params.Password)); status == vlauth.StatusAllow {
-			reason = packet.CodeSuccess
+			reason = mqttp.CodeSuccess
 		} else {
-			reason = packet.CodeRefusedBadUsernameOrPassword
-			if params.Version == packet.ProtocolV50 {
-				reason = packet.CodeBadUserOrPassword
+			reason = mqttp.CodeRefusedBadUsernameOrPassword
+			if params.Version == mqttp.ProtocolV50 {
+				reason = mqttp.CodeBadUserOrPassword
 			}
 		}
 
-		pkt := packet.NewConnAck(params.Version)
+		pkt := mqttp.NewConnAck(params.Version)
 		pkt.SetReturnCode(reason)
 		resp = pkt
 	}
@@ -358,14 +376,14 @@ func (m *Manager) processConnect(cn connection.Initial, params *connection.Conne
 	return resp, nil
 }
 
-func (m *Manager) processAuth(params *connection.ConnectParams, auth connection.AuthParams) (packet.Provider, error) {
-	var resp packet.Provider
+func (m *Manager) processAuth(params *connection.ConnectParams, auth connection.AuthParams) (mqttp.Provider, error) {
+	var resp mqttp.Provider
 
 	return resp, nil
 }
 
 // newSession create new session with provided established connection
-func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectParams, ack *packet.ConnAck, authMngr *auth.Manager) {
+func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectParams, ack *mqttp.ConnAck, authMngr *auth.Manager) {
 	var ses *session
 	var err error
 
@@ -400,20 +418,20 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 
 	// if response has return code differs from CodeSuccess return from this point
 	// and send connack in deferred statement
-	if ack.ReturnCode() != packet.CodeSuccess {
+	if ack.ReturnCode() != mqttp.CodeSuccess {
 		return
 	}
 
-	if params.Version >= packet.ProtocolV50 {
+	if params.Version >= mqttp.ProtocolV50 {
 		ids := ""
 		if params.IDGen {
 			ids = params.ID
 		}
 
 		if err = m.writeSessionProperties(ack, ids); err != nil {
-			reason := packet.CodeUnspecifiedError
-			if params.Version <= packet.ProtocolV50 {
-				reason = packet.CodeRefusedServerUnavailable
+			reason := mqttp.CodeUnspecifiedError
+			if params.Version <= mqttp.ProtocolV50 {
+				reason = mqttp.CodeRefusedServerUnavailable
 			}
 			ack.SetReturnCode(reason)
 			return
@@ -437,13 +455,13 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 
 		ack.SetSessionPresent(info.present)
 	} else {
-		var reason packet.ReasonCode
-		if r, ok := err.(packet.ReasonCode); ok {
+		var reason mqttp.ReasonCode
+		if r, ok := err.(mqttp.ReasonCode); ok {
 			reason = r
 		} else {
-			reason = packet.CodeUnspecifiedError
-			if params.Version <= packet.ProtocolV50 {
-				reason = packet.CodeRefusedServerUnavailable
+			reason = mqttp.CodeUnspecifiedError
+			if params.Version <= mqttp.ProtocolV50 {
+				reason = mqttp.CodeRefusedServerUnavailable
 			}
 		}
 
@@ -451,22 +469,22 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 	}
 }
 
-func (m *Manager) onAuth(id string, params *connection.AuthParams) (packet.Provider, error) {
+func (m *Manager) onAuth(id string, params *connection.AuthParams) (mqttp.Provider, error) {
 	return nil, nil
 }
 
-func (m *Manager) checkServerStatus(v packet.ProtocolVersion, resp *packet.ConnAck) {
+func (m *Manager) checkServerStatus(v mqttp.ProtocolVersion, resp *mqttp.ConnAck) {
 	// check first if server is not about to shutdown
 	// if so just give reject and exit
 	select {
 	case <-m.quit:
-		var reason packet.ReasonCode
+		var reason mqttp.ReasonCode
 		switch v {
-		case packet.ProtocolV50:
-			reason = packet.CodeServerShuttingDown
+		case mqttp.ProtocolV50:
+			reason = mqttp.CodeServerShuttingDown
 			// TODO: if cluster route client to another node
 		default:
-			reason = packet.CodeRefusedServerUnavailable
+			reason = mqttp.CodeRefusedServerUnavailable
 		}
 		if err := resp.SetReturnCode(reason); err != nil {
 			m.log.Error("check server status set return code", zap.Error(err))
@@ -522,9 +540,9 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 			if !m.Options.SessionDups {
 				// we do not make any changes to current network connection
 				// response to new one with error and release both new & old sessions
-				err = packet.CodeRefusedIdentifierRejected
-				if params.Version >= packet.ProtocolV50 {
-					err = packet.CodeInvalidClientID
+				err = mqttp.CodeRefusedIdentifierRejected
+				if params.Version >= mqttp.ProtocolV50 {
+					err = mqttp.CodeInvalidClientID
 				}
 
 				currContainer.setRemovable(true)
@@ -536,7 +554,7 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 
 			// session will be replaced with new one
 			// stop current active connection
-			current.stop(packet.CodeSessionTakenOver)
+			current.stop(mqttp.CodeSessionTakenOver)
 		}
 
 		// MQTT5.0 cancel expiry if set
@@ -554,9 +572,9 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 			// if current container marked as removed check if concurrent connection has created new entry with same id
 			// and reject current if so
 			if _, present = m.sessions.LoadOrStore(params.ID, newContainer); present {
-				err = packet.CodeRefusedIdentifierRejected
-				if params.Version >= packet.ProtocolV50 {
-					err = packet.CodeInvalidClientID
+				err = mqttp.CodeRefusedIdentifierRejected
+				if params.Version >= mqttp.ProtocolV50 {
+					err = mqttp.CodeInvalidClientID
 				}
 				return
 			} else {
@@ -575,7 +593,7 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 		params.CleanStart,
 		subscriber.Config{
 			ID:             params.ID,
-			OfflinePublish: m,
+			OfflinePublish: m.sessionPublish,
 			Topics:         m.TopicsMgr,
 			Version:        params.Version,
 		})
@@ -622,7 +640,7 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 	return
 }
 
-func (m *Manager) writeSessionProperties(resp *packet.ConnAck, id string) error {
+func (m *Manager) writeSessionProperties(resp *mqttp.ConnAck, id string) error {
 	boolToByte := func(v bool) byte {
 		if v {
 			return 1
@@ -633,53 +651,53 @@ func (m *Manager) writeSessionProperties(resp *packet.ConnAck, id string) error 
 
 	// [MQTT-3.2.2.3.2] if server receive max less than 65536 than let client to know about
 	if m.Options.ReceiveMax < types.DefaultReceiveMax {
-		if err := resp.PropertySet(packet.PropertyReceiveMaximum, m.Options.ReceiveMax); err != nil {
+		if err := resp.PropertySet(mqttp.PropertyReceiveMaximum, m.Options.ReceiveMax); err != nil {
 			return err
 		}
 	}
 	// [MQTT-3.2.2.3.3] if supported server's QoS less than 2 notify client
-	if m.Options.MaxQoS < packet.QoS2 {
-		if err := resp.PropertySet(packet.PropertyMaximumQoS, byte(m.Options.MaxQoS)); err != nil {
+	if m.Options.MaxQoS < mqttp.QoS2 {
+		if err := resp.PropertySet(mqttp.PropertyMaximumQoS, byte(m.Options.MaxQoS)); err != nil {
 			return err
 		}
 	}
 	// [MQTT-3.2.2.3.4] tell client whether retained messages supported
-	if err := resp.PropertySet(packet.PropertyRetainAvailable, boolToByte(m.Options.RetainAvailable)); err != nil {
+	if err := resp.PropertySet(mqttp.PropertyRetainAvailable, boolToByte(m.Options.RetainAvailable)); err != nil {
 		return err
 	}
 	// [MQTT-3.2.2.3.5] if server max packet size less than 268435455 than let client to know about
 	if m.Options.MaxPacketSize < types.DefaultMaxPacketSize {
-		if err := resp.PropertySet(packet.PropertyMaximumPacketSize, m.Options.MaxPacketSize); err != nil {
+		if err := resp.PropertySet(mqttp.PropertyMaximumPacketSize, m.Options.MaxPacketSize); err != nil {
 			return err
 		}
 	}
 	// [MQTT-3.2.2.3.6]
 	if len(id) > 0 {
-		if err := resp.PropertySet(packet.PropertyAssignedClientIdentifier, id); err != nil {
+		if err := resp.PropertySet(mqttp.PropertyAssignedClientIdentifier, id); err != nil {
 			return err
 		}
 	}
 	// [MQTT-3.2.2.3.7]
 	if m.Options.MaxTopicAlias > 0 {
-		if err := resp.PropertySet(packet.PropertyTopicAliasMaximum, m.Options.MaxTopicAlias); err != nil {
+		if err := resp.PropertySet(mqttp.PropertyTopicAliasMaximum, m.Options.MaxTopicAlias); err != nil {
 			return err
 		}
 	}
 	// [MQTT-3.2.2.3.10] tell client whether server supports wildcard subscriptions or not
-	if err := resp.PropertySet(packet.PropertyWildcardSubscriptionAvailable, boolToByte(m.Options.SubsWildcard)); err != nil {
+	if err := resp.PropertySet(mqttp.PropertyWildcardSubscriptionAvailable, boolToByte(m.Options.SubsWildcard)); err != nil {
 		return err
 	}
 	// [MQTT-3.2.2.3.11] tell client whether server supports subscription identifiers or not
-	if err := resp.PropertySet(packet.PropertySubscriptionIdentifierAvailable, boolToByte(m.Options.SubsID)); err != nil {
+	if err := resp.PropertySet(mqttp.PropertySubscriptionIdentifierAvailable, boolToByte(m.Options.SubsID)); err != nil {
 		return err
 	}
 	// [MQTT-3.2.2.3.12] tell client whether server supports shared subscriptions or not
-	if err := resp.PropertySet(packet.PropertySharedSubscriptionAvailable, boolToByte(m.Options.SubsShared)); err != nil {
+	if err := resp.PropertySet(mqttp.PropertySharedSubscriptionAvailable, boolToByte(m.Options.SubsShared)); err != nil {
 		return err
 	}
 
 	if m.KeepAlive.Force {
-		if err := resp.PropertySet(packet.PropertyServerKeepAlive, m.KeepAlive); err != nil {
+		if err := resp.PropertySet(mqttp.PropertyServerKeepAlive, m.KeepAlive); err != nil {
 			return err
 		}
 	}
@@ -687,11 +705,11 @@ func (m *Manager) writeSessionProperties(resp *packet.ConnAck, id string) error 
 	return nil
 }
 
-func (m *Manager) connectionClosed(id string, reason packet.ReasonCode) {
+func (m *Manager) connectionClosed(id string, reason mqttp.ReasonCode) {
 	m.Systree.Clients().Disconnected(id, reason)
 }
 
-func (m *Manager) subscriberShutdown(id string, sub subscriber.SessionProvider) {
+func (m *Manager) subscriberShutdown(id string, sub vlsubscriber.IFace) {
 	sub.Offline(true)
 	if val, ok := m.sessions.Load(id); ok {
 		wrap := val.(*container)
@@ -759,7 +777,7 @@ func (m *Manager) configurePersistedSubscribers(ctx *loadContext) {
 			subscriber.Config{
 				ID:             id,
 				Topics:         m.TopicsMgr,
-				OfflinePublish: m,
+				OfflinePublish: m.sessionPublish,
 				Version:        t.sub.version,
 			})
 
@@ -824,14 +842,14 @@ func (m *Manager) decodeSessionExpiry(ctx *loadContext, id string, state *persis
 		return prev
 	}
 
-	var will *packet.Publish
+	var will *mqttp.Publish
 	var willIn uint32
 	var expireIn uint32
 
 	// if persisted state has delayed will lets check if it has not elapsed its time
 	if len(state.Expire.WillIn) > 0 && len(state.Expire.WillData) > 0 {
-		pkt, _, _ := packet.Decode(packet.ProtocolVersion(state.Version), state.Expire.WillData)
-		will, _ = pkt.(*packet.Publish)
+		pkt, _, _ := mqttp.Decode(mqttp.ProtocolVersion(state.Version), state.Expire.WillData)
+		will, _ = pkt.(*mqttp.Publish)
 		var val int
 		if val, err = strconv.Atoi(state.Expire.WillIn); err == nil {
 			willIn = uint32(val)
@@ -901,22 +919,22 @@ func (m *Manager) decodeSubscriber(ctx *loadContext, id string, from []byte) err
 		return nil
 	}
 
-	subscriptions := subscriber.Subscriptions{}
+	subscriptions := vlsubscriber.Subscriptions{}
 	offset := 0
-	version := packet.ProtocolVersion(from[offset])
+	version := mqttp.ProtocolVersion(from[offset])
 	offset++
 	remaining := len(from) - 1
 	for offset != remaining {
-		t, total, e := packet.ReadLPBytes(from[offset:])
+		t, total, e := mqttp.ReadLPBytes(from[offset:])
 		if e != nil {
 			return e
 		}
 
 		offset += total
 
-		params := &topicsTypes.SubscriptionParams{}
+		params := &vlsubscriber.SubscriptionParams{}
 
-		params.Ops = packet.SubscriptionOptions(from[offset])
+		params.Ops = mqttp.SubscriptionOptions(from[offset])
 		offset++
 
 		params.ID = binary.BigEndian.Uint32(from[offset:])
@@ -962,7 +980,7 @@ func (m *Manager) persistSubscriber(s *subscriber.Type) error {
 	offset++
 
 	for topic, params := range topics {
-		total, _ := packet.WriteLPBytes(buf[offset:], []byte(topic))
+		total, _ := mqttp.WriteLPBytes(buf[offset:], []byte(topic))
 		offset += total
 		buf[offset] = byte(params.Ops)
 		offset++
@@ -978,7 +996,7 @@ func (m *Manager) persistSubscriber(s *subscriber.Type) error {
 	return nil
 }
 
-func (m *Manager) Publish(id string, p *packet.Publish) {
+func (m *Manager) sessionPublish(id string, p *mqttp.Publish) {
 	pkt := &persistence.PersistedPacket{}
 	pkt.Flags.UnAck = false
 
@@ -996,7 +1014,7 @@ func (m *Manager) Publish(id string, p *packet.Publish) {
 	p.SetPacketID(0)
 
 	var err error
-	pkt.Data, err = packet.Encode(p)
+	pkt.Data, err = mqttp.Encode(p)
 	if err != nil {
 		m.log.Error("Couldn't encode packet", zap.String("ClientID", id), zap.Error(err))
 		return
@@ -1005,4 +1023,33 @@ func (m *Manager) Publish(id string, p *packet.Publish) {
 	if err = m.persistence.PacketStore([]byte(id), pkt); err != nil {
 		m.log.Error("Couldn't persist message", zap.String("ClientID", id), zap.Error(err))
 	}
+}
+
+func (m *Manager) pluginPublish(id string, p *mqttp.Publish) {
+	//pkt := &persistence.PersistedPacket{}
+	//pkt.Flags.UnAck = false
+	//
+	//var expired bool
+	//var expireAt time.Time
+	//
+	//if expireAt, _, expired = p.Expired(); expired {
+	//	return
+	//}
+	//
+	//if !expireAt.IsZero() {
+	//	pkt.ExpireAt = expireAt.Format(time.RFC3339)
+	//}
+	//
+	//p.SetPacketID(0)
+	//
+	//var err error
+	//pkt.Data, err = mqttp.Encode(p)
+	//if err != nil {
+	//	m.log.Error("Couldn't encode packet", zap.String("ClientID", id), zap.Error(err))
+	//	return
+	//}
+	//
+	//if err = m.persistence.PacketStore([]byte(id), pkt); err != nil {
+	//	m.log.Error("Couldn't persist message", zap.String("ClientID", id), zap.Error(err))
+	//}
 }

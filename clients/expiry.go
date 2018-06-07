@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/VolantMQ/mqttp"
+	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/VolantMQ/volantmq/types"
 )
 
@@ -17,7 +17,7 @@ type expiryConfig struct {
 	id        string
 	createdAt time.Time
 	messenger types.TopicMessenger
-	will      *packet.Publish
+	will      *mqttp.Publish
 	expireIn  *uint32
 	willDelay uint32
 }

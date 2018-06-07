@@ -5,21 +5,20 @@ import (
 	"sync"
 	"time"
 
-	"github.com/VolantMQ/mqttp"
-	"github.com/VolantMQ/persistence"
-	"github.com/VolantMQ/vlauth"
+	"github.com/VolantMQ/vlapi/mqttp"
+	"github.com/VolantMQ/vlapi/plugin/auth"
+	"github.com/VolantMQ/vlapi/plugin/persistence"
+	"github.com/VolantMQ/vlapi/subscriber"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/connection"
-	"github.com/VolantMQ/volantmq/subscriber"
-	"github.com/VolantMQ/volantmq/topics/types"
 	"github.com/VolantMQ/volantmq/types"
 	"go.uber.org/zap"
 )
 
 type sessionEvents interface {
 	sessionOffline(string, bool, *expiry)
-	connectionClosed(string, packet.ReasonCode)
-	subscriberShutdown(string, subscriber.SessionProvider)
+	connectionClosed(string, mqttp.ReasonCode)
+	subscriberShutdown(string, vlsubscriber.IFace)
 }
 
 type sessionPreConfig struct {
@@ -34,12 +33,12 @@ type sessionPreConfig struct {
 
 type sessionConfig struct {
 	sessionEvents
-	subscriber subscriber.SessionProvider
-	will       *packet.Publish
+	subscriber vlsubscriber.IFace
+	will       *mqttp.Publish
 	expireIn   *uint32
 	willDelay  uint32
 	durable    bool
-	version    packet.ProtocolVersion
+	version    mqttp.ProtocolVersion
 }
 
 type session struct {
@@ -63,8 +62,8 @@ func newTmpPublish() *temporaryPublish {
 	}
 }
 
-func (t *temporaryPublish) Publish(id string, p *packet.Publish) {
-	if p.QoS() == packet.QoS0 {
+func (t *temporaryPublish) onPublish(id string, p *mqttp.Publish) {
+	if p.QoS() == mqttp.QoS0 {
 		t.gList.PushBack(p)
 	} else {
 		t.qList.PushBack(p)
@@ -87,13 +86,13 @@ func (s *session) configure(c sessionConfig, clean bool) {
 
 	if !clean {
 		tmp := newTmpPublish()
-		s.subscriber.Online(tmp)
+		s.subscriber.Online(tmp.onPublish)
 		s.persistence.PacketsForEach([]byte(s.id), s.conn)
-		s.subscriber.Online(s.conn)
+		s.subscriber.Online(s.conn.Publish)
 		s.persistence.PacketsDelete([]byte(s.id))
 		s.conn.LoadRemaining(tmp.gList, tmp.qList)
 	} else {
-		s.subscriber.Online(s.conn)
+		s.subscriber.Online(s.conn.Publish)
 	}
 }
 
@@ -102,14 +101,14 @@ func (s *session) start() {
 	s.idLock.Unlock()
 }
 
-func (s *session) stop(reason packet.ReasonCode) {
+func (s *session) stop(reason mqttp.ReasonCode) {
 	s.stopReq.Do(func() {
 		s.conn.Stop(reason)
 	})
 }
 
 // SignalPublish process PUBLISH packet from client
-func (s *session) SignalPublish(pkt *packet.Publish) error {
+func (s *session) SignalPublish(pkt *mqttp.Publish) error {
 	pkt.SetPublishID(s.subscriber.Hash())
 
 	// [MQTT-3.3.1.3]
@@ -119,8 +118,8 @@ func (s *session) SignalPublish(pkt *packet.Publish) error {
 		}
 
 		// [MQTT-3.3.1-7]
-		if pkt.QoS() == packet.QoS0 {
-			retained := packet.NewPublish(s.version)
+		if pkt.QoS() == mqttp.QoS0 {
+			retained := mqttp.NewPublish(s.version)
 			if err := retained.SetQoS(pkt.QoS()); err != nil {
 				s.log.Error("set retained QoS", zap.String("ClientID", s.id), zap.Error(err))
 			}
@@ -138,46 +137,46 @@ func (s *session) SignalPublish(pkt *packet.Publish) error {
 }
 
 // SignalSubscribe process SUBSCRIBE packet from client
-func (s *session) SignalSubscribe(pkt *packet.Subscribe) (packet.Provider, error) {
-	m, _ := packet.New(s.version, packet.SUBACK)
-	resp, _ := m.(*packet.SubAck)
+func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.Provider, error) {
+	m, _ := mqttp.New(s.version, mqttp.SUBACK)
+	resp, _ := m.(*mqttp.SubAck)
 
 	id, _ := pkt.ID()
 	resp.SetPacketID(id)
 
-	var retCodes []packet.ReasonCode
-	var retainedPublishes []*packet.Publish
+	var retCodes []mqttp.ReasonCode
+	var retainedPublishes []*mqttp.Publish
 
-	pkt.RangeTopics(func(t string, ops packet.SubscriptionOptions) {
-		reason := packet.CodeSuccess // nolint: ineffassign
+	pkt.RangeTopics(func(t string, ops mqttp.SubscriptionOptions) {
+		reason := mqttp.CodeSuccess // nolint: ineffassign
 
 		if err := s.permissions.ACL(s.id, s.username, t, vlauth.AccessRead); err == vlauth.StatusAllow {
 			subsID := uint32(0)
 
 			// V5.0 [MQTT-3.8.2.1.2]
-			if prop := pkt.PropertyGet(packet.PropertySubscriptionIdentifier); prop != nil {
+			if prop := pkt.PropertyGet(mqttp.PropertySubscriptionIdentifier); prop != nil {
 				if v, e := prop.AsInt(); e == nil {
 					subsID = v
 				}
 			}
 
-			subsParams := topicsTypes.SubscriptionParams{
+			subsParams := vlsubscriber.SubscriptionParams{
 				ID:  subsID,
 				Ops: ops,
 			}
 
 			if grantedQoS, retained, err := s.subscriber.Subscribe(t, &subsParams); err != nil {
-				reason = packet.QosFailure
+				reason = mqttp.QosFailure
 			} else {
-				reason = packet.ReasonCode(grantedQoS)
+				reason = mqttp.ReasonCode(grantedQoS)
 				retainedPublishes = append(retainedPublishes, retained...)
 			}
 		} else {
 			// [MQTT-3.9.3]
-			if s.version == packet.ProtocolV50 {
-				reason = packet.CodeNotAuthorized
+			if s.version == mqttp.ProtocolV50 {
+				reason = mqttp.CodeNotAuthorized
 			} else {
-				reason = packet.QosFailure
+				reason = mqttp.QosFailure
 			}
 		}
 
@@ -202,25 +201,25 @@ func (s *session) SignalSubscribe(pkt *packet.Subscribe) (packet.Provider, error
 }
 
 // SignalUnSubscribe process UNSUBSCRIBE packet from client
-func (s *session) SignalUnSubscribe(pkt *packet.UnSubscribe) (packet.Provider, error) {
-	var retCodes []packet.ReasonCode
+func (s *session) SignalUnSubscribe(pkt *mqttp.UnSubscribe) (mqttp.Provider, error) {
+	var retCodes []mqttp.ReasonCode
 
 	for _, t := range pkt.Topics() {
-		reason := packet.CodeSuccess
+		reason := mqttp.CodeSuccess
 		if err := s.permissions.ACL(s.id, s.username, t, vlauth.AccessRead); err == vlauth.StatusAllow {
 			if err = s.subscriber.UnSubscribe(t); err != nil {
 				s.log.Error("Couldn't unsubscribe from topic", zap.Error(err))
-				reason = packet.CodeNoSubscriptionExisted
+				reason = mqttp.CodeNoSubscriptionExisted
 			}
 		} else {
-			reason = packet.CodeNotAuthorized
+			reason = mqttp.CodeNotAuthorized
 		}
 
 		retCodes = append(retCodes, reason)
 	}
 
-	m, _ := packet.New(s.version, packet.UNSUBACK)
-	resp, _ := m.(*packet.UnSubAck)
+	m, _ := mqttp.New(s.version, mqttp.UNSUBACK)
+	resp, _ := m.(*mqttp.UnSubAck)
 
 	id, _ := pkt.ID()
 	resp.SetPacketID(id)
@@ -232,25 +231,25 @@ func (s *session) SignalUnSubscribe(pkt *packet.UnSubscribe) (packet.Provider, e
 }
 
 // SignalDisconnect process DISCONNECT packet from client
-func (s *session) SignalDisconnect(pkt *packet.Disconnect) (packet.Provider, error) {
+func (s *session) SignalDisconnect(pkt *mqttp.Disconnect) (mqttp.Provider, error) {
 	var err error
 
-	err = packet.CodeSuccess
+	err = mqttp.CodeSuccess
 
-	if s.version == packet.ProtocolV50 {
+	if s.version == mqttp.ProtocolV50 {
 		// FIXME: CodeRefusedBadUsernameOrPassword has same id as CodeDisconnectWithWill
-		if pkt.ReasonCode() != packet.CodeRefusedBadUsernameOrPassword {
+		if pkt.ReasonCode() != mqttp.CodeRefusedBadUsernameOrPassword {
 			s.will = nil
 		}
 
-		if prop := pkt.PropertyGet(packet.PropertySessionExpiryInterval); prop != nil {
+		if prop := pkt.PropertyGet(mqttp.PropertySessionExpiryInterval); prop != nil {
 			if val, ok := prop.AsInt(); ok == nil {
 				// If the Session Expiry Interval in the CONNECT packet was zero, then it is a Protocol Error to set a non-
 				// zero Session Expiry Interval in the DISCONNECT packet sent by the Client. If such a non-zero Session
-				// Expiry Interval is received by the Server, it does not treat it as a valid DISCONNECT packet. The Server
+				// Expiry Interval is received by the Server, it does not treat it as a valid DISCONNECT mqttp. The Server
 				// uses DISCONNECT with Reason Code 0x82 (Protocol Error) as described in section 4.13.
 				if (s.expireIn != nil && *s.expireIn == 0) && val != 0 {
-					err = packet.CodeProtocolError
+					err = mqttp.CodeProtocolError
 				} else {
 					s.expireIn = &val
 				}
@@ -301,7 +300,7 @@ func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 
 	var exp *expiry
 
-	if params.Reason != packet.CodeSessionTakenOver {
+	if params.Reason != mqttp.CodeSessionTakenOver {
 		if s.willDelay > 0 || (s.expireIn != nil && *s.expireIn > 0) {
 			exp = newExpiry(
 				expiryConfig{

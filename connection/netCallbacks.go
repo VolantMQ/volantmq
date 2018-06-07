@@ -3,7 +3,7 @@ package connection
 import (
 	"time"
 
-	"github.com/VolantMQ/mqttp"
+	"github.com/VolantMQ/vlapi/mqttp"
 	"go.uber.org/zap"
 )
 
@@ -27,15 +27,15 @@ func (s *impl) onConnectionClose(status error) bool {
 		// clean up transmitter to allow send disconnect command to client if needed
 		s.txShutdown()
 
-		if reason, ok := status.(packet.ReasonCode); ok &&
-			reason != packet.CodeSuccess && s.version >= packet.ProtocolV50 &&
+		if reason, ok := status.(mqttp.ReasonCode); ok &&
+			reason != mqttp.CodeSuccess && s.version >= mqttp.ProtocolV50 &&
 			s.state != stateConnecting && s.state != stateAuth && s.state != stateConnectFailed {
 			// server wants to tell client disconnect reason
-			pkt := packet.NewDisconnect(s.version)
+			pkt := mqttp.NewDisconnect(s.version)
 			pkt.SetReasonCode(reason)
 
 			var buf []byte
-			if buf, err = packet.Encode(pkt); err != nil {
+			if buf, err = mqttp.Encode(pkt); err != nil {
 				s.log.Error("encode disconnect packet", zap.String("ClientID", s.id), zap.Error(err))
 			} else {
 				var written int
@@ -63,10 +63,10 @@ func (s *impl) onConnectionClose(status error) bool {
 			s.SignalOffline()
 			params := DisconnectParams{
 				Packets: s.getQueuedPackets(),
-				Reason:  packet.CodeSuccess,
+				Reason:  mqttp.CodeSuccess,
 			}
 
-			if rc, ok := err.(packet.ReasonCode); ok {
+			if rc, ok := err.(mqttp.ReasonCode); ok {
 				params.Reason = rc
 			}
 
@@ -81,61 +81,61 @@ func (s *impl) onConnectionClose(status error) bool {
 // On QoS == 0, we should just take the next step, no ack required
 // On QoS == 1, send back PUBACK, then take the next step
 // On QoS == 2, we need to put it in the ack queue, send back PUBREC
-func (s *impl) onPublish(pkt *packet.Publish) (packet.Provider, error) {
+func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.Provider, error) {
 	// check for topic access
 	var err error
-	reason := packet.CodeSuccess
+	reason := mqttp.CodeSuccess
 
-	if s.version >= packet.ProtocolV50 {
+	if s.version >= mqttp.ProtocolV50 {
 		if !s.retainAvailable && pkt.Retain() {
-			return nil, packet.CodeRetainNotSupported
+			return nil, mqttp.CodeRetainNotSupported
 		}
 
-		if prop := pkt.PropertyGet(packet.PropertyTopicAlias); prop != nil {
+		if prop := pkt.PropertyGet(mqttp.PropertyTopicAlias); prop != nil {
 			if val, ok := prop.AsShort(); ok == nil && (val == 0 || val > s.maxRxTopicAlias) {
-				return nil, packet.CodeInvalidTopicAlias
+				return nil, mqttp.CodeInvalidTopicAlias
 			}
 		}
 	}
 
-	var resp packet.Provider
+	var resp mqttp.Provider
 	// This case is for V5.0 actually as ack messages may return status.
 	// To deal with V3.1.1 two ways left:
 	//   - ignore the message but send acks
 	//   - return error which leads to disconnect
 	//if status := s.ACL(s.ID, pkt.Topic(), auth.AccessTypeWrite); status == auth.StatusDeny {
-	//	reason = packet.CodeAdministrativeAction
+	//	reason = mqttp.CodeAdministrativeAction
 	//}
 
 	switch pkt.QoS() {
-	case packet.QoS2:
+	case mqttp.QoS2:
 		if s.rxQuota == 0 {
-			reason = packet.CodeReceiveMaximumExceeded
+			reason = mqttp.CodeReceiveMaximumExceeded
 		} else {
 			s.rxQuota--
-			r := packet.NewPubRec(s.version)
+			r := mqttp.NewPubRec(s.version)
 			id, _ := pkt.ID()
 
 			r.SetPacketID(id)
 
 			resp = r
 
-			// if reason < packet.CodeUnspecifiedError {
+			// if reason < mqttp.CodeUnspecifiedError {
 			// [MQTT-4.3.3-9]
 			// store incoming QoS 2 message before sending PUBREC as theoretically PUBREL
 			// might come before store in case message store done after write PUBREC
-			if reason < packet.CodeUnspecifiedError {
+			if reason < mqttp.CodeUnspecifiedError {
 				s.pubIn.store(pkt)
 			}
 			//if !s.pubIn.store(pkt) {
-			//	reason = packet.CodeReceiveMaximumExceeded
+			//	reason = mqttp.CodeReceiveMaximumExceeded
 			//}
 			// }
 
-			r.SetReason(packet.CodeSuccess)
+			r.SetReason(mqttp.CodeSuccess)
 		}
-	case packet.QoS1:
-		r := packet.NewPubAck(s.version)
+	case mqttp.QoS1:
+		r := mqttp.NewPubAck(s.version)
 
 		id, _ := pkt.ID()
 
@@ -143,10 +143,10 @@ func (s *impl) onPublish(pkt *packet.Publish) (packet.Provider, error) {
 		r.SetReason(reason)
 		resp = r
 		fallthrough
-	case packet.QoS0: // QoS 0
+	case mqttp.QoS0: // QoS 0
 		// [MQTT-4.3.1]
 		// [MQTT-4.3.2-4]
-		// if reason < packet.CodeUnspecifiedError {
+		// if reason < mqttp.CodeUnspecifiedError {
 		if err = s.publishToTopic(pkt); err != nil {
 			s.log.Error("Couldn't publish message",
 				zap.String("ClientID", s.id),
@@ -160,15 +160,15 @@ func (s *impl) onPublish(pkt *packet.Publish) (packet.Provider, error) {
 }
 
 // onAck handle ack acknowledgment received from remote
-func (s *impl) onAck(pkt packet.Provider) (packet.Provider, error) {
-	var resp packet.Provider
+func (s *impl) onAck(pkt mqttp.Provider) (mqttp.Provider, error) {
+	var resp mqttp.Provider
 	switch mIn := pkt.(type) {
-	case *packet.Ack:
+	case *mqttp.Ack:
 		switch pkt.Type() {
-		case packet.PUBACK:
+		case mqttp.PUBACK:
 			// remote acknowledged PUBLISH QoS 1 message sent by this server
 			s.pubOut.release(pkt)
-		case packet.PUBREC:
+		case mqttp.PUBREC:
 			// remote received PUBLISH message sent by this server
 			s.pubOut.release(pkt)
 
@@ -176,7 +176,7 @@ func (s *impl) onAck(pkt packet.Provider) (packet.Provider, error) {
 
 			id, _ := pkt.ID()
 
-			if s.version == packet.ProtocolV50 && mIn.Reason() >= packet.CodeUnspecifiedError {
+			if s.version == mqttp.ProtocolV50 && mIn.Reason() >= mqttp.CodeUnspecifiedError {
 				// v5.0 [MQTT-4.9]
 				if s.flowRelease(id) {
 					s.signalQuota()
@@ -186,8 +186,8 @@ func (s *impl) onAck(pkt packet.Provider) (packet.Provider, error) {
 			}
 
 			if !discard {
-				resp, _ = packet.New(s.version, packet.PUBREL)
-				r, _ := resp.(*packet.Ack)
+				resp, _ = mqttp.New(s.version, mqttp.PUBREL)
+				r, _ := resp.(*mqttp.Ack)
 
 				r.SetPacketID(id)
 
@@ -196,17 +196,17 @@ func (s *impl) onAck(pkt packet.Provider) (packet.Provider, error) {
 				// faster than put into queue
 				s.pubOut.store(resp)
 			}
-		case packet.PUBREL:
+		case mqttp.PUBREL:
 			// Remote has released PUBLISH
-			resp, _ = packet.New(s.version, packet.PUBCOMP)
-			r, _ := resp.(*packet.Ack)
+			resp, _ = mqttp.New(s.version, mqttp.PUBCOMP)
+			r, _ := resp.(*mqttp.Ack)
 
 			id, _ := pkt.ID()
 			r.SetPacketID(id)
 
 			s.rxQuota++
 			s.pubIn.release(pkt)
-		case packet.PUBCOMP:
+		case mqttp.PUBCOMP:
 			// PUBREL message has been acknowledged, release from queue
 			s.pubOut.release(pkt)
 		default:

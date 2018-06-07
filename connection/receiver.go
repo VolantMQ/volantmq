@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"time"
 
-	"github.com/VolantMQ/mqttp"
+	"github.com/VolantMQ/vlapi/mqttp"
 )
 
 func (s *impl) rxShutdown() {
@@ -58,7 +58,7 @@ func (s *impl) rxRoutine() {
 	buf := bufio.NewReader(s.conn)
 
 	for {
-		var pkt packet.Provider
+		var pkt mqttp.Provider
 
 		if s.keepAlive.Nanoseconds() > 0 {
 			if err = s.conn.SetReadDeadline(time.Now().Add(s.keepAlive)); err != nil {
@@ -89,7 +89,7 @@ func (s *impl) rxRoutine() {
 //
 //	buf := bufio.NewReader(s.conn)
 //
-//	var pkt packet.Provider
+//	var pkt mqttp.Provider
 //
 //	if pkt, err = s.readPacket(buf); err != nil {
 //		return
@@ -129,7 +129,7 @@ func (s *impl) connectionRoutine() {
 	}
 }
 
-func (s *impl) readPacket(buf *bufio.Reader) (packet.Provider, error) {
+func (s *impl) readPacket(buf *bufio.Reader) (mqttp.Provider, error) {
 	var err error
 
 	if len(s.rxRecv) == 0 {
@@ -140,7 +140,7 @@ func (s *impl) readPacket(buf *bufio.Reader) (packet.Provider, error) {
 			// max length of fh is 5 bytes
 			// if we have read 5 bytes and still not done report protocol error and exit
 			if peekCount > 5 {
-				return nil, packet.CodeProtocolError
+				return nil, mqttp.CodeProtocolError
 			}
 
 			if header, err = buf.Peek(peekCount); err != nil {
@@ -164,7 +164,7 @@ func (s *impl) readPacket(buf *bufio.Reader) (packet.Provider, error) {
 	}
 
 	if s.rxRemaining > int(s.maxRxPacketSize) {
-		return nil, packet.CodePacketTooLarge
+		return nil, mqttp.CodePacketTooLarge
 	}
 
 	offset := len(s.rxRecv) - s.rxRemaining
@@ -180,8 +180,8 @@ func (s *impl) readPacket(buf *bufio.Reader) (packet.Provider, error) {
 		}
 	}
 
-	var pkt packet.Provider
-	pkt, _, err = packet.Decode(s.version, s.rxRecv)
+	var pkt mqttp.Provider
+	pkt, _, err = mqttp.Decode(s.version, s.rxRecv)
 
 	s.rxRecv = []byte{}
 	s.rxRemaining = 0

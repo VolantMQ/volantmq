@@ -59,6 +59,22 @@ func NewTCP(config *ConfigTCP, internal *InternalConfig) (Provider, error) {
 	return l, nil
 }
 
+func (l *tcp) Ready() error {
+	if err := l.baseReady(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (l *tcp) Alive() error {
+	if err := l.baseReady(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // Close tcp listener
 func (l *tcp) Close() error {
 	var err error
@@ -125,7 +141,7 @@ func (l *tcp) Serve() error {
 				if max := 1 * time.Second; tempDelay > max {
 					tempDelay = max
 				}
-				l.log.Error("Couldn't accept connection. Retrying",
+				l.log.Error("accept connection. Retrying",
 					zap.Error(err),
 					zap.Duration("retryIn", tempDelay))
 
@@ -140,7 +156,7 @@ func (l *tcp) Serve() error {
 			defer l.onConnection.Done()
 
 			if inConn, e := l.newConnTCP(cn, l.Metric.Bytes()); e != nil {
-				l.log.Error("Couldn't create connection interface", zap.Error(e))
+				l.log.Error("create connection interface", zap.Error(e))
 			} else {
 				l.handleConnection(inConn)
 			}

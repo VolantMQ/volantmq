@@ -5,22 +5,22 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/VolantMQ/mqttp"
+	"github.com/VolantMQ/vlapi/mqttp"
 )
 
 // DynamicValue interface describes states of the dynamic value
 type DynamicValue interface {
 	Topic() string
 	// Retained used by topics provider to get retained message when there is new subscription to given topic
-	Retained() *packet.Publish
+	Retained() *mqttp.Publish
 	// Publish used by systree update routine to publish new value when on periodic basis
-	Publish() *packet.Publish
+	Publish() *mqttp.Publish
 }
 
 type dynamicValue struct {
 	topic    string
-	retained *packet.Publish
-	publish  *packet.Publish
+	retained *mqttp.Publish
+	publish  *mqttp.Publish
 	getValue func() []byte
 }
 
@@ -85,12 +85,12 @@ func (m *dynamicValue) Topic() string {
 	return m.topic
 }
 
-func (m *dynamicValue) Retained() *packet.Publish {
+func (m *dynamicValue) Retained() *mqttp.Publish {
 	if m.retained == nil {
-		np, _ := packet.New(packet.ProtocolV311, packet.PUBLISH)
-		m.retained, _ = np.(*packet.Publish)
-		m.retained.SetTopic(m.topic)   // nolint: errcheck
-		m.retained.SetQoS(packet.QoS0) // nolint: errcheck
+		np, _ := mqttp.New(mqttp.ProtocolV311, mqttp.PUBLISH)
+		m.retained, _ = np.(*mqttp.Publish)
+		m.retained.SetTopic(m.topic)  // nolint: errcheck
+		m.retained.SetQoS(mqttp.QoS0) // nolint: errcheck
 		m.retained.SetRetain(true)
 	}
 
@@ -99,12 +99,12 @@ func (m *dynamicValue) Retained() *packet.Publish {
 	return m.retained
 }
 
-func (m *dynamicValue) Publish() *packet.Publish {
+func (m *dynamicValue) Publish() *mqttp.Publish {
 	if m.publish == nil {
-		np, _ := packet.New(packet.ProtocolV311, packet.PUBLISH)
-		m.publish, _ = np.(*packet.Publish)
-		m.publish.SetTopic(m.topic)   // nolint: errcheck
-		m.publish.SetQoS(packet.QoS0) // nolint: errcheck
+		np, _ := mqttp.New(mqttp.ProtocolV311, mqttp.PUBLISH)
+		m.publish, _ = np.(*mqttp.Publish)
+		m.publish.SetTopic(m.topic)  // nolint: errcheck
+		m.publish.SetQoS(mqttp.QoS0) // nolint: errcheck
 		m.publish.SetRetain(true)
 	}
 

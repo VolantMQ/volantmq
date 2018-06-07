@@ -10,11 +10,12 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 
-	"github.com/VolantMQ/persistence"
-	"github.com/VolantMQ/vlauth"
-	"github.com/VolantMQ/vlplugin"
+	"github.com/VolantMQ/vlapi/plugin"
+	"github.com/VolantMQ/vlapi/plugin/auth"
+	"github.com/VolantMQ/vlapi/plugin/persistence"
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/server"
@@ -26,6 +27,31 @@ import (
 type pluginType map[string]vlplugin.Plugin
 
 type pluginTypes map[string]pluginType
+
+type httpServer struct {
+	mux    *http.ServeMux
+	server *http.Server
+}
+
+func (h *httpServer) Mux() *http.ServeMux {
+	return h.mux
+}
+
+func (h *httpServer) Addr() string {
+	return h.server.Addr
+}
+
+type appContext struct {
+	plugins struct {
+		acquired   pluginTypes
+		configured []interface{}
+	}
+
+	//health         healthcheck.Handler
+	//registry       *prometheus.Registry
+	httpDefaultMux string
+	httpServers    sync.Map
+}
 
 func loadMqttListeners(defaultAuth *auth.Manager, lCfg *configuration.ListenersConfig) ([]interface{}, error) {
 	var listeners []interface{}
@@ -141,7 +167,7 @@ func configureSimpleAuth(cfg interface{}) (vlauth.Iface, error) {
 	return sAuth, nil
 }
 
-func loadAuth(cfg *configuration.Config, plTypes pluginTypes) (*auth.Manager, error) {
+func (ctx *appContext) loadAuth(cfg *configuration.Config) (*auth.Manager, error) {
 	logger.Info("configuring auth")
 
 	a, ok := cfg.Plugins.Config["auth"]
@@ -181,9 +207,9 @@ func loadAuth(cfg *configuration.Config, plTypes pluginTypes) (*auth.Manager, er
 			iface, _ = configureSimpleAuth(config)
 		default:
 			var authPlugins pluginType
-			if authPlugins, ok = plTypes["auth"]; ok {
+			if authPlugins, ok = ctx.plugins.acquired["auth"]; ok {
 				if pl, kk := authPlugins[backend]; kk {
-					plObject, err := configurePlugin(pl, config)
+					plObject, err := ctx.configurePlugin(pl, config)
 					if err != nil {
 						logger.Fatalf(err.Error())
 						return nil, errors.New("")
@@ -218,7 +244,43 @@ func loadAuth(cfg *configuration.Config, plTypes pluginTypes) (*auth.Manager, er
 	return def, nil
 }
 
-func loadPersistence(cfg interface{}, plTypes pluginTypes) (persistence.Provider, error) {
+func (ctx *appContext) configureDebugPlugins(cfg interface{}) error {
+	logger.Info("configuring debug plugins")
+
+	for idx, cfgEntry := range cfg.([]interface{}) {
+		entry := cfgEntry.(map[interface{}]interface{})
+
+		var backend string
+		var config interface{}
+		var ok bool
+
+		if backend, ok = entry["backend"].(string); !ok {
+			logger.Fatalf("\tplugins.config.debug[%d] must contain key \"backend\"", idx)
+		}
+
+		if config, ok = entry["config"]; !ok {
+			logger.Fatalf("\tplugins.config.debug[%d] must contain map \"config\"", idx)
+		}
+
+		var debugPlugins pluginType
+		if debugPlugins, ok = ctx.plugins.acquired["debug"]; ok {
+			if pl, kk := debugPlugins[backend]; kk {
+				_, err := ctx.configurePlugin(pl, config)
+				if err != nil {
+					logger.Fatalf(err.Error())
+					return errors.New("")
+				}
+			} else {
+				logger.Warnf("\tno enabled plugin of type [%d]", backend)
+			}
+		} else {
+			logger.Error("\tno debug plugins loaded")
+		}
+	}
+	return nil
+}
+
+func (ctx *appContext) loadPersistence(cfg interface{}) (persistence.Provider, error) {
 	persist := persistence.Default()
 
 	logger.Info("loading persistence")
@@ -245,12 +307,12 @@ func loadPersistence(cfg interface{}, plTypes pluginTypes) (persistence.Provider
 			logger.Fatalf("\tplugins.config.persistence[0] must contain map \"config\"")
 		}
 
-		if plTypes != nil {
-			if pl, kk := plTypes["persistence"][backend]; !kk {
+		if ctx.plugins.acquired != nil {
+			if pl, kk := ctx.plugins.acquired["persistence"][backend]; !kk {
 				logger.Fatalf("\tplugins.config.persistence.backend: plugin type [%s] not found", backend)
 				return nil, errors.New("")
 			} else {
-				plObject, err := configurePlugin(pl, config)
+				plObject, err := ctx.configurePlugin(pl, config)
 				if err != nil {
 					logger.Fatalf(err.Error())
 					return nil, errors.New("")
@@ -266,10 +328,11 @@ func loadPersistence(cfg interface{}, plTypes pluginTypes) (persistence.Provider
 	return persist, nil
 }
 
-func configurePlugin(pl vlplugin.Plugin, c interface{}) (interface{}, error) {
+func (ctx *appContext) configurePlugin(pl vlplugin.Plugin, c interface{}) (interface{}, error) {
 	name := "plugin." + pl.Info().Type() + "." + pl.Info().Name()
 
 	sysParams := &vlplugin.SysParams{
+		HTTP:          ctx,
 		SignalFailure: pluginFailureSignal,
 		Log:           configuration.GetLogger().Named(name),
 	}
@@ -281,10 +344,12 @@ func configurePlugin(pl vlplugin.Plugin, c interface{}) (interface{}, error) {
 		return nil, errors.New(name + ": acquire failed : " + err.Error())
 	}
 
+	ctx.plugins.configured = append(ctx.plugins.configured, plObject)
+
 	return plObject, err
 }
 
-func loadPlugins(cfg *configuration.PluginsConfig) (pluginTypes, error) {
+func (ctx *appContext) loadPlugins(cfg *configuration.PluginsConfig) error {
 	plugins := configuration.LoadPlugins(configuration.PluginsDir, cfg.Enabled)
 
 	plTypes := make(pluginTypes)
@@ -312,7 +377,29 @@ func loadPlugins(cfg *configuration.PluginsConfig) (pluginTypes, error) {
 		}
 	}
 
-	return plTypes, nil
+	ctx.plugins.acquired = plTypes
+	return nil
+}
+
+func (ctx *appContext) GetHTTPServer(port string) vlplugin.HTTPHandler {
+	if port == "" {
+		port = ctx.httpDefaultMux
+	}
+
+	srv := &httpServer{
+		mux: http.NewServeMux(),
+	}
+
+	srv.server = &http.Server{
+		Addr:    ":" + port,
+		Handler: srv.mux,
+	}
+
+	if actual, ok := ctx.httpServers.LoadOrStore(port, srv); ok {
+		srv = actual.(*httpServer)
+	}
+
+	return srv
 }
 
 var logger *zap.SugaredLogger
@@ -337,22 +424,64 @@ func main() {
 	}
 
 	var persist persistence.Provider
-	var plTypes pluginTypes
 	var defaultAuth *auth.Manager
-
 	var err error
 
-	if plTypes, err = loadPlugins(&config.Plugins); err != nil {
+	ctx := appContext{
+		httpDefaultMux: config.System.Http.DefaultPort,
+		//registry: prometheus.NewRegistry(),
+	}
+	//
+	//ctx.health = healthcheck.NewMetricsHandler(ctx.registry, "volantmq")
+
+	//ctx.httpServer = &http.Server{
+	//	Addr:    ":8086",
+	//	Handler: ctx.adminMux,
+	//}
+	//
+	//// Expose prometheus metrics on /metrics
+	//ctx.adminMux.Handle("/metrics", promhttp.HandlerFor(ctx.registry, promhttp.HandlerOpts{}))
+	//
+	//// Expose a liveness check on /live
+	//ctx.adminMux.HandleFunc("/live", ctx.health.LiveEndpoint)
+	//
+	//// Expose a readiness check on /ready
+	//ctx.adminMux.HandleFunc("/ready", ctx.health.ReadyEndpoint)
+	//
+	//go func() {
+	//	logger.Info("starting http server on " + ctx.httpServer.Addr)
+	//	ctx.httpServer.ListenAndServe()
+	//	logger.Info("stopped http server")
+	//}()
+
+	if err = ctx.loadPlugins(&config.Plugins); err != nil {
 		return
 	}
 
-	if persist, err = loadPersistence(config.Plugins.Config["persistence"], plTypes); err != nil {
+	if c, ok := config.Plugins.Config["debug"]; ok {
+		if err = ctx.configureDebugPlugins(c); err != nil {
+			return
+		}
+	}
+
+	if persist, err = ctx.loadPersistence(config.Plugins.Config["persistence"]); err != nil {
 		return
 	}
 
-	if defaultAuth, err = loadAuth(config, plTypes); err != nil {
+	if defaultAuth, err = ctx.loadAuth(config); err != nil {
 		return
 	}
+
+	ctx.httpServers.Range(func(k, v interface{}) bool {
+		s := v.(*httpServer)
+
+		go func() {
+			logger.Info("starting http server on " + s.server.Addr)
+			s.server.ListenAndServe()
+			logger.Info("stopped http server on " + s.server.Addr)
+		}()
+		return true
+	})
 
 	var listeners map[string][]interface{}
 
@@ -372,9 +501,10 @@ func main() {
 	}
 
 	serverConfig := server.Config{
+		//Health:          ctx.health,
 		MQTT:            config.Mqtt,
-		TransportStatus: listenerStatus,
 		Persistence:     persist,
+		TransportStatus: listenerStatus,
 		OnDuplicate: func(s string, b bool) {
 			logger.Info("Session duplicate: ClientID: ", s, " allowed: ", b)
 		},
@@ -386,6 +516,7 @@ func main() {
 	}
 
 	logger.Info("MQTT server created")
+
 	logger.Info("MQTT starting listeners")
 	for _, l := range listeners["mqtt"] {
 		if err = srv.ListenAndServe(l); err != nil {
@@ -394,21 +525,12 @@ func main() {
 		}
 	}
 
-	var profServer *http.Server
+	// stop if any listeners failed
+	if err != nil {
+		return
+	}
 
 	if err == nil {
-		if config.System.Profiler.Port != "" {
-			profServer = &http.Server{
-				Addr: ":" + config.System.Profiler.Port,
-			}
-
-			logger.Info("profiler: serving at: ", "http://"+profServer.Addr+"/debug/pprof")
-
-			go func() {
-				profServer.ListenAndServe()
-			}()
-		}
-
 		ch := make(chan os.Signal, 1)
 		signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 		sig := <-ch
@@ -419,9 +541,11 @@ func main() {
 		logger.Error("shutdown server", zap.Error(err))
 	}
 
-	if profServer != nil {
-		profServer.Shutdown(context.Background())
-	}
+	ctx.httpServers.Range(func(k, v interface{}) bool {
+		s := v.(*httpServer)
+		s.server.Shutdown(context.Background())
+		return true
+	})
 }
 
 func pluginFailureSignal(name, msg string) {

@@ -4,16 +4,21 @@ system:
     console:
       config:
         level: info # available levels: debug, info, warn, error, dpanic, panic, fatal
-  profiler:
-    port: 6060
-    cpu: true
-    mem: false
-    mutex: false
+  http:
+    defaultPort: 8086
 plugins:
   enabled:
 #  - persistence_boltdb
-  - controller_auth
+#  - controller_auth
+#  - mqtt.amqp.bridge
+  - debug
   config:
+    debug:
+      - backend: prof.profiler
+        config:
+          cpu: true
+          mem: false
+          mutex: false
 #    persistence:            # plugin type
 #      - backend: boltdb     # plugin internal name
 #        config:
@@ -25,26 +30,46 @@ plugins:
           users:
             testuser: "9f735e0df9a1ddc702bf0a1a7b83033f9f7153a00c29de82cedadc9957289b05" # password must be sha-256 hashed
 #          usersFile: "./users.yaml" # path to file with users: passwords
-      - name: "simply.amqp"
-        backend: "simply.amqp"
-        config:
-          schemas: "/Users/amr/projects/gocode/src/gitlab.com/trysimply/cloud/controller_auth/schema"
+#      - name: "simply.amqp"
+#        backend: "simply.amqp"
+#        config:
+#          schemas: "/Users/amr/projects/gocode/src/gitlab.com/trysimply/cloud/controller_auth/schema"
+#          reqTimeout: 5
+#          reconnect:
+#            attempts: -1
+#            period: 5
+#          exchanges:
+#            - name: events
+#              type: topic
+#              durable : true
+#              autoDelete: false
+#              internal: false
+#              nowait: false
+    bridge:
+      - name: amqp.bridge
+        backend: amqp.bridge
+        amqp:
+          vhost: "/"
           reqTimeout: 5
           reconnect:
             attempts: -1
             period: 5
-          exchanges:
-            - name: events
-              type: topic
-              durable : true
-              autoDelete: false
-              internal: false
-              nowait: false
+          exchange:
+            name: "raw.events"
+            type: topic
+            durable : true
+            autoDelete: false
+            internal: false
+            nowait: false
+        mqtt:
+          subscribe:
+          - topic: "/events/controller/#"
+            qos: 2
 auth:
   anonymous: true
   order:
     - internal
-    - simply.amqp
+#    - simply.amqp
 mqtt:
   version:
   - v3.1.1

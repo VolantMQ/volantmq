@@ -7,45 +7,28 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/VolantMQ/mqttp"
+	"github.com/VolantMQ/vlapi/mqttp"
+	"github.com/VolantMQ/vlapi/subscriber"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/topics/types"
 )
 
-// SessionProvider passed to present network connection
-type SessionProvider interface {
-	Subscriptions() Subscriptions
-	Subscribe(string, *topicsTypes.SubscriptionParams) (packet.QosType, []*packet.Publish, error)
-	UnSubscribe(string) error
-	HasSubscriptions() bool
-	Online(c Publisher)
-	Offline(bool)
-	Hash() uintptr
-}
-
-type Publisher interface {
-	Publish(string, *packet.Publish)
-}
-
 type publisher struct {
-	Publisher
+	vlsubscriber.Publisher
 	sync.WaitGroup
 }
-
-// Subscriptions contains active subscriptions with respective subscription parameters
-type Subscriptions map[string]*topicsTypes.SubscriptionParams
 
 // Config subscriber config options
 type Config struct {
 	ID             string
-	OfflinePublish Publisher
+	OfflinePublish vlsubscriber.Publisher
 	Topics         topicsTypes.SubscriberInterface
-	Version        packet.ProtocolVersion
+	Version        mqttp.ProtocolVersion
 }
 
 // Type subscriber object
 type Type struct {
-	subscriptions Subscriptions
+	subscriptions vlsubscriber.Subscriptions
 	publisher     atomic.Value
 	log           *zap.SugaredLogger
 	access        sync.WaitGroup
@@ -53,12 +36,12 @@ type Type struct {
 	Config
 }
 
-var _ SessionProvider = (*Type)(nil)
+var _ vlsubscriber.IFace = (*Type)(nil)
 
 // New allocate new subscriber
 func New(c Config) *Type {
 	p := &Type{
-		subscriptions: make(Subscriptions),
+		subscriptions: make(vlsubscriber.Subscriptions),
 		Config:        c,
 		log:           configuration.GetLogger().Named("subscriber"),
 	}
@@ -97,17 +80,17 @@ func (s *Type) Release() {
 }
 
 // GetVersion return MQTT protocol version
-func (s *Type) GetVersion() packet.ProtocolVersion {
+func (s *Type) GetVersion() mqttp.ProtocolVersion {
 	return s.Version
 }
 
 // Subscriptions list active subscriptions
-func (s *Type) Subscriptions() Subscriptions {
+func (s *Type) Subscriptions() vlsubscriber.Subscriptions {
 	return s.subscriptions
 }
 
 // Subscribe to given topic
-func (s *Type) Subscribe(topic string, params *topicsTypes.SubscriptionParams) (packet.QosType, []*packet.Publish, error) {
+func (s *Type) Subscribe(topic string, params *vlsubscriber.SubscriptionParams) (mqttp.QosType, []*mqttp.Publish, error) {
 	q, r, err := s.Topics.Subscribe(topic, s, params)
 
 	s.subscriptions[topic] = params
@@ -124,14 +107,14 @@ func (s *Type) UnSubscribe(topic string) error {
 // Publish message accordingly to subscriber state
 // online: forward message to session
 // offline: persist message
-func (s *Type) Publish(p *packet.Publish, grantedQoS packet.QosType, ops packet.SubscriptionOptions, ids []uint32) error {
+func (s *Type) Publish(p *mqttp.Publish, grantedQoS mqttp.QosType, ops mqttp.SubscriptionOptions, ids []uint32) error {
 	pkt, err := p.Clone(s.Version)
 	if err != nil {
 		return err
 	}
 
 	if len(ids) > 0 {
-		if err = pkt.PropertySet(packet.PropertySubscriptionIdentifier, ids); err != nil {
+		if err = pkt.PropertySet(mqttp.PropertySubscriptionIdentifier, ids); err != nil {
 			return err
 		}
 	}
@@ -140,7 +123,7 @@ func (s *Type) Publish(p *packet.Publish, grantedQoS packet.QosType, ops packet.
 		pkt.SetRetain(false)
 	}
 
-	if pkt.QoS() != packet.QoS0 {
+	if pkt.QoS() != mqttp.QoS0 {
 		pkt.SetPacketID(0)
 	}
 
@@ -150,9 +133,9 @@ func (s *Type) Publish(p *packet.Publish, grantedQoS packet.QosType, ops packet.
 	// that at most one copy of the message is received by the Client. On the other hand, a QoS 2
 	// Message published to the same topic is downgraded by the Server to QoS 1 for delivery to the
 	// Client, so that Client might receive duplicate copies of the Message.
-	case packet.QoS1:
-		if pkt.QoS() == packet.QoS2 {
-			pkt.SetQoS(packet.QoS1) // nolint: errcheck
+	case mqttp.QoS1:
+		if pkt.QoS() == mqttp.QoS2 {
+			pkt.SetQoS(mqttp.QoS1) // nolint: errcheck
 		}
 
 		// If the subscribing Client has been granted maximum QoS 0, then an Application Message
@@ -164,7 +147,7 @@ func (s *Type) Publish(p *packet.Publish, grantedQoS packet.QosType, ops packet.
 
 	s.inProgress.Add(1)
 	pb := s.publisher.Load().(*publisher)
-	pb.Publish(s.ID, pkt)
+	pb.Publisher(s.ID, pkt)
 	s.inProgress.Done()
 
 	return nil
@@ -172,7 +155,7 @@ func (s *Type) Publish(p *packet.Publish, grantedQoS packet.QosType, ops packet.
 
 // Online moves subscriber to online state
 // since this moment all of publishes are forwarded to provided callback
-func (s *Type) Online(c Publisher) {
+func (s *Type) Online(c vlsubscriber.Publisher) {
 	s.publisher.Store(&publisher{
 		Publisher: c,
 	})

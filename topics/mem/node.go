@@ -3,7 +3,8 @@ package mem
 import (
 	"strings"
 
-	"github.com/VolantMQ/mqttp"
+	"github.com/VolantMQ/vlapi/mqttp"
+	"github.com/VolantMQ/vlapi/subscriber"
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/topics/types"
 	"github.com/VolantMQ/volantmq/types"
@@ -11,7 +12,7 @@ import (
 
 type topicSubscriber struct {
 	s topicsTypes.Subscriber
-	p *topicsTypes.SubscriptionParams
+	p *vlsubscriber.SubscriptionParams
 }
 
 type subscribers map[uintptr]*topicSubscriber
@@ -33,8 +34,8 @@ func (s *topicSubscriber) acquire() *publish {
 
 type publish struct {
 	s   topicsTypes.Subscriber
-	ops packet.SubscriptionOptions
-	qos packet.QosType
+	ops mqttp.SubscriptionOptions
+	qos mqttp.QosType
 	ids []uint32
 }
 
@@ -97,7 +98,7 @@ func (mT *provider) leafSearchNode(levels []string) *node {
 	return root
 }
 
-func (mT *provider) subscriptionInsert(filter string, sub topicsTypes.Subscriber, p *topicsTypes.SubscriptionParams) bool {
+func (mT *provider) subscriptionInsert(filter string, sub topicsTypes.Subscriber, p *vlsubscriber.SubscriptionParams) bool {
 	levels := strings.Split(filter, "/")
 
 	root := mT.leafInsertNode(levels)
@@ -233,7 +234,7 @@ func (mT *provider) retainRemove(topic string) error {
 	return nil
 }
 
-func retainRecurseSearch(root *node, levels []string, retained *[]*packet.Publish) {
+func retainRecurseSearch(root *node, levels []string, retained *[]*mqttp.Publish) {
 	if len(levels) == 0 {
 		// leaf level of the topic
 		root.getRetained(retained)
@@ -259,7 +260,7 @@ func retainRecurseSearch(root *node, levels []string, retained *[]*packet.Publis
 	}
 }
 
-func (mT *provider) retainSearch(filter string, retained *[]*packet.Publish) {
+func (mT *provider) retainSearch(filter string, retained *[]*mqttp.Publish) {
 	levels := strings.Split(filter, "/")
 	level := levels[0]
 
@@ -276,12 +277,12 @@ func (mT *provider) retainSearch(filter string, retained *[]*packet.Publish) {
 	}
 }
 
-func (sn *node) getRetained(retained *[]*packet.Publish) {
+func (sn *node) getRetained(retained *[]*mqttp.Publish) {
 	if sn.retained != nil {
-		var p *packet.Publish
+		var p *mqttp.Publish
 
 		switch t := sn.retained.(type) {
-		case *packet.Publish:
+		case *mqttp.Publish:
 			p = t
 		case systree.DynamicValue:
 			p = t.Retained()
@@ -297,7 +298,7 @@ func (sn *node) getRetained(retained *[]*packet.Publish) {
 	}
 }
 
-func (sn *node) allRetained(retained *[]*packet.Publish) {
+func (sn *node) allRetained(retained *[]*mqttp.Publish) {
 	sn.getRetained(retained)
 
 	for _, n := range sn.children {

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"sync/atomic"
 
-	"github.com/VolantMQ/mqttp"
+	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/VolantMQ/volantmq/types"
 )
 
@@ -48,10 +48,10 @@ func (t *sessions) Created(id string, status *SessionCreatedStatus) {
 
 	if t.topicsManager != nil {
 		// notify client connected
-		nm, _ := packet.New(packet.ProtocolV311, packet.PUBLISH)
-		notifyMsg, _ := nm.(*packet.Publish)
+		nm, _ := mqttp.New(mqttp.ProtocolV311, mqttp.PUBLISH)
+		notifyMsg, _ := nm.(*mqttp.Publish)
 		notifyMsg.SetRetain(false)
-		notifyMsg.SetQoS(packet.QoS0)    // nolint: errcheck
+		notifyMsg.SetQoS(mqttp.QoS0)     // nolint: errcheck
 		notifyMsg.SetTopic(t.topic + id) // nolint: errcheck
 
 		if out, err := json.Marshal(&status); err != nil {
@@ -70,18 +70,18 @@ func (t *sessions) Created(id string, status *SessionCreatedStatus) {
 func (t *sessions) Removed(id string, status *SessionDeletedStatus) {
 	atomic.AddUint64(&t.curr.val, ^uint64(0))
 	if t.topicsManager != nil {
-		nm, _ := packet.New(packet.ProtocolV311, packet.PUBLISH)
-		notifyMsg, _ := nm.(*packet.Publish)
+		nm, _ := mqttp.New(mqttp.ProtocolV311, mqttp.PUBLISH)
+		notifyMsg, _ := nm.(*mqttp.Publish)
 		notifyMsg.SetRetain(false)
-		notifyMsg.SetQoS(packet.QoS0)    // nolint: errcheck
+		notifyMsg.SetQoS(mqttp.QoS0)     // nolint: errcheck
 		notifyMsg.SetTopic(t.topic + id) // nolint: errcheck
 
 		t.topicsManager.Retain(notifyMsg) // nolint: errcheck
 
-		nm, _ = packet.New(packet.ProtocolV311, packet.PUBLISH)
-		notifyMsg, _ = nm.(*packet.Publish)
+		nm, _ = mqttp.New(mqttp.ProtocolV311, mqttp.PUBLISH)
+		notifyMsg, _ = nm.(*mqttp.Publish)
 		notifyMsg.SetRetain(false)
-		notifyMsg.SetQoS(packet.QoS0)                 // nolint: errcheck
+		notifyMsg.SetQoS(mqttp.QoS0)                  // nolint: errcheck
 		notifyMsg.SetTopic(t.topic + id)              // nolint: errcheck
 		notifyMsg.SetTopic(t.topic + id + "/removed") // nolint: errcheck
 		if out, err := json.Marshal(&status); err != nil {

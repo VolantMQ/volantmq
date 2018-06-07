@@ -3,7 +3,7 @@ package configuration
 import (
 	"plugin"
 
-	"github.com/VolantMQ/vlplugin"
+	"github.com/VolantMQ/vlapi/plugin"
 )
 
 // PluginState status

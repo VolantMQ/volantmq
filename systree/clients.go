@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/VolantMQ/mqttp"
+	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/VolantMQ/volantmq/types"
 )
 
@@ -22,9 +22,9 @@ type ClientConnectStatus struct {
 	Durable           bool
 	SessionPresent    bool
 	PreserveOrder     bool
-	MaximumQoS        packet.QosType
-	Protocol          packet.ProtocolVersion
-	ConnAckCode       packet.ReasonCode
+	MaximumQoS        mqttp.QosType
+	Protocol          mqttp.ProtocolVersion
+	ConnAckCode       mqttp.ReasonCode
 }
 
 type clientDisconnectStatus struct {
@@ -55,10 +55,10 @@ func (t *clients) Connected(id string, status *ClientConnectStatus) {
 	}
 
 	// notify client connected
-	nm, _ := packet.New(packet.ProtocolV311, packet.PUBLISH)
-	notifyMsg, _ := nm.(*packet.Publish)
+	nm, _ := mqttp.New(mqttp.ProtocolV311, mqttp.PUBLISH)
+	notifyMsg, _ := nm.(*mqttp.Publish)
 	notifyMsg.SetRetain(false)
-	notifyMsg.SetQoS(packet.QoS0)                   // nolint: errcheck
+	notifyMsg.SetQoS(mqttp.QoS0)                    // nolint: errcheck
 	notifyMsg.SetTopic(t.topic + id + "/connected") // nolint: errcheck
 
 	if out, err := json.Marshal(&status); err != nil {
@@ -72,22 +72,22 @@ func (t *clients) Connected(id string, status *ClientConnectStatus) {
 	t.topicsManager.Retain(notifyMsg)  // nolint: errcheck
 
 	// notify remove previous disconnect if any
-	nm, _ = packet.New(packet.ProtocolV311, packet.PUBLISH)
-	notifyMsg, _ = nm.(*packet.Publish)
+	nm, _ = mqttp.New(mqttp.ProtocolV311, mqttp.PUBLISH)
+	notifyMsg, _ = nm.(*mqttp.Publish)
 	notifyMsg.SetRetain(false)
-	notifyMsg.SetQoS(packet.QoS0)                      // nolint: errcheck
+	notifyMsg.SetQoS(mqttp.QoS0)                       // nolint: errcheck
 	notifyMsg.SetTopic(t.topic + id + "/disconnected") // nolint: errcheck
 	t.topicsManager.Retain(notifyMsg)                  // nolint: errcheck
 }
 
 // Disconnected remove client from statistic
-func (t *clients) Disconnected(id string, reason packet.ReasonCode) {
+func (t *clients) Disconnected(id string, reason mqttp.ReasonCode) {
 	atomic.AddUint64(&t.curr.val, ^uint64(0))
 
-	nm, _ := packet.New(packet.ProtocolV311, packet.PUBLISH)
-	notifyMsg, _ := nm.(*packet.Publish)
+	nm, _ := mqttp.New(mqttp.ProtocolV311, mqttp.PUBLISH)
+	notifyMsg, _ := nm.(*mqttp.Publish)
 	notifyMsg.SetRetain(false)
-	notifyMsg.SetQoS(packet.QoS0)                      // nolint: errcheck
+	notifyMsg.SetQoS(mqttp.QoS0)                       // nolint: errcheck
 	notifyMsg.SetTopic(t.topic + id + "/disconnected") // nolint: errcheck
 	notifyPayload := clientDisconnectStatus{
 		Reason:    "normal",
@@ -103,10 +103,10 @@ func (t *clients) Disconnected(id string, reason packet.ReasonCode) {
 	t.topicsManager.Publish(notifyMsg) // nolint: errcheck
 
 	// remove connected retained message
-	nm, _ = packet.New(packet.ProtocolV311, packet.PUBLISH)
-	notifyMsg, _ = nm.(*packet.Publish)
+	nm, _ = mqttp.New(mqttp.ProtocolV311, mqttp.PUBLISH)
+	notifyMsg, _ = nm.(*mqttp.Publish)
 	notifyMsg.SetRetain(false)
-	notifyMsg.SetQoS(packet.QoS0)                   // nolint: errcheck
+	notifyMsg.SetQoS(mqttp.QoS0)                    // nolint: errcheck
 	notifyMsg.SetTopic(t.topic + id + "/connected") // nolint: errcheck
 	t.topicsManager.Retain(notifyMsg)               // nolint: errcheck
 }

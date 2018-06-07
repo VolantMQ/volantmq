@@ -4,12 +4,12 @@ import (
 	"errors"
 	"time"
 
-	"github.com/VolantMQ/mqttp"
+	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/transport"
 )
 
-type OnAuthCb func(string, *AuthParams) (packet.Provider, error)
+type OnAuthCb func(string, *AuthParams) (mqttp.Provider, error)
 
 type Option func(*impl) error
 

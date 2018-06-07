@@ -6,8 +6,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/VolantMQ/mqttp"
-	"github.com/VolantMQ/persistence"
+	"github.com/VolantMQ/vlapi/mqttp"
+	"github.com/VolantMQ/vlapi/plugin"
+	"github.com/VolantMQ/vlapi/plugin/persistence"
+	"github.com/VolantMQ/vlapi/subscriber"
 	"github.com/VolantMQ/volantmq/clients"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/systree"
@@ -30,11 +32,10 @@ var (
 	ErrInvalidNodeName = errors.New("node name is invalid")
 )
 
-type option func(*Server)
-
 // Config configuration of the MQTT server
 type Config struct {
 	MQTT configuration.MqttConfig
+
 	// Configuration of persistence provider
 	Persistence persistence.Provider
 
@@ -45,6 +46,8 @@ type Config struct {
 	// TransportStatus user provided callback to track transport status
 	// If not set than defaults to mock function
 	TransportStatus func(id string, status string)
+
+	//Health healthcheck.Handler
 
 	// NodeName
 	NodeName string
@@ -84,6 +87,8 @@ type server struct {
 		wg        sync.WaitGroup
 	}
 }
+
+var _ vlplugin.Messaging = (*server)(nil)
 
 // NewServer allocate server object
 func NewServer(config Config) (Server, error) {
@@ -151,7 +156,7 @@ func NewServer(config Config) (Server, error) {
 
 	topicsConfig.Stat = s.sysTree.Topics()
 	topicsConfig.Persist = persisRetained
-	topicsConfig.OverlappingSubscriptions = config.MQTT.Options.SubsOverlap
+	topicsConfig.OverlappingSubscriptions = s.MQTT.Options.SubsOverlap
 
 	if s.topicsMgr, err = topics.New(topicsConfig); err != nil {
 		return nil, err
@@ -188,6 +193,11 @@ func NewServer(config Config) (Server, error) {
 	}
 
 	return s, nil
+}
+
+// GetSubscriber ...
+func (s *server) GetSubscriber(id string) (vlsubscriber.IFace, error) {
+	return s.sessionsMgr.GetSubscriber(id)
 }
 
 // ListenAndServe start listener
@@ -230,9 +240,27 @@ func (s *server) ListenAndServe(config interface{}) error {
 		s.TransportStatus(":"+l.Port(), "started")
 
 		status := "stopped"
+
+		//s.Health.AddReadinessCheck("listener-ready:"+l.Port(), func() error {
+		//	if e := l.Ready(); e != nil {
+		//		return e
+		//	}
+		//
+		//	return healthcheck.TCPDialCheck(":"+l.Port(), 1*time.Second)()
+		//})
+		//
+		//s.Health.AddLivenessCheck("listener-alive:"+l.Port(), func() error {
+		//	if e := l.Alive(); e != nil {
+		//		return e
+		//	}
+		//
+		//	return healthcheck.TCPDialCheck(":"+l.Port(), 1*time.Second)()
+		//})
+
 		if e := l.Serve(); e != nil {
 			status = e.Error()
 		}
+
 		s.TransportStatus(":"+l.Port(), status)
 	}()
 
@@ -289,7 +317,7 @@ func (s *server) systreeUpdater() {
 	case <-s.systree.timer.C:
 		for _, val := range s.systree.publishes {
 			p := val.Publish()
-			pkt := packet.NewPublish(packet.ProtocolV311)
+			pkt := mqttp.NewPublish(mqttp.ProtocolV311)
 
 			pkt.SetPayload(p.Payload())
 			pkt.SetTopic(p.Topic())  // nolint: errcheck

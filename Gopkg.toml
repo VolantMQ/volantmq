@@ -31,15 +31,7 @@
 
 [[constraint]]
   branch = "master"
-  name = "github.com/VolantMQ/persistence"
-
-[[constraint]]
-  branch = "master"
-  name = "github.com/VolantMQ/vlauth"
-
-[[constraint]]
-  branch = "master"
-  name = "github.com/VolantMQ/vlplugin"
+  name = "github.com/VolantMQ/vlapi"
 
 [[constraint]]
   name = "github.com/gorilla/websocket"

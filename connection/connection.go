@@ -25,8 +25,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/VolantMQ/mqttp"
-	"github.com/VolantMQ/persistence"
+	"github.com/VolantMQ/vlapi/mqttp"
+	"github.com/VolantMQ/vlapi/plugin/persistence"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/transport"
@@ -51,39 +51,39 @@ var (
 	ErrPersistence = errors.New("session: error during persistence restore")
 )
 
-var expectedPacketType = map[state]map[packet.Type]bool{
-	stateConnecting: {packet.CONNECT: true},
+var expectedPacketType = map[state]map[mqttp.Type]bool{
+	stateConnecting: {mqttp.CONNECT: true},
 	stateAuth: {
-		packet.AUTH:       true,
-		packet.DISCONNECT: true,
+		mqttp.AUTH:       true,
+		mqttp.DISCONNECT: true,
 	},
 	stateConnected: {
-		packet.PUBLISH:     true,
-		packet.PUBACK:      true,
-		packet.PUBREC:      true,
-		packet.PUBREL:      true,
-		packet.PUBCOMP:     true,
-		packet.SUBSCRIBE:   true,
-		packet.SUBACK:      true,
-		packet.UNSUBSCRIBE: true,
-		packet.UNSUBACK:    true,
-		packet.PINGREQ:     true,
-		packet.AUTH:        true,
-		packet.DISCONNECT:  true,
+		mqttp.PUBLISH:     true,
+		mqttp.PUBACK:      true,
+		mqttp.PUBREC:      true,
+		mqttp.PUBREL:      true,
+		mqttp.PUBCOMP:     true,
+		mqttp.SUBSCRIBE:   true,
+		mqttp.SUBACK:      true,
+		mqttp.UNSUBSCRIBE: true,
+		mqttp.UNSUBACK:    true,
+		mqttp.PINGREQ:     true,
+		mqttp.AUTH:        true,
+		mqttp.DISCONNECT:  true,
 	},
 	stateReAuth: {
-		packet.PUBLISH:     true,
-		packet.PUBACK:      true,
-		packet.PUBREC:      true,
-		packet.PUBREL:      true,
-		packet.PUBCOMP:     true,
-		packet.SUBSCRIBE:   true,
-		packet.SUBACK:      true,
-		packet.UNSUBSCRIBE: true,
-		packet.UNSUBACK:    true,
-		packet.PINGREQ:     true,
-		packet.AUTH:        true,
-		packet.DISCONNECT:  true,
+		mqttp.PUBLISH:     true,
+		mqttp.PUBACK:      true,
+		mqttp.PUBREC:      true,
+		mqttp.PUBREL:      true,
+		mqttp.PUBCOMP:     true,
+		mqttp.SUBSCRIBE:   true,
+		mqttp.SUBACK:      true,
+		mqttp.UNSUBSCRIBE: true,
+		mqttp.UNSUBACK:    true,
+		mqttp.PINGREQ:     true,
+		mqttp.AUTH:        true,
+		mqttp.DISCONNECT:  true,
 	},
 }
 
@@ -106,7 +106,7 @@ func (s state) desc() string {
 
 // DisconnectParams session state when stopped
 type DisconnectParams struct {
-	Reason  packet.ReasonCode
+	Reason  mqttp.ReasonCode
 	Packets persistence.PersistedPackets
 }
 
@@ -123,14 +123,14 @@ type WillConfig struct {
 	Topic   string
 	Message []byte
 	Retain  bool
-	QoS     packet.QosType
+	QoS     mqttp.QosType
 }
 
 // AuthParams ...
 type AuthParams struct {
 	AuthMethod string
 	AuthData   []byte
-	Reason     packet.ReasonCode
+	Reason     mqttp.ReasonCode
 }
 
 // ConnectParams ...
@@ -139,7 +139,7 @@ type ConnectParams struct {
 	ID              string
 	Error           error
 	ExpireIn        *uint32
-	Will            *packet.Publish
+	Will            *mqttp.Publish
 	Username        []byte
 	Password        []byte
 	WillDelay       uint32
@@ -149,15 +149,15 @@ type ConnectParams struct {
 	IDGen           bool
 	CleanStart      bool
 	Durable         bool
-	Version         packet.ProtocolVersion
+	Version         mqttp.ProtocolVersion
 }
 
 // SessionCallbacks ...
 type SessionCallbacks interface {
-	SignalPublish(*packet.Publish) error
-	SignalSubscribe(*packet.Subscribe) (packet.Provider, error)
-	SignalUnSubscribe(*packet.UnSubscribe) (packet.Provider, error)
-	SignalDisconnect(*packet.Disconnect) (packet.Provider, error)
+	SignalPublish(*mqttp.Publish) error
+	SignalSubscribe(*mqttp.Subscribe) (mqttp.Provider, error)
+	SignalUnSubscribe(*mqttp.UnSubscribe) (mqttp.Provider, error)
+	SignalDisconnect(*mqttp.Disconnect) (mqttp.Provider, error)
 	SignalOffline()
 	SignalConnectionClose(DisconnectParams)
 }
@@ -224,13 +224,13 @@ type impl struct {
 	topicAliasCurrMax uint16
 	maxTxTopicAlias   uint16
 	maxRxTopicAlias   uint16
-	version           packet.ProtocolVersion
+	version           mqttp.ProtocolVersion
 	retainAvailable   bool
 	offlineQoS0       bool
 }
 
 type unacknowledged struct {
-	packet packet.Provider
+	packet mqttp.Provider
 }
 
 // Size ...
@@ -250,8 +250,8 @@ type baseAPI interface {
 type Initial interface {
 	baseAPI
 	Accept() (chan interface{}, error)
-	Send(packet.Provider) error
-	Acknowledge(p *packet.ConnAck, opts ...Option) bool
+	Send(mqttp.Provider) error
+	Acknowledge(p *mqttp.ConnAck, opts ...Option) bool
 	Session() Session
 }
 
@@ -259,7 +259,7 @@ type Initial interface {
 type Session interface {
 	baseAPI
 	persistence.PacketLoader
-	Publish(string, *packet.Publish)
+	Publish(string, *mqttp.Publish)
 	LoadRemaining(g, q *list.List)
 	SetOptions(opts ...Option) error
 	Start() error
@@ -350,7 +350,7 @@ func (s *impl) Start() error {
 }
 
 // Send packet to connection
-func (s *impl) Send(pkt packet.Provider) (err error) {
+func (s *impl) Send(pkt mqttp.Provider) (err error) {
 	defer func() {
 		if err != nil {
 			close(s.connect)
@@ -358,7 +358,7 @@ func (s *impl) Send(pkt packet.Provider) (err error) {
 		}
 	}()
 
-	if pkt.Type() == packet.AUTH {
+	if pkt.Type() == mqttp.AUTH {
 		s.state = stateAuth
 	}
 
@@ -378,7 +378,7 @@ func (s *impl) Send(pkt packet.Provider) (err error) {
 }
 
 // Acknowledge incoming connection
-func (s *impl) Acknowledge(p *packet.ConnAck, opts ...Option) bool {
+func (s *impl) Acknowledge(p *mqttp.ConnAck, opts ...Option) bool {
 	ack := true
 	s.conn.SetReadDeadline(time.Time{})
 	//s.conn.Stop()
@@ -386,7 +386,7 @@ func (s *impl) Acknowledge(p *packet.ConnAck, opts ...Option) bool {
 
 	close(s.connect)
 
-	if p.ReturnCode() == packet.CodeSuccess {
+	if p.ReturnCode() == mqttp.CodeSuccess {
 		s.state = stateConnected
 
 		for _, opt := range opts {
@@ -406,7 +406,7 @@ func (s *impl) Acknowledge(p *packet.ConnAck, opts ...Option) bool {
 		ack = false
 	}
 
-	buf, _ := packet.Encode(p)
+	buf, _ := mqttp.Encode(p)
 	bufs := net.Buffers{buf}
 	bufs.WriteTo(s.conn)
 
@@ -440,26 +440,26 @@ func (s *impl) LoadRemaining(g, q *list.List) {
 // LoadPersistedPacket ...
 func (s *impl) LoadPersistedPacket(entry *persistence.PersistedPacket) error {
 	var err error
-	var pkt packet.Provider
+	var pkt mqttp.Provider
 
-	if pkt, _, err = packet.Decode(s.version, entry.Data); err != nil {
+	if pkt, _, err = mqttp.Decode(s.version, entry.Data); err != nil {
 		s.log.Error("Couldn't decode persisted message", zap.Error(err))
 		return ErrPersistence
 	}
 
 	if entry.Flags.UnAck {
 		switch p := pkt.(type) {
-		case *packet.Publish:
+		case *mqttp.Publish:
 			id, _ := p.ID()
 			s.flowReAcquire(id)
-		case *packet.Ack:
+		case *mqttp.Ack:
 			id, _ := p.ID()
 			s.flowReAcquire(id)
 		}
 
 		s.qLoad(&unacknowledged{packet: pkt})
 	} else {
-		if p, ok := pkt.(*packet.Publish); ok {
+		if p, ok := pkt.(*mqttp.Publish); ok {
 			if len(entry.ExpireAt) > 0 {
 				var tm time.Time
 				if tm, err = time.Parse(time.RFC3339, entry.ExpireAt); err == nil {
@@ -469,7 +469,7 @@ func (s *impl) LoadPersistedPacket(entry *persistence.PersistedPacket) error {
 				}
 			}
 
-			if p.QoS() == packet.QoS0 {
+			if p.QoS() == mqttp.QoS0 {
 				s.gLoad(pkt)
 			} else {
 				s.qLoad(pkt)
@@ -481,8 +481,8 @@ func (s *impl) LoadPersistedPacket(entry *persistence.PersistedPacket) error {
 }
 
 // Publish ...
-func (s *impl) Publish(id string, pkt *packet.Publish) {
-	if pkt.QoS() == packet.QoS0 {
+func (s *impl) Publish(id string, pkt *mqttp.Publish) {
+	if pkt.QoS() == mqttp.QoS0 {
 		s.gPush(pkt)
 	} else {
 		s.qPush(pkt)
@@ -498,11 +498,11 @@ func genClientID() string {
 	return base64.URLEncoding.EncodeToString(b)
 }
 
-func (s *impl) getWill(pkt *packet.Connect) *packet.Publish {
-	var p *packet.Publish
+func (s *impl) getWill(pkt *mqttp.Connect) *mqttp.Publish {
+	var p *mqttp.Publish
 
 	if willTopic, willPayload, willQoS, willRetain, will := pkt.Will(); will {
-		p = packet.NewPublish(pkt.Version())
+		p = mqttp.NewPublish(pkt.Version())
 		if err := p.Set(willTopic, willPayload, willQoS, willRetain, false); err != nil {
 			s.log.Error("Configure will packet", zap.String("ClientID", s.id), zap.Error(err))
 			p = nil
@@ -512,7 +512,7 @@ func (s *impl) getWill(pkt *packet.Connect) *packet.Publish {
 	return p
 }
 
-func (s *impl) onConnect(pkt *packet.Connect) (packet.Provider, error) {
+func (s *impl) onConnect(pkt *mqttp.Connect) (mqttp.Provider, error) {
 	if atomic.CompareAndSwapUint32(&s.connectProcessed, 0, 1) {
 		id := string(pkt.ClientID())
 		idGen := false
@@ -542,8 +542,8 @@ func (s *impl) onConnect(pkt *packet.Connect) (packet.Provider, error) {
 		//  - v3: if session is clean it is clean start and session lasts when Network connection closed
 		//  - v5: clean only means "clean start" and sessions lasts on connection close on if expire propery
 		//          exists and set to 0
-		if (params.Version <= packet.ProtocolV311 && params.CleanStart) ||
-			(params.Version >= packet.ProtocolV50 && params.ExpireIn != nil && *params.ExpireIn == 0) {
+		if (params.Version <= mqttp.ProtocolV311 && params.CleanStart) ||
+			(params.Version >= mqttp.ProtocolV50 && params.ExpireIn != nil && *params.ExpireIn == 0) {
 			params.Durable = false
 		}
 
@@ -552,13 +552,13 @@ func (s *impl) onConnect(pkt *packet.Connect) (packet.Provider, error) {
 	}
 
 	// It's protocol error to send CONNECT packet more than once
-	return nil, packet.CodeProtocolError
+	return nil, mqttp.CodeProtocolError
 }
 
-func (s *impl) onAuth(pkt *packet.Auth) (packet.Provider, error) {
+func (s *impl) onAuth(pkt *mqttp.Auth) (mqttp.Provider, error) {
 	// AUTH packets are allowed for v5.0 only
-	if s.version < packet.ProtocolV50 {
-		return nil, packet.CodeRefusedServerUnavailable
+	if s.version < mqttp.ProtocolV50 {
+		return nil, mqttp.CodeRefusedServerUnavailable
 	}
 
 	reason := pkt.ReasonCode()
@@ -567,9 +567,9 @@ func (s *impl) onAuth(pkt *packet.Auth) (packet.Provider, error) {
 	// during auth or re-auth Client must respond only AUTH with CodeContinueAuthentication
 	// if connection is being established Client must send AUTH only with CodeReAuthenticate
 	if (s.state == stateConnecting) ||
-		((s.state == stateAuth || s.state == stateReAuth) && (reason != packet.CodeContinueAuthentication)) ||
-		((s.state == stateConnected) && reason != (packet.CodeReAuthenticate)) {
-		return nil, packet.CodeProtocolError
+		((s.state == stateAuth || s.state == stateReAuth) && (reason != mqttp.CodeContinueAuthentication)) ||
+		((s.state == stateConnected) && reason != (mqttp.CodeReAuthenticate)) {
+		return nil, mqttp.CodeProtocolError
 	}
 
 	params := AuthParams{
@@ -577,7 +577,7 @@ func (s *impl) onAuth(pkt *packet.Auth) (packet.Provider, error) {
 	}
 
 	// [MQTT-3.15.2.2.2]
-	if prop := pkt.PropertyGet(packet.PropertyAuthMethod); prop != nil {
+	if prop := pkt.PropertyGet(mqttp.PropertyAuthMethod); prop != nil {
 		if val, e := prop.AsString(); e == nil {
 			params.AuthMethod = val
 		}
@@ -585,7 +585,7 @@ func (s *impl) onAuth(pkt *packet.Auth) (packet.Provider, error) {
 
 	// AUTH packet must provide AuthMethod property
 	if len(params.AuthMethod) == 0 {
-		return nil, packet.CodeProtocolError
+		return nil, mqttp.CodeProtocolError
 	}
 
 	// [MQTT-4.12.0-7] - If the Client does not include an Authentication Method in the CONNECT,
@@ -593,11 +593,11 @@ func (s *impl) onAuth(pkt *packet.Auth) (packet.Provider, error) {
 	// [MQTT-4.12.1-1] - The Client MUST set the Authentication Method to the same value as
 	//                   the Authentication Method originally used to authenticate the Network Connection
 	if len(s.authMethod) == 0 || s.authMethod != params.AuthMethod {
-		return nil, packet.CodeProtocolError
+		return nil, mqttp.CodeProtocolError
 	}
 
 	// [MQTT-3.15.2.2.3]
-	if prop := pkt.PropertyGet(packet.PropertyAuthData); prop != nil {
+	if prop := pkt.PropertyGet(mqttp.PropertyAuthData); prop != nil {
 		if val, e := prop.AsBinary(); e == nil {
 			params.AuthData = val
 		}
@@ -611,27 +611,27 @@ func (s *impl) onAuth(pkt *packet.Auth) (packet.Provider, error) {
 	return s.signalAuth(s.id, &params)
 }
 
-func (s *impl) readConnProperties(req *packet.Connect, params *ConnectParams) {
-	if s.version < packet.ProtocolV50 {
+func (s *impl) readConnProperties(req *mqttp.Connect, params *ConnectParams) {
+	if s.version < mqttp.ProtocolV50 {
 		return
 	}
 
 	// [MQTT-3.1.2.11.2]
-	if prop := req.PropertyGet(packet.PropertySessionExpiryInterval); prop != nil {
+	if prop := req.PropertyGet(mqttp.PropertySessionExpiryInterval); prop != nil {
 		if val, e := prop.AsInt(); e == nil {
 			params.ExpireIn = &val
 		}
 	}
 
 	// [MQTT-3.1.2.11.3]
-	if prop := req.PropertyGet(packet.PropertyWillDelayInterval); prop != nil {
+	if prop := req.PropertyGet(mqttp.PropertyWillDelayInterval); prop != nil {
 		if val, e := prop.AsInt(); e == nil {
 			params.WillDelay = val
 		}
 	}
 
 	// [MQTT-3.1.2.11.4]
-	if prop := req.PropertyGet(packet.PropertyReceiveMaximum); prop != nil {
+	if prop := req.PropertyGet(mqttp.PropertyReceiveMaximum); prop != nil {
 		if val, e := prop.AsShort(); e == nil {
 			//s.pubOut.quota = int32(val)
 			s.txQuota = int32(val)
@@ -640,21 +640,21 @@ func (s *impl) readConnProperties(req *packet.Connect, params *ConnectParams) {
 	}
 
 	// [MQTT-3.1.2.11.5]
-	if prop := req.PropertyGet(packet.PropertyMaximumPacketSize); prop != nil {
+	if prop := req.PropertyGet(mqttp.PropertyMaximumPacketSize); prop != nil {
 		if val, e := prop.AsInt(); e == nil {
 			s.maxTxPacketSize = val
 		}
 	}
 
 	// [MQTT-3.1.2.11.6]
-	if prop := req.PropertyGet(packet.PropertyTopicAliasMaximum); prop != nil {
+	if prop := req.PropertyGet(mqttp.PropertyTopicAliasMaximum); prop != nil {
 		if val, e := prop.AsShort(); e == nil {
 			s.maxTxTopicAlias = val
 		}
 	}
 
 	// [MQTT-3.1.2.11.10]
-	if prop := req.PropertyGet(packet.PropertyAuthMethod); prop != nil {
+	if prop := req.PropertyGet(mqttp.PropertyAuthMethod); prop != nil {
 		if val, e := prop.AsString(); e == nil {
 			params.AuthMethod = val
 			s.authMethod = val
@@ -662,9 +662,9 @@ func (s *impl) readConnProperties(req *packet.Connect, params *ConnectParams) {
 	}
 
 	// [MQTT-3.1.2.11.11]
-	if prop := req.PropertyGet(packet.PropertyAuthData); prop != nil {
+	if prop := req.PropertyGet(mqttp.PropertyAuthData); prop != nil {
 		if len(params.AuthMethod) == 0 {
-			params.Error = packet.CodeProtocolError
+			params.Error = mqttp.CodeProtocolError
 			return
 		}
 		if val, e := prop.AsBinary(); e == nil {
@@ -675,9 +675,9 @@ func (s *impl) readConnProperties(req *packet.Connect, params *ConnectParams) {
 	return
 }
 
-func (s *impl) processIncoming(p packet.Provider) error {
+func (s *impl) processIncoming(p mqttp.Provider) error {
 	var err error
-	var resp packet.Provider
+	var resp mqttp.Provider
 
 	// [MQTT-3.1.2-33] - If a Client sets an Authentication Method in the CONNECT,
 	//                   the Client MUST NOT send any packets other than AUTH or DISCONNECT packets
@@ -687,26 +687,26 @@ func (s *impl) processIncoming(p packet.Provider) error {
 			zap.String("ClientID", s.id),
 			zap.String("state", s.state.desc()),
 			zap.String("packet", p.Type().Name()))
-		return packet.CodeProtocolError
+		return mqttp.CodeProtocolError
 	}
 
 	switch pkt := p.(type) {
-	case *packet.Connect:
+	case *mqttp.Connect:
 		resp, err = s.onConnect(pkt)
-	case *packet.Auth:
+	case *mqttp.Auth:
 		resp, err = s.onAuth(pkt)
-	case *packet.Publish:
+	case *mqttp.Publish:
 		resp, err = s.onPublish(pkt)
-	case *packet.Ack:
+	case *mqttp.Ack:
 		resp, err = s.onAck(pkt)
-	case *packet.Subscribe:
+	case *mqttp.Subscribe:
 		resp, err = s.SignalSubscribe(pkt)
-	case *packet.UnSubscribe:
+	case *mqttp.UnSubscribe:
 		resp, err = s.SignalUnSubscribe(pkt)
-	case *packet.PingReq:
+	case *mqttp.PingReq:
 		// For PINGREQ message, we should send back PINGRESP
-		resp = packet.NewPingResp(s.version)
-	case *packet.Disconnect:
+		resp = mqttp.NewPingResp(s.version)
+	case *mqttp.Disconnect:
 		resp, err = s.SignalDisconnect(pkt)
 	}
 
@@ -721,19 +721,19 @@ func (s *impl) getQueuedPackets() persistence.PersistedPackets {
 	var packets persistence.PersistedPackets
 
 	packetEncode := func(p interface{}) {
-		var pkt packet.Provider
+		var pkt mqttp.Provider
 		pPkt := &persistence.PersistedPacket{}
 
 		pPkt.Flags.UnAck = false
 
 		switch tp := p.(type) {
-		case *packet.Publish:
-			if expireAt, _, expired := tp.Expired(); expired && (s.offlineQoS0 || tp.QoS() != packet.QoS0) {
+		case *mqttp.Publish:
+			if expireAt, _, expired := tp.Expired(); expired && (s.offlineQoS0 || tp.QoS() != mqttp.QoS0) {
 				if !expireAt.IsZero() {
 					pPkt.ExpireAt = expireAt.Format(time.RFC3339)
 				}
 
-				if tp.QoS() != packet.QoS0 {
+				if tp.QoS() != mqttp.QoS0 {
 					// make sure message has some IDType to prevent encode error
 					tp.SetPacketID(0)
 				}
@@ -741,7 +741,7 @@ func (s *impl) getQueuedPackets() persistence.PersistedPackets {
 				pkt = tp
 			}
 		case *unacknowledged:
-			if pb, ok := tp.packet.(*packet.Publish); ok && pb.QoS() == packet.QoS1 {
+			if pb, ok := tp.packet.(*mqttp.Publish); ok && pb.QoS() == mqttp.QoS1 {
 				pb.SetDup(true)
 			}
 
@@ -751,7 +751,7 @@ func (s *impl) getQueuedPackets() persistence.PersistedPackets {
 
 		if pkt != nil {
 			var err error
-			if pPkt.Data, err = packet.Encode(pkt); err != nil {
+			if pPkt.Data, err = mqttp.Encode(pkt); err != nil {
 				s.log.Error("Couldn't encode message for persistence", zap.Error(err))
 			} else {
 				packets = append(packets, pPkt)
@@ -768,13 +768,13 @@ func (s *impl) getQueuedPackets() persistence.PersistedPackets {
 	for elem := s.txGMessages.Front(); elem != nil; elem = next {
 		next = elem.Next()
 		switch tp := s.txGMessages.Remove(elem).(type) {
-		case *packet.Publish:
+		case *mqttp.Publish:
 			packetEncode(tp)
 		}
 	}
 
 	s.pubOut.messages.Range(func(k, v interface{}) bool {
-		if pkt, ok := v.(packet.Provider); ok {
+		if pkt, ok := v.(mqttp.Provider); ok {
 			packetEncode(&unacknowledged{packet: pkt})
 		}
 
@@ -791,14 +791,14 @@ func (s *impl) getQueuedPackets() persistence.PersistedPackets {
 }
 
 // forward PUBLISH message to topics manager which takes care about subscribers
-func (s *impl) publishToTopic(p *packet.Publish) error {
+func (s *impl) publishToTopic(p *mqttp.Publish) error {
 	// v5.0
 	// If the Server included Retain Available in its CONNACK response to a Client with its value set to 0 and it
 	// receives a PUBLISH packet with the RETAIN flag is set to 1, then it uses the DISCONNECT Reason
 	// Code of 0x9A (Retain not supported) as described in section 4.13.
-	if s.version >= packet.ProtocolV50 {
+	if s.version >= mqttp.ProtocolV50 {
 		// [MQTT-3.3.2.3.4]
-		if prop := p.PropertyGet(packet.PropertyTopicAlias); prop != nil {
+		if prop := p.PropertyGet(mqttp.PropertyTopicAlias); prop != nil {
 			if val, err := prop.AsShort(); err == nil {
 				if len(p.Topic()) != 0 {
 					// renew alias with new topic
@@ -813,16 +813,16 @@ func (s *impl) publishToTopic(p *packet.Publish) error {
 								zap.Error(err))
 						}
 					} else {
-						return packet.CodeInvalidTopicAlias
+						return mqttp.CodeInvalidTopicAlias
 					}
 				}
 			} else {
-				return packet.CodeInvalidTopicAlias
+				return mqttp.CodeInvalidTopicAlias
 			}
 		}
 
 		// [MQTT-3.3.2.3.3]
-		if prop := p.PropertyGet(packet.PropertyPublicationExpiry); prop != nil {
+		if prop := p.PropertyGet(mqttp.PropertyPublicationExpiry); prop != nil {
 			if val, err := prop.AsInt(); err == nil {
 				s.log.Warn("Set pub expiration", zap.String("ClientID", s.id), zap.Duration("val", time.Duration(val)*time.Second))
 				p.SetExpireAt(time.Now().Add(time.Duration(val) * time.Second))
@@ -836,9 +836,9 @@ func (s *impl) publishToTopic(p *packet.Publish) error {
 }
 
 // onReleaseIn ack process for incoming messages
-func (s *impl) onReleaseIn(o, n packet.Provider) {
+func (s *impl) onReleaseIn(o, n mqttp.Provider) {
 	switch p := o.(type) {
-	case *packet.Publish:
+	case *mqttp.Publish:
 		s.SignalPublish(p)
 	}
 }
@@ -846,11 +846,11 @@ func (s *impl) onReleaseIn(o, n packet.Provider) {
 // onReleaseOut process messages that required ack cycle
 // onAckTimeout if publish message has not been acknowledged withing specified ackTimeout
 // server should mark it as a dup and send again
-func (s *impl) onReleaseOut(o, n packet.Provider) {
+func (s *impl) onReleaseOut(o, n mqttp.Provider) {
 	switch n.Type() {
-	case packet.PUBACK:
+	case mqttp.PUBACK:
 		fallthrough
-	case packet.PUBCOMP:
+	case mqttp.PUBCOMP:
 		id, _ := n.ID()
 		if s.flowRelease(id) {
 			s.signalQuota()

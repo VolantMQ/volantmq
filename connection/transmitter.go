@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/VolantMQ/mqttp"
+	"github.com/VolantMQ/vlapi/mqttp"
 	"go.uber.org/zap"
 )
 
@@ -27,7 +27,7 @@ func (s *impl) txShutdown() {
 	}
 }
 
-func (s *impl) gPushFront(pkt packet.Provider) {
+func (s *impl) gPushFront(pkt mqttp.Provider) {
 	s.txGLock.Lock()
 	s.txGMessages.PushFront(pkt)
 	s.txGLock.Unlock()
@@ -35,7 +35,7 @@ func (s *impl) gPushFront(pkt packet.Provider) {
 	s.txRun()
 }
 
-func (s *impl) gPush(pkt packet.Provider) {
+func (s *impl) gPush(pkt mqttp.Provider) {
 	s.txGLock.Lock()
 	s.txGMessages.PushBack(pkt)
 	s.txGLock.Unlock()
@@ -43,7 +43,7 @@ func (s *impl) gPush(pkt packet.Provider) {
 	s.txRun()
 }
 
-func (s *impl) gLoad(pkt packet.Provider) {
+func (s *impl) gLoad(pkt mqttp.Provider) {
 	s.txGLock.Lock()
 	s.txGMessages.PushBack(pkt)
 	s.txGLock.Unlock()
@@ -161,7 +161,7 @@ func (s *impl) qAvailable() bool {
 	return !s.txQuotaExceeded && s.txQMessages.Len() > 0
 }
 
-func (s *impl) gPopPacket() packet.Provider {
+func (s *impl) gPopPacket() mqttp.Provider {
 	defer s.txGLock.Unlock()
 	s.txGLock.Lock()
 
@@ -171,19 +171,19 @@ func (s *impl) gPopPacket() packet.Provider {
 		return nil
 	}
 
-	return s.txGMessages.Remove(elem).(packet.Provider)
+	return s.txGMessages.Remove(elem).(mqttp.Provider)
 }
 
-func (s *impl) qPopPacket() packet.Provider {
+func (s *impl) qPopPacket() mqttp.Provider {
 	defer s.txQLock.Unlock()
 	s.txQLock.Lock()
 
-	var pkt packet.Provider
+	var pkt mqttp.Provider
 
 	if elem := s.txQMessages.Front(); !s.txQuotaExceeded && elem != nil {
 		value := elem.Value
 		switch m := value.(type) {
-		case *packet.Publish:
+		case *mqttp.Publish:
 			// try acquire packet id
 			id, err := s.flowAcquire()
 			if err == errExit {
@@ -227,12 +227,12 @@ func (s *impl) txRoutine() {
 			for packets := s.popPackets(); len(packets) > 0; packets = s.popPackets() {
 				for _, pkt := range packets {
 					switch pack := pkt.(type) {
-					case *packet.Publish:
+					case *mqttp.Publish:
 						if _, expireLeft, expired := pack.Expired(); expired {
 							continue
 						} else {
 							if expireLeft > 0 {
-								if err = pkt.PropertySet(packet.PropertyPublicationExpiry, expireLeft); err != nil {
+								if err = pkt.PropertySet(mqttp.PropertyPublicationExpiry, expireLeft); err != nil {
 									s.log.Error("Set publication expire", zap.String("ClientID", s.id), zap.Error(err))
 								}
 							}
@@ -241,7 +241,7 @@ func (s *impl) txRoutine() {
 					}
 
 					if ok := s.packetFitsSize(pkt); ok {
-						if buf, e := packet.Encode(pkt); e != nil {
+						if buf, e := mqttp.Encode(pkt); e != nil {
 							s.log.Error("Message encode", zap.String("ClientID", s.id), zap.Error(err))
 						} else {
 							// todo (troian) might not be good place to do metrics
@@ -298,8 +298,8 @@ func (s *impl) txRoutine() {
 }
 
 // +
-func (s *impl) popPackets() []packet.Provider {
-	var packets []packet.Provider
+func (s *impl) popPackets() []mqttp.Provider {
+	var packets []mqttp.Provider
 	if pkt := s.gPopPacket(); pkt != nil {
 		packets = append(packets, pkt)
 	}
@@ -312,7 +312,7 @@ func (s *impl) popPackets() []packet.Provider {
 }
 
 // +
-func (s *impl) setTopicAlias(pkt *packet.Publish) {
+func (s *impl) setTopicAlias(pkt *mqttp.Publish) {
 	if s.maxTxTopicAlias > 0 {
 		var exists bool
 		var alias uint16
@@ -327,7 +327,7 @@ func (s *impl) setTopicAlias(pkt *packet.Publish) {
 			s.txTopicAlias[pkt.Topic()] = alias
 		}
 
-		if err := pkt.PropertySet(packet.PropertyTopicAlias, alias); err == nil && exists {
+		if err := pkt.PropertySet(mqttp.PropertyTopicAlias, alias); err == nil && exists {
 			pkt.SetTopic("") // nolint: errcheck
 		}
 	}

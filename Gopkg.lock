@@ -9,21 +9,15 @@
 
 [[projects]]
   branch = "master"
-  name = "github.com/VolantMQ/persistence"
-  packages = ["."]
-  revision = "1e90fe4c5a562943a73ecf706926700225bcfe1e"
-
-[[projects]]
-  branch = "master"
-  name = "github.com/VolantMQ/vlauth"
-  packages = ["."]
-  revision = "58fa3533cbf0fa378f6528fc5e05a0e23c8be4a5"
-
-[[projects]]
-  branch = "master"
-  name = "github.com/VolantMQ/vlplugin"
-  packages = ["."]
-  revision = "fcffa566ad4397405c5a75c45bac6a6e025a1027"
+  name = "github.com/VolantMQ/vlapi"
+  packages = [
+    "mqttp",
+    "plugin",
+    "plugin/auth",
+    "plugin/persistence",
+    "subsriber"
+  ]
+  revision = "23ac0581238ea8fc160872b2f5903857a95734dc"
 
 [[projects]]
   name = "github.com/davecgh/go-spew"
@@ -114,7 +108,7 @@
   branch = "master"
   name = "golang.org/x/sys"
   packages = ["unix"]
-  revision = "c11f84a56e43e20a78cee75a7c034031ecf57d1f"
+  revision = "9527bec2660bd847c050fda93a0f0c6dee0800bb"
 
 [[projects]]
   name = "gopkg.in/yaml.v2"
@@ -125,6 +119,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "e6bc98856cd72cc36715cf5c9ca106f1ebdff9661780051ae93b5f5a6b1b3bda"
+  inputs-digest = "2bc75cc86d5a7f4c3126aef6298d524e40d77b341d861028ecbb6a9bcea1ef7e"
   solver-name = "gps-cdcl"
   solver-version = 1

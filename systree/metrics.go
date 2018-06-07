@@ -3,7 +3,7 @@ package systree
 import (
 	"sync/atomic"
 
-	"github.com/VolantMQ/mqttp"
+	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/VolantMQ/volantmq/types"
 )
 
@@ -77,59 +77,59 @@ func newPacketsMetric(topicPrefix string, retained *[]types.RetainObject) *packe
 }
 
 // Sent add sent packet to metrics
-func (t *packetsMetric) Sent(mt packet.Type) {
+func (t *packetsMetric) Sent(mt mqttp.Type) {
 	atomic.AddUint64(&t.total.sent.val, 1)
 	switch mt {
-	case packet.CONNECT:
+	case mqttp.CONNECT:
 		atomic.AddUint64(&t.connect.sent.val, 1)
-	case packet.CONNACK:
+	case mqttp.CONNACK:
 		atomic.AddUint64(&t.connAck.sent.val, 1)
-	case packet.PUBLISH:
+	case mqttp.PUBLISH:
 		atomic.AddUint64(&t.publish.sent.val, 1)
-	case packet.SUBSCRIBE:
+	case mqttp.SUBSCRIBE:
 		atomic.AddUint64(&t.subscribe.sent.val, 1)
-	case packet.SUBACK:
+	case mqttp.SUBACK:
 		atomic.AddUint64(&t.suback.sent.val, 1)
-	case packet.UNSUBSCRIBE:
+	case mqttp.UNSUBSCRIBE:
 		atomic.AddUint64(&t.unsubscribe.sent.val, 1)
-	case packet.UNSUBACK:
+	case mqttp.UNSUBACK:
 		atomic.AddUint64(&t.unSubAck.sent.val, 1)
-	case packet.PINGREQ:
+	case mqttp.PINGREQ:
 		atomic.AddUint64(&t.pingReq.sent.val, 1)
-	case packet.PINGRESP:
+	case mqttp.PINGRESP:
 		atomic.AddUint64(&t.pingResp.sent.val, 1)
-	case packet.DISCONNECT:
+	case mqttp.DISCONNECT:
 		atomic.AddUint64(&t.disconnect.sent.val, 1)
-	case packet.AUTH:
+	case mqttp.AUTH:
 		atomic.AddUint64(&t.auth.sent.val, 1)
 	}
 }
 
 // Received add received packet to metrics
-func (t *packetsMetric) Received(mt packet.Type) {
+func (t *packetsMetric) Received(mt mqttp.Type) {
 	atomic.AddUint64(&t.total.recv.val, 1)
 	switch mt {
-	case packet.CONNECT:
+	case mqttp.CONNECT:
 		atomic.AddUint64(&t.connect.recv.val, 1)
-	case packet.CONNACK:
+	case mqttp.CONNACK:
 		atomic.AddUint64(&t.connAck.recv.val, 1)
-	case packet.PUBLISH:
+	case mqttp.PUBLISH:
 		atomic.AddUint64(&t.publish.recv.val, 1)
-	case packet.SUBSCRIBE:
+	case mqttp.SUBSCRIBE:
 		atomic.AddUint64(&t.subscribe.recv.val, 1)
-	case packet.SUBACK:
+	case mqttp.SUBACK:
 		atomic.AddUint64(&t.suback.recv.val, 1)
-	case packet.UNSUBSCRIBE:
+	case mqttp.UNSUBSCRIBE:
 		atomic.AddUint64(&t.unsubscribe.recv.val, 1)
-	case packet.UNSUBACK:
+	case mqttp.UNSUBACK:
 		atomic.AddUint64(&t.unSubAck.recv.val, 1)
-	case packet.PINGREQ:
+	case mqttp.PINGREQ:
 		atomic.AddUint64(&t.pingReq.recv.val, 1)
-	case packet.PINGRESP:
+	case mqttp.PINGRESP:
 		atomic.AddUint64(&t.pingResp.recv.val, 1)
-	case packet.DISCONNECT:
+	case mqttp.DISCONNECT:
 		atomic.AddUint64(&t.disconnect.recv.val, 1)
-	case packet.AUTH:
+	case mqttp.AUTH:
 		atomic.AddUint64(&t.auth.recv.val, 1)
 	}
 }

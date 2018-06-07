@@ -1,8 +1,8 @@
 package topicsTypes
 
 import (
-	"github.com/VolantMQ/mqttp"
-	"github.com/VolantMQ/persistence"
+	"github.com/VolantMQ/vlapi/mqttp"
+	"github.com/VolantMQ/vlapi/plugin/persistence"
 	"github.com/VolantMQ/volantmq/systree"
 )
 
@@ -15,7 +15,7 @@ type MemConfig struct {
 	Persist                  persistence.Retained
 	OnCleanUnsubscribe       func([]string)
 	Name                     string
-	MaxQos                   packet.QosType
+	MaxQos                   mqttp.QosType
 	OverlappingSubscriptions bool
 }
 
@@ -24,7 +24,7 @@ func NewMemConfig() *MemConfig {
 
 	return &MemConfig{
 		Name:                     "mem",
-		MaxQos:                   packet.QoS2,
+		MaxQos:                   mqttp.QoS2,
 		OnCleanUnsubscribe:       func([]string) {},
 		OverlappingSubscriptions: false,
 	}

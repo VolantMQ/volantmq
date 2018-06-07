@@ -4,7 +4,7 @@ import (
 	"crypto/tls"
 	"io/ioutil"
 
-	"github.com/VolantMQ/mqttp"
+	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/pkg/errors"
 )
 
@@ -41,15 +41,12 @@ type LogConfig struct {
 	File      *FileLogConfig   `yaml:"file,omitempty"`
 }
 
-// ProfilerConfig configure pprof
-type ProfilerConfig struct {
-	Port string `yaml:"port,omitempty" json:"port,omitempty"`
-}
-
 // SystemConfig entry in system
 type SystemConfig struct {
-	Log      LogConfig      `yaml:"log,omitempty"`
-	Profiler ProfilerConfig `json:"profiler" yaml:"profiler"`
+	Log  LogConfig `yaml:"log,omitempty"`
+	Http struct {
+		DefaultPort string `yaml:"defaultPort"`
+	} `yaml:"http"`
 }
 
 // TLSConfig used by SecurityConfig or ssl/ws listeners
@@ -88,18 +85,18 @@ type MqttConfig struct {
 		Force  bool `yaml:"force,omitempty"`
 	} `yaml:"keepAlive,omitempty"`
 	Options struct {
-		ConnectTimeout  int            `yaml:"connectTimeout,omitempty"`
-		SessionDups     bool           `yaml:"sessionDups,omitempty"`
-		RetainAvailable bool           `yaml:"retainAvailable,omitempty"`
-		SubsOverlap     bool           `yaml:"subsOverlap,omitempty"`
-		SubsID          bool           `yaml:"subsId,omitempty"`
-		SubsShared      bool           `yaml:"subsShared,omitempty"`
-		SubsWildcard    bool           `yaml:"subsWildcard,omitempty"`
-		ReceiveMax      int            `yaml:"receiveMax,omitempty"`
-		MaxPacketSize   uint32         `yaml:"maxPacketSize,omitempty"`
-		MaxTopicAlias   uint16         `yaml:"maxTopicAlias,omitempty"`
-		MaxQoS          packet.QosType `yaml:"maxQoS,omitempty"`
-		OfflineQoS0     bool           `yaml:"offlineQoS0,omitempty"`
+		ConnectTimeout  int           `yaml:"connectTimeout,omitempty"`
+		SessionDups     bool          `yaml:"sessionDups,omitempty"`
+		RetainAvailable bool          `yaml:"retainAvailable,omitempty"`
+		SubsOverlap     bool          `yaml:"subsOverlap,omitempty"`
+		SubsID          bool          `yaml:"subsId,omitempty"`
+		SubsShared      bool          `yaml:"subsShared,omitempty"`
+		SubsWildcard    bool          `yaml:"subsWildcard,omitempty"`
+		ReceiveMax      int           `yaml:"receiveMax,omitempty"`
+		MaxPacketSize   uint32        `yaml:"maxPacketSize,omitempty"`
+		MaxTopicAlias   uint16        `yaml:"maxTopicAlias,omitempty"`
+		MaxQoS          mqttp.QosType `yaml:"maxQoS,omitempty"`
+		OfflineQoS0     bool          `yaml:"offlineQoS0,omitempty"`
 	}
 }
 
