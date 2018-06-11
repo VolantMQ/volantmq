@@ -11,7 +11,7 @@ type simpleAuth struct {
 	creds map[string]string
 }
 
-var _ vlauth.Iface = (*simpleAuth)(nil)
+var _ vlauth.IFace = (*simpleAuth)(nil)
 
 func newSimpleAuth() *simpleAuth {
 	return &simpleAuth{
@@ -24,7 +24,7 @@ func (a *simpleAuth) addUser(u, p string) {
 }
 
 // nolint: golint
-func (a *simpleAuth) Password(user, password string) error {
+func (a *simpleAuth) Password(clientID, user, password string) error {
 	if hash, ok := a.creds[user]; ok {
 		algo := sha256.New()
 		algo.Write([]byte(password))

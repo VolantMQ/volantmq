@@ -7,10 +7,9 @@ version: v0.0.1
 system:
   log:
     console:
-      config:
-        level: info # available levels: debug, info, warn, error, dpanic, panic, fatal
+      level: info # available levels: debug, info, warn, error, dpanic, panic, fatal
   http:
-    defaultPort: 8086
+    defaultPort: 8080
 plugins:
   config:
     auth: # plugin type

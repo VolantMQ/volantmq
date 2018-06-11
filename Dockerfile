@@ -28,6 +28,11 @@ RUN \
     cd $GOPATH/src/github.com/VolantMQ/vlapi/plugin/debug && \
     go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -o $VOLANTMQ_WORK_DIR/plugins/debug.so
 
+# build health plugins
+RUN \
+    cd $GOPATH/src/github.com/VolantMQ/vlapi/plugin/health/plugin && \
+    go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -o $VOLANTMQ_WORK_DIR/plugins/health.so
+
 #build persistence plugins
 RUN \
     go get github.com/VolantMQ/persistence-boltdb && \

@@ -284,10 +284,11 @@ func (m *Manager) LoadSession(context interface{}, id []byte, state *persistence
 }
 
 // OnConnection implements transport.Handler interface and handles incoming connection
-func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) error {
+func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Println(r)
+			err = errors.New("panic")
 		}
 	}()
 	cn := connection.New(
@@ -307,23 +308,23 @@ func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) erro
 
 	var connParams *connection.ConnectParams
 	var ack *mqttp.ConnAck
-	if ch, err := cn.Accept(); err == nil {
+	if ch, e := cn.Accept(); e == nil {
 		for dl := range ch {
 			var resp mqttp.Provider
 			switch obj := dl.(type) {
 			case *connection.ConnectParams:
 				connParams = obj
-				resp, err = m.processConnect(cn, connParams, authMngr)
+				resp, e = m.processConnect(cn, connParams, authMngr)
 			case connection.AuthParams:
-				resp, err = m.processAuth(connParams, obj)
+				resp, e = m.processAuth(connParams, obj)
 			case error:
-				err = obj
+				e = obj
 			default:
-				err = errors.New("unknown")
+				e = errors.New("unknown")
 			}
 
-			if err != nil || resp == nil {
-				cn.Stop(err)
+			if e != nil || resp == nil {
+				cn.Stop(e)
 				cn = nil
 				return nil
 			} else {
@@ -359,7 +360,7 @@ func (m *Manager) processConnect(cn connection.Initial, params *connection.Conne
 	} else {
 		var reason mqttp.ReasonCode
 
-		if status := authMngr.Password(string(params.Username), string(params.Password)); status == vlauth.StatusAllow {
+		if status := authMngr.Password(params.ID, string(params.Username), string(params.Password)); status == vlauth.StatusAllow {
 			reason = mqttp.CodeSuccess
 		} else {
 			reason = mqttp.CodeRefusedBadUsernameOrPassword

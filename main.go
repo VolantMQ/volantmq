@@ -20,6 +20,7 @@ import (
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/server"
 	"github.com/VolantMQ/volantmq/transport"
+	"github.com/troian/healthcheck"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v2"
 )
@@ -47,11 +48,16 @@ type appContext struct {
 		configured []interface{}
 	}
 
-	//health         healthcheck.Handler
-	//registry       *prometheus.Registry
 	httpDefaultMux string
 	httpServers    sync.Map
+
+	healthLock      sync.Mutex
+	healthHandler   healthcheck.Handler
+	livenessChecks  map[string]healthcheck.Check
+	readinessChecks map[string]healthcheck.Check
 }
+
+var _ healthcheck.Checks = (*appContext)(nil)
 
 func loadMqttListeners(defaultAuth *auth.Manager, lCfg *configuration.ListenersConfig) ([]interface{}, error) {
 	var listeners []interface{}
@@ -134,7 +140,7 @@ func loadListeners(defaultAuth *auth.Manager, lst *configuration.ListenersConfig
 	return listeners, nil
 }
 
-func configureSimpleAuth(cfg interface{}) (vlauth.Iface, error) {
+func configureSimpleAuth(cfg interface{}) (vlauth.IFace, error) {
 	sAuth := newSimpleAuth()
 	authConfig := cfg.(map[interface{}]interface{})
 
@@ -200,7 +206,7 @@ func (ctx *appContext) loadAuth(cfg *configuration.Config) (*auth.Manager, error
 			logger.Fatalf("\tplugins.config.auth[%d] must contain map \"config\"", idx)
 		}
 
-		var iface vlauth.Iface
+		var iface vlauth.IFace
 
 		switch backend {
 		case "simpleAuth":
@@ -215,7 +221,7 @@ func (ctx *appContext) loadAuth(cfg *configuration.Config) (*auth.Manager, error
 						return nil, errors.New("")
 					}
 
-					iface = plObject.(vlauth.Iface)
+					iface = plObject.(vlauth.IFace)
 				} else {
 					logger.Warnf("\tno enabled plugin of type [%d] for config [%s]", backend, name)
 				}
@@ -280,6 +286,59 @@ func (ctx *appContext) configureDebugPlugins(cfg interface{}) error {
 	return nil
 }
 
+func (ctx *appContext) configureHealthPlugins(cfg interface{}) error {
+	logger.Info("configuring debug plugins")
+
+	for idx, cfgEntry := range cfg.([]interface{}) {
+		entry := cfgEntry.(map[interface{}]interface{})
+
+		var backend string
+		var config interface{}
+		var ok bool
+
+		if backend, ok = entry["backend"].(string); !ok {
+			logger.Fatalf("\tplugins.config.health[%d] must contain key \"backend\"", idx)
+		}
+
+		if config, ok = entry["config"]; !ok {
+			logger.Fatalf("\tplugins.config.health[%d] must contain map \"config\"", idx)
+		}
+
+		var debugPlugins pluginType
+		if debugPlugins, ok = ctx.plugins.acquired["health"]; ok {
+			if pl, kk := debugPlugins[backend]; kk {
+				plObject, err := ctx.configurePlugin(pl, config)
+				if err != nil {
+					logger.Fatalf(err.Error())
+					return errors.New("")
+				}
+
+				ctx.healthLock.Lock()
+				ctx.healthHandler = plObject.(healthcheck.Handler)
+
+				// if any checks already registered move them to the plugin
+				for n, c := range ctx.livenessChecks {
+					ctx.healthHandler.AddLivenessCheck(n, c)
+				}
+
+				for n, c := range ctx.readinessChecks {
+					ctx.healthHandler.AddReadinessCheck(n, c)
+				}
+
+				ctx.livenessChecks = nil
+				ctx.readinessChecks = nil
+
+				ctx.healthLock.Unlock()
+			} else {
+				logger.Warnf("\tno enabled plugin of type [%d]", backend)
+			}
+		} else {
+			logger.Error("\tno debug plugins loaded")
+		}
+	}
+	return nil
+}
+
 func (ctx *appContext) loadPersistence(cfg interface{}) (persistence.Provider, error) {
 	persist := persistence.Default()
 
@@ -333,6 +392,7 @@ func (ctx *appContext) configurePlugin(pl vlplugin.Plugin, c interface{}) (inter
 
 	sysParams := &vlplugin.SysParams{
 		HTTP:          ctx,
+		Health:        ctx,
 		SignalFailure: pluginFailureSignal,
 		Log:           configuration.GetLogger().Named(name),
 	}
@@ -402,6 +462,62 @@ func (ctx *appContext) GetHTTPServer(port string) vlplugin.HTTPHandler {
 	return srv
 }
 
+func (ctx *appContext) GetHealth() healthcheck.Checks {
+	return ctx
+}
+
+func (ctx *appContext) AddLivenessCheck(name string, check healthcheck.Check) error {
+	ctx.healthLock.Lock()
+	defer ctx.healthLock.Unlock()
+
+	if ctx.healthHandler == nil {
+		ctx.livenessChecks[name] = check
+	} else {
+		ctx.healthHandler.AddLivenessCheck(name, check)
+	}
+
+	return nil
+}
+
+func (ctx *appContext) AddReadinessCheck(name string, check healthcheck.Check) error {
+	ctx.healthLock.Lock()
+	defer ctx.healthLock.Unlock()
+
+	if ctx.healthHandler == nil {
+		ctx.readinessChecks[name] = check
+	} else {
+		ctx.healthHandler.AddReadinessCheck(name, check)
+	}
+
+	return nil
+}
+
+func (ctx *appContext) RemoveLivenessCheck(name string) error {
+	ctx.healthLock.Lock()
+	defer ctx.healthLock.Unlock()
+
+	if ctx.healthHandler == nil {
+		delete(ctx.livenessChecks, name)
+	} else {
+		ctx.healthHandler.RemoveLivenessCheck(name)
+	}
+
+	return nil
+}
+
+func (ctx *appContext) RemoveReadinessCheck(name string) error {
+	ctx.healthLock.Lock()
+	defer ctx.healthLock.Unlock()
+
+	if ctx.healthHandler == nil {
+		delete(ctx.readinessChecks, name)
+	} else {
+		ctx.healthHandler.RemoveReadinessCheck(name)
+	}
+
+	return nil
+}
+
 var logger *zap.SugaredLogger
 
 func main() {
@@ -415,44 +531,30 @@ func main() {
 
 	logger = configuration.GetHumanLogger()
 	logger.Info("starting service...")
-	logger.Info("working directory: ", configuration.WorkDir)
-	logger.Info("plugins directory: ", configuration.PluginsDir)
 
 	config := configuration.ReadConfig()
 	if config == nil {
 		return
 	}
 
+	if err := configuration.ConfigureLoggers(&config.System.Log); err != nil {
+		return
+	}
+
+	logger = configuration.GetHumanLogger()
+
+	logger.Info("working directory: ", configuration.WorkDir)
+	logger.Info("plugins directory: ", configuration.PluginsDir)
+
 	var persist persistence.Provider
 	var defaultAuth *auth.Manager
 	var err error
 
-	ctx := appContext{
-		httpDefaultMux: config.System.Http.DefaultPort,
-		//registry: prometheus.NewRegistry(),
+	ctx := &appContext{
+		httpDefaultMux:  config.System.Http.DefaultPort,
+		livenessChecks:  make(map[string]healthcheck.Check),
+		readinessChecks: make(map[string]healthcheck.Check),
 	}
-	//
-	//ctx.health = healthcheck.NewMetricsHandler(ctx.registry, "volantmq")
-
-	//ctx.httpServer = &http.Server{
-	//	Addr:    ":8086",
-	//	Handler: ctx.adminMux,
-	//}
-	//
-	//// Expose prometheus metrics on /metrics
-	//ctx.adminMux.Handle("/metrics", promhttp.HandlerFor(ctx.registry, promhttp.HandlerOpts{}))
-	//
-	//// Expose a liveness check on /live
-	//ctx.adminMux.HandleFunc("/live", ctx.health.LiveEndpoint)
-	//
-	//// Expose a readiness check on /ready
-	//ctx.adminMux.HandleFunc("/ready", ctx.health.ReadyEndpoint)
-	//
-	//go func() {
-	//	logger.Info("starting http server on " + ctx.httpServer.Addr)
-	//	ctx.httpServer.ListenAndServe()
-	//	logger.Info("stopped http server")
-	//}()
 
 	if err = ctx.loadPlugins(&config.Plugins); err != nil {
 		return
@@ -460,15 +562,24 @@ func main() {
 
 	if c, ok := config.Plugins.Config["debug"]; ok {
 		if err = ctx.configureDebugPlugins(c); err != nil {
+			logger.Error("loading debug plugins", zap.Error(err))
+			return
+		}
+	}
+	if c, ok := config.Plugins.Config["health"]; ok {
+		if err = ctx.configureHealthPlugins(c); err != nil {
+			logger.Error("loading health plugins", zap.Error(err))
 			return
 		}
 	}
 
 	if persist, err = ctx.loadPersistence(config.Plugins.Config["persistence"]); err != nil {
+		logger.Error("loading persistence plugins", zap.Error(err))
 		return
 	}
 
 	if defaultAuth, err = ctx.loadAuth(config); err != nil {
+		logger.Error("loading auth plugins", zap.Error(err))
 		return
 	}
 
@@ -476,6 +587,11 @@ func main() {
 		s := v.(*httpServer)
 
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Panic("http server panic", zap.Any("panic", r))
+				}
+			}()
 			logger.Info("starting http server on " + s.server.Addr)
 			s.server.ListenAndServe()
 			logger.Info("stopped http server on " + s.server.Addr)
@@ -486,6 +602,7 @@ func main() {
 	var listeners map[string][]interface{}
 
 	if listeners, err = loadListeners(defaultAuth, &config.Listeners); err != nil {
+		logger.Error("loading listeners", zap.Error(err))
 		return
 	}
 
@@ -501,7 +618,7 @@ func main() {
 	}
 
 	serverConfig := server.Config{
-		//Health:          ctx.health,
+		Health:          ctx,
 		MQTT:            config.Mqtt,
 		Persistence:     persist,
 		TransportStatus: listenerStatus,

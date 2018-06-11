@@ -3,6 +3,7 @@ package configuration
 import (
 	"crypto/tls"
 	"io/ioutil"
+	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/pkg/errors"
@@ -14,36 +15,65 @@ type PluginsConfig struct {
 	Config  map[string]interface{} `yaml:"config,omitempty"`
 }
 
+// LogConfigBase base entry for all logger
+type LogConfigBase struct {
+	Timestamp *struct {
+		Format string `yaml:"format" default:"2006-01-02T15:04:05Z07:00"`
+	} `yaml:"timestamp,omitempty"`
+	Level     string `yaml:"level"`
+	Backtrace bool   `yaml:"backtrace"`
+}
+
+func (s *LogConfigBase) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	type rawStuff LogConfigBase
+
+	raw := rawStuff{
+		Level:     "info",
+		Backtrace: false,
+	}
+
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+
+	if raw.Timestamp != nil && raw.Timestamp.Format == "" {
+		raw.Timestamp.Format = time.RFC3339
+	}
+
+	*s = LogConfigBase(raw)
+
+	return nil
+}
+
 // ConsoleLogConfig entry in system.log.console
 type ConsoleLogConfig struct {
-	Level string `yaml:"level,omitempty"`
+	LogConfigBase `yaml:",inline"`
 }
 
 // SysLogConfig entry in system.log.syslog
 type SysLogConfig struct {
-	Level string `yaml:"level,omitempty"`
+	LogConfigBase `yaml:",inline"`
 }
 
 // FileLogConfig entry in system.log.file
 type FileLogConfig struct {
-	File       string `yaml:"file,omitempty"`
-	Level      string `yaml:"level,omitempty"`
-	MaxSize    int    `yaml:"maxSize,omitempty"`
-	MaxBackups int    `yaml:"maxBackups,omitempty"`
-	MaxAge     int    `yaml:"maxAge,omitempty"`
+	LogConfigBase `yaml:",inline"`
+	File          string `yaml:"file,omitempty"`
+	MaxSize       int    `yaml:"maxSize,omitempty"`
+	MaxBackups    int    `yaml:"maxBackups,omitempty"`
+	MaxAge        int    `yaml:"maxAge,omitempty"`
 }
 
 // LogConfig entry in system.log
 type LogConfig struct {
-	Timestamp bool             `yaml:"timestamp,omitempty"`
-	Console   ConsoleLogConfig `yaml:"console,omitempty"`
-	SysLog    *SysLogConfig    `yaml:"syslog,omitempty"`
-	File      *FileLogConfig   `yaml:"file,omitempty"`
+	Console ConsoleLogConfig `yaml:"console"`
+	SysLog  *SysLogConfig    `yaml:"syslog,omitempty"`
+	File    *FileLogConfig   `yaml:"file,omitempty"`
 }
 
 // SystemConfig entry in system
 type SystemConfig struct {
-	Log  LogConfig `yaml:"log,omitempty"`
+	Log  LogConfig `yaml:"log"`
 	Http struct {
 		DefaultPort string `yaml:"defaultPort"`
 	} `yaml:"http"`
@@ -108,7 +138,7 @@ type ListenersConfig struct {
 
 // Config system-wide config
 type Config struct {
-	System    SystemConfig    `yaml:"system,omitempty"`
+	System    SystemConfig    `yaml:"system"`
 	Plugins   PluginsConfig   `yaml:"plugins,omitempty"`
 	Mqtt      MqttConfig      `yaml:"mqtt,omitempty"`
 	Listeners ListenersConfig `yaml:"listeners,omitempty"`

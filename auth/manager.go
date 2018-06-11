@@ -9,14 +9,14 @@ import (
 
 // Manager auth
 type Manager struct {
-	p         []vlauth.Iface
+	p         []vlauth.IFace
 	anonymous bool
 }
 
-var providers = make(map[string]vlauth.Iface)
+var providers = make(map[string]vlauth.IFace)
 
 // Register auth provider
-func Register(name string, i vlauth.Iface) error {
+func Register(name string, i vlauth.IFace) error {
 	if name == "" && i == nil {
 		return errors.New("invalid args")
 	}
@@ -62,12 +62,12 @@ func (m *Manager) AllowAnonymous() error {
 }
 
 // Password authentication
-func (m *Manager) Password(user, password string) error {
+func (m *Manager) Password(clientID, user, password string) error {
 	if user == "" && m.anonymous {
 		return vlauth.StatusAllow
 	} else {
 		for _, p := range m.p {
-			if status := p.Password(user, password); status == vlauth.StatusAllow {
+			if status := p.Password(clientID, user, password); status == vlauth.StatusAllow {
 				return status
 			}
 		}

@@ -17,6 +17,7 @@ import (
 	"github.com/VolantMQ/volantmq/topics/types"
 	"github.com/VolantMQ/volantmq/transport"
 	"github.com/VolantMQ/volantmq/types"
+	"github.com/troian/healthcheck"
 	"go.uber.org/zap"
 )
 
@@ -47,7 +48,7 @@ type Config struct {
 	// If not set than defaults to mock function
 	TransportStatus func(id string, status string)
 
-	//Health healthcheck.Handler
+	Health healthcheck.Checks
 
 	// NodeName
 	NodeName string
@@ -241,21 +242,21 @@ func (s *server) ListenAndServe(config interface{}) error {
 
 		status := "stopped"
 
-		//s.Health.AddReadinessCheck("listener-ready:"+l.Port(), func() error {
-		//	if e := l.Ready(); e != nil {
-		//		return e
-		//	}
-		//
-		//	return healthcheck.TCPDialCheck(":"+l.Port(), 1*time.Second)()
-		//})
-		//
-		//s.Health.AddLivenessCheck("listener-alive:"+l.Port(), func() error {
-		//	if e := l.Alive(); e != nil {
-		//		return e
-		//	}
-		//
-		//	return healthcheck.TCPDialCheck(":"+l.Port(), 1*time.Second)()
-		//})
+		s.Health.AddReadinessCheck("listener:"+l.Port(), func() error {
+			if e := l.Ready(); e != nil {
+				return e
+			}
+
+			return healthcheck.TCPDialCheck(":"+l.Port(), 1*time.Second)()
+		})
+
+		s.Health.AddLivenessCheck("listener:"+l.Port(), func() error {
+			if e := l.Alive(); e != nil {
+				return e
+			}
+
+			return healthcheck.TCPDialCheck(":"+l.Port(), 1*time.Second)()
+		})
 
 		if e := l.Serve(); e != nil {
 			status = e.Error()
