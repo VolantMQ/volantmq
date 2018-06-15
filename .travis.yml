@@ -8,8 +8,8 @@ os:
   - linux
 before_install:
   - npm install -g codeclimate-test-reporter
-  - go get github.com/alecthomas/gometalinter
-  - gometalinter --install
+  - go get -u gopkg.in/alecthomas/gometalinter.v2
+  - gometalinter.v2 --install
   - curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
 jobs:
   include:

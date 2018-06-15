@@ -1,17 +1,19 @@
-FROM golang:1.10.2
+FROM golang:1.10.3 as builder
+
+#compile linux only
 
 ENV \
-    VOLANTMQ_WORK_DIR=/var/lib/volantmq \
-    VOLANTMQ_BUILD_FLAGS="-i"
+    GOOS=linux \
+    VOLANTMQ_WORK_DIR=/usr/lib/volantmq \
+    VOLANTMQ_BUILD_FLAGS="-i" \
+    VOLANTMQ_PLUGINS_DIR=/usr/lib/volantmq/plugins
 
-# add our user and group first to make sure their IDs get assigned consistently, regardless of whatever dependencies get added
-RUN groupadd -r volantmq && useradd -r -d $VOLANTMQ_WORK_DIR -m -g volantmq volantmq
+RUN mkdir -p $VOLANTMQ_WORK_DIR/bin
+RUN mkdir -p $VOLANTMQ_WORK_DIR/conf
+RUN mkdir -p $VOLANTMQ_PLUGINS_DIR
 
 # Create environment directory
-ENV PATH /usr/lib/volantmq/bin:$PATH
-
-RUN mkdir -p $VOLANTMQ_WORK_DIR/{plugins,logs}; \
-    mkdir -p /usr/lib/volantmq/bin
+ENV PATH $VOLANTMQ_WORK_DIR/bin:$PATH
 
 # install dep tool
 RUN curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
@@ -21,7 +23,7 @@ RUN \
     go get github.com/VolantMQ/volantmq && \
     cd $GOPATH/src/github.com/VolantMQ/volantmq && \
     go build $VOLANTMQ_BUILD_FLAGS && \
-    cp volantmq /usr/lib/volantmq/bin/
+    cp volantmq $VOLANTMQ_WORK_DIR/bin/
 
 # build debug plugins
 RUN \
@@ -39,14 +41,16 @@ RUN \
     cd $GOPATH/src/github.com/VolantMQ/persistence-boltdb && \
     go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -o $VOLANTMQ_WORK_DIR/plugins/persistence_boltdb.so
 
-# cleanup
-RUN \
-    cd / && \
-    rm -r $GOPATH/src
+FROM ubuntu
+ENV \
+    VOLANTMQ_WORK_DIR=/usr/lib/volantmq
 
-RUN chown -R volantmq:volantmq $VOLANTMQ_WORK_DIR
+COPY --from=builder $VOLANTMQ_WORK_DIR $VOLANTMQ_WORK_DIR
+
+# Create environment directory
+ENV PATH $VOLANTMQ_WORK_DIR/bin:$PATH
+ENV VOLANTMQ_PLUGINS_DIR=$VOLANTMQ_WORK_DIR/plugins
 
 # default config uses mqtt:1883
 EXPOSE 1883
-
 CMD ["volantmq"]

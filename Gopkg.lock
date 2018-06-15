@@ -140,7 +140,7 @@
   branch = "master"
   name = "github.com/troian/healthcheck"
   packages = ["."]
-  revision = "95ccdada0be988ae7ee5705d644680992a7f1df6"
+  revision = "28210b882127d82f4af3797c25bcc85e7ea22533"
 
 [[projects]]
   name = "go.uber.org/atomic"
@@ -171,7 +171,7 @@
   branch = "master"
   name = "golang.org/x/sys"
   packages = ["unix"]
-  revision = "a9e25c09b96b8870693763211309e213c6ef299d"
+  revision = "8883426083c04a2627e6e59d84d5f6fb63d16c91"
 
 [[projects]]
   name = "gopkg.in/yaml.v2"
