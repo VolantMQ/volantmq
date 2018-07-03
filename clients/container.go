@@ -7,6 +7,8 @@ import (
 	"github.com/VolantMQ/volantmq/subscriber"
 )
 
+var subCount int32 = 0
+
 // container wrap session to reduce resource usage when non clean session is disconnected
 // but has active subscription and/or has expiry set
 type container struct {
@@ -18,10 +20,6 @@ type container struct {
 	removable bool
 	removed   bool
 }
-
-//func (s *container) shutdown() bool {
-//
-//}
 
 func (s *container) setRemovable(rm bool) {
 	s.rmLock.Lock()
@@ -45,14 +43,13 @@ func (s *container) session() *session {
 
 func (s *container) swap(from *container) *container {
 	s.ses = from.ses
-	s.sub = from.sub
 
 	s.ses.idLock = &s.lock
 
 	return s
 }
 
-func (s *container) subscriber(cleanStart bool, c subscriber.Config) (*subscriber.Type, bool) {
+func (s *container) subscriber(cleanStart bool, c subscriber.Config) *subscriber.Type {
 	if cleanStart && s.sub != nil {
 		s.sub.Offline(true)
 		s.sub = nil
@@ -60,10 +57,7 @@ func (s *container) subscriber(cleanStart bool, c subscriber.Config) (*subscribe
 
 	if s.sub == nil {
 		s.sub = subscriber.New(c)
-		cleanStart = true
-	} else {
-		cleanStart = false
 	}
 
-	return s.sub, !cleanStart
+	return s.sub
 }

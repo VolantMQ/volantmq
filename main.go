@@ -140,6 +140,38 @@ func loadListeners(defaultAuth *auth.Manager, lst *configuration.ListenersConfig
 	return listeners, nil
 }
 
+func (ctx *appContext) loadPlugins(cfg *configuration.PluginsConfig) error {
+	plugins := configuration.LoadPlugins(configuration.PluginsDir, cfg.Enabled)
+
+	plTypes := make(pluginTypes)
+
+	if len(plugins) > 0 {
+		for name, pl := range plugins {
+			if len(pl.Errors) > 0 {
+				logger.Info("\t", name, pl.Errors)
+			} else if pl.Plugin == nil {
+				logger.Info("\t", name, "Not Found")
+			} else {
+				apiV, plV := pl.Plugin.Info().Version()
+				logger.Info("\t", name, ":",
+					"\n\t\tPlugins API Version: ", apiV,
+					"\n\t\t     Plugin Version: ", plV,
+					"\n\t\t               Type: ", pl.Plugin.Info().Type(),
+					"\n\t\t        Description: ", pl.Plugin.Info().Desc(),
+					"\n\t\t               Name: ", pl.Plugin.Info().Name())
+				if _, ok := plTypes[pl.Plugin.Info().Type()]; !ok {
+					plTypes[pl.Plugin.Info().Type()] = make(map[string]vlplugin.Plugin)
+				}
+
+				plTypes[pl.Plugin.Info().Type()][pl.Plugin.Info().Name()] = pl.Plugin
+			}
+		}
+	}
+
+	ctx.plugins.acquired = plTypes
+	return nil
+}
+
 func configureSimpleAuth(cfg interface{}) (vlauth.IFace, error) {
 	sAuth := newSimpleAuth()
 	authConfig := cfg.(map[interface{}]interface{})
@@ -226,7 +258,7 @@ func (ctx *appContext) loadAuth(cfg *configuration.Config) (*auth.Manager, error
 					logger.Warnf("\tno enabled plugin of type [%d] for config [%s]", backend, name)
 				}
 			} else {
-				logger.Error("\tno auth plugins loaded")
+				logger.Warn("\tno auth plugins loaded")
 			}
 		}
 
@@ -280,14 +312,14 @@ func (ctx *appContext) configureDebugPlugins(cfg interface{}) error {
 				logger.Warnf("\tno enabled plugin of type [%d]", backend)
 			}
 		} else {
-			logger.Error("\tno debug plugins loaded")
+			logger.Warn("\tno debug plugins loaded")
 		}
 	}
 	return nil
 }
 
 func (ctx *appContext) configureHealthPlugins(cfg interface{}) error {
-	logger.Info("configuring debug plugins")
+	logger.Info("configuring health plugins")
 
 	for idx, cfgEntry := range cfg.([]interface{}) {
 		entry := cfgEntry.(map[interface{}]interface{})
@@ -333,13 +365,13 @@ func (ctx *appContext) configureHealthPlugins(cfg interface{}) error {
 				logger.Warnf("\tno enabled plugin of type [%d]", backend)
 			}
 		} else {
-			logger.Error("\tno debug plugins loaded")
+			logger.Warn("\tno health plugins loaded")
 		}
 	}
 	return nil
 }
 
-func (ctx *appContext) loadPersistence(cfg interface{}) (persistence.Provider, error) {
+func (ctx *appContext) loadPersistence(cfg interface{}) (persistence.IFace, error) {
 	persist := persistence.Default()
 
 	logger.Info("loading persistence")
@@ -379,7 +411,7 @@ func (ctx *appContext) loadPersistence(cfg interface{}) (persistence.Provider, e
 
 				logger.Infof("\tusing persistence provider [%s]", backend)
 
-				persist = plObject.(persistence.Provider)
+				persist = plObject.(persistence.IFace)
 			}
 		}
 	}
@@ -407,38 +439,6 @@ func (ctx *appContext) configurePlugin(pl vlplugin.Plugin, c interface{}) (inter
 	ctx.plugins.configured = append(ctx.plugins.configured, plObject)
 
 	return plObject, err
-}
-
-func (ctx *appContext) loadPlugins(cfg *configuration.PluginsConfig) error {
-	plugins := configuration.LoadPlugins(configuration.PluginsDir, cfg.Enabled)
-
-	plTypes := make(pluginTypes)
-
-	if len(plugins) > 0 {
-		for name, pl := range plugins {
-			if len(pl.Errors) > 0 {
-				logger.Info("\t", name, pl.Errors)
-			} else if pl.Plugin == nil {
-				logger.Info("\t", name, "Not Found")
-			} else {
-				apiV, plV := pl.Plugin.Info().Version()
-				logger.Info("\t", name, ":",
-					"\n\t\tPlugins API Version: ", apiV,
-					"\n\t\t     Plugin Version: ", plV,
-					"\n\t\t               Type: ", pl.Plugin.Info().Type(),
-					"\n\t\t        Description: ", pl.Plugin.Info().Desc(),
-					"\n\t\t               Name: ", pl.Plugin.Info().Name())
-				if _, ok := plTypes[pl.Plugin.Info().Type()]; !ok {
-					plTypes[pl.Plugin.Info().Type()] = make(map[string]vlplugin.Plugin)
-				}
-
-				plTypes[pl.Plugin.Info().Type()][pl.Plugin.Info().Name()] = pl.Plugin
-			}
-		}
-	}
-
-	ctx.plugins.acquired = plTypes
-	return nil
 }
 
 func (ctx *appContext) GetHTTPServer(port string) vlplugin.HTTPHandler {
@@ -546,7 +546,7 @@ func main() {
 	logger.Info("working directory: ", configuration.WorkDir)
 	logger.Info("plugins directory: ", configuration.PluginsDir)
 
-	var persist persistence.Provider
+	var persist persistence.IFace
 	var defaultAuth *auth.Manager
 	var err error
 

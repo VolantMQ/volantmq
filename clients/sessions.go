@@ -38,7 +38,7 @@ type subscriberConfig struct {
 type Config struct {
 	configuration.MqttConfig
 	TopicsMgr        topicsTypes.Provider
-	Persist          persistence.Provider
+	Persist          persistence.IFace
 	Systree          systree.Provider
 	OnReplaceAttempt func(string, bool)
 	NodeName         string
@@ -79,7 +79,7 @@ type containerInfo struct {
 type loadContext struct {
 	bar            *uiprogress.Bar
 	preloadConfigs map[string]*preloadConfig
-	delayedWills   []mqttp.Provider
+	delayedWills   []mqttp.IFace
 }
 
 // NewManager create new clients manager
@@ -229,8 +229,8 @@ func (m *Manager) GetSubscriber(id string) (vlsubscriber.IFace, error) {
 
 	if !ok {
 		sub = subscriber.New(subscriber.Config{
-			ID:             id,
-			OfflinePublish: m.pluginPublish,
+			ID: id,
+			//OfflinePublish: m.pluginPublish,
 		})
 		m.plSubscribers[id] = sub
 	}
@@ -285,12 +285,12 @@ func (m *Manager) LoadSession(context interface{}, id []byte, state *persistence
 
 // OnConnection implements transport.Handler interface and handles incoming connection
 func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Println(r)
-			err = errors.New("panic")
-		}
-	}()
+	//defer func() {
+	//	if r := recover(); r != nil {
+	//		fmt.Println(r)
+	//		err = errors.New("panic")
+	//	}
+	//}()
 	cn := connection.New(
 		connection.OnAuth(m.onAuth),
 		connection.NetConn(conn),
@@ -304,13 +304,14 @@ func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) (err
 		connection.MaxRxTopicAlias(m.Options.MaxTopicAlias),
 		connection.MaxTxTopicAlias(0),
 		connection.KeepAlive(m.Options.ConnectTimeout),
+		connection.Persistence(m.persistence),
 	)
 
 	var connParams *connection.ConnectParams
 	var ack *mqttp.ConnAck
 	if ch, e := cn.Accept(); e == nil {
 		for dl := range ch {
-			var resp mqttp.Provider
+			var resp mqttp.IFace
 			switch obj := dl.(type) {
 			case *connection.ConnectParams:
 				connParams = obj
@@ -324,6 +325,7 @@ func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) (err
 			}
 
 			if e != nil || resp == nil {
+				m.log.Error("stop connection", zap.Error(e))
 				cn.Stop(e)
 				cn = nil
 				return nil
@@ -343,8 +345,8 @@ func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) (err
 	return nil
 }
 
-func (m *Manager) processConnect(cn connection.Initial, params *connection.ConnectParams, authMngr *auth.Manager) (mqttp.Provider, error) {
-	var resp mqttp.Provider
+func (m *Manager) processConnect(cn connection.Initial, params *connection.ConnectParams, authMngr *auth.Manager) (mqttp.IFace, error) {
+	var resp mqttp.IFace
 
 	if allowed, ok := m.allowedVersions[params.Version]; !ok || !allowed {
 		reason := mqttp.CodeRefusedUnacceptableProtocolVersion
@@ -377,8 +379,8 @@ func (m *Manager) processConnect(cn connection.Initial, params *connection.Conne
 	return resp, nil
 }
 
-func (m *Manager) processAuth(params *connection.ConnectParams, auth connection.AuthParams) (mqttp.Provider, error) {
-	var resp mqttp.Provider
+func (m *Manager) processAuth(params *connection.ConnectParams, auth connection.AuthParams) (mqttp.IFace, error) {
+	var resp mqttp.IFace
 
 	return resp, nil
 }
@@ -452,7 +454,7 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 			subscriber:    info.sub,
 		}
 
-		ses.configure(config, params.CleanStart)
+		ses.configure(config)
 
 		ack.SetSessionPresent(info.present)
 	} else {
@@ -470,7 +472,7 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 	}
 }
 
-func (m *Manager) onAuth(id string, params *connection.AuthParams) (mqttp.Provider, error) {
+func (m *Manager) onAuth(id string, params *connection.AuthParams) (mqttp.IFace, error) {
 	return nil, nil
 }
 
@@ -584,17 +586,17 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 		} else {
 			newContainer = currContainer.swap(newContainer)
 			newContainer.removed = false
-			currContainer.setRemovable(true)
+			newContainer.setRemovable(true)
 		}
 	} else {
 		m.sessionsCount.Add(1)
 	}
 
-	sub, present := newContainer.subscriber(
+	sub := newContainer.subscriber(
 		params.CleanStart,
 		subscriber.Config{
 			ID:             params.ID,
-			OfflinePublish: m.sessionPublish,
+			OfflinePublish: m.sessionPersistPublish,
 			Topics:         m.TopicsMgr,
 			Version:        params.Version,
 		})
@@ -605,37 +607,37 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 		} else {
 			err = nil
 		}
-	} else {
-		persisted := m.persistence.Exists([]byte(params.ID))
-		present = present || persisted
+	}
 
-		if params.Durable && !persisted {
-			err = m.persistence.Create([]byte(params.ID),
-				&persistence.SessionBase{
-					Timestamp: time.Now().Format(time.RFC3339),
-					Version:   byte(params.Version),
-				})
-			if err != nil {
-				m.log.Error("Create persistence entry: ", err.Error())
-				err = nil
+	persisted := m.persistence.Exists([]byte(params.ID))
+
+	if !persisted {
+		err = m.persistence.Create([]byte(params.ID),
+			&persistence.SessionBase{
+				Timestamp: time.Now().Format(time.RFC3339),
+				Version:   byte(params.Version),
+			})
+		if err != nil {
+			m.log.Error("Create persistence entry: ", err.Error())
+		}
+	}
+
+	if err == nil {
+		if !persisted {
+			status := &systree.SessionCreatedStatus{
+				Clean:     params.CleanStart,
+				Durable:   params.Durable,
+				Timestamp: time.Now().Format(time.RFC3339),
+				WillDelay: strconv.FormatUint(uint64(params.WillDelay), 10),
 			}
+			m.Systree.Sessions().Created(params.ID, status)
 		}
-	}
 
-	if !present {
-		status := &systree.SessionCreatedStatus{
-			Clean:     params.CleanStart,
-			Durable:   params.Durable,
-			Timestamp: time.Now().Format(time.RFC3339),
-			WillDelay: strconv.FormatUint(uint64(params.WillDelay), 10),
+		cont = &containerInfo{
+			ses:     newContainer.ses,
+			sub:     sub,
+			present: persisted,
 		}
-		m.Systree.Sessions().Created(params.ID, status)
-	}
-
-	cont = &containerInfo{
-		ses:     newContainer.ses,
-		sub:     sub,
-		present: present,
 	}
 
 	return
@@ -778,7 +780,7 @@ func (m *Manager) configurePersistedSubscribers(ctx *loadContext) {
 			subscriber.Config{
 				ID:             id,
 				Topics:         m.TopicsMgr,
-				OfflinePublish: m.sessionPublish,
+				OfflinePublish: m.sessionPersistPublish,
 				Version:        t.sub.version,
 			})
 
@@ -997,9 +999,8 @@ func (m *Manager) persistSubscriber(s *subscriber.Type) error {
 	return nil
 }
 
-func (m *Manager) sessionPublish(id string, p *mqttp.Publish) {
+func (m *Manager) sessionPersistPublish(id string, p *mqttp.Publish) {
 	pkt := &persistence.PersistedPacket{}
-	pkt.Flags.UnAck = false
 
 	var expired bool
 	var expireAt time.Time
@@ -1021,36 +1022,13 @@ func (m *Manager) sessionPublish(id string, p *mqttp.Publish) {
 		return
 	}
 
-	if err = m.persistence.PacketStore([]byte(id), pkt); err != nil {
+	if p.QoS() == mqttp.QoS0 {
+		err = m.persistence.PacketStoreQoS0([]byte(id), pkt)
+	} else {
+		m.persistence.PacketStoreQoS12([]byte(id), pkt)
+	}
+
+	if err != nil {
 		m.log.Error("Couldn't persist message", zap.String("ClientID", id), zap.Error(err))
 	}
-}
-
-func (m *Manager) pluginPublish(id string, p *mqttp.Publish) {
-	//pkt := &persistence.PersistedPacket{}
-	//pkt.Flags.UnAck = false
-	//
-	//var expired bool
-	//var expireAt time.Time
-	//
-	//if expireAt, _, expired = p.Expired(); expired {
-	//	return
-	//}
-	//
-	//if !expireAt.IsZero() {
-	//	pkt.ExpireAt = expireAt.Format(time.RFC3339)
-	//}
-	//
-	//p.SetPacketID(0)
-	//
-	//var err error
-	//pkt.Data, err = mqttp.Encode(p)
-	//if err != nil {
-	//	m.log.Error("Couldn't encode packet", zap.String("ClientID", id), zap.Error(err))
-	//	return
-	//}
-	//
-	//if err = m.persistence.PacketStore([]byte(id), pkt); err != nil {
-	//	m.log.Error("Couldn't persist message", zap.String("ClientID", id), zap.Error(err))
-	//}
 }

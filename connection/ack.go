@@ -6,33 +6,25 @@ import (
 	"github.com/VolantMQ/vlapi/mqttp"
 )
 
-type onRelease func(o, n mqttp.Provider)
+type onRelease func(o, n mqttp.IFace)
 
 type ackQueue struct {
 	messages  sync.Map
 	onRelease onRelease
-	//quota     int32
 }
 
-func (a *ackQueue) store(pkt mqttp.Provider) bool {
-	//if a.quota == 0 {
-	//	return false
-	//}
-	//
-	//a.quota--
+func (a *ackQueue) store(pkt mqttp.IFace) bool {
 	id, _ := pkt.ID()
 	a.messages.Store(id, pkt)
 
 	return true
 }
 
-func (a *ackQueue) release(pkt mqttp.Provider) {
+func (a *ackQueue) release(pkt mqttp.IFace) {
 	id, _ := pkt.ID()
 
-	//a.quota++
-
 	if value, ok := a.messages.Load(id); ok {
-		if orig, k := value.(mqttp.Provider); k && a.onRelease != nil {
+		if orig, k := value.(mqttp.IFace); k && a.onRelease != nil {
 			a.onRelease(orig, pkt)
 		}
 		a.messages.Delete(id)

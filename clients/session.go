@@ -79,25 +79,13 @@ func newSession(c sessionPreConfig) *session {
 	return s
 }
 
-func (s *session) configure(c sessionConfig, clean bool) {
+func (s *session) configure(c sessionConfig) {
 	s.sessionConfig = c
 
 	s.conn.SetOptions(connection.AttachSession(s))
-
-	if !clean {
-		tmp := newTmpPublish()
-		s.subscriber.Online(tmp.onPublish)
-		s.persistence.PacketsForEach([]byte(s.id), s.conn)
-		s.subscriber.Online(s.conn.Publish)
-		s.persistence.PacketsDelete([]byte(s.id))
-		s.conn.LoadRemaining(tmp.gList, tmp.qList)
-	} else {
-		s.subscriber.Online(s.conn.Publish)
-	}
 }
 
 func (s *session) start() {
-	s.conn.Start()
 	s.idLock.Unlock()
 }
 
@@ -137,7 +125,7 @@ func (s *session) SignalPublish(pkt *mqttp.Publish) error {
 }
 
 // SignalSubscribe process SUBSCRIBE packet from client
-func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.Provider, error) {
+func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 	m, _ := mqttp.New(s.version, mqttp.SUBACK)
 	resp, _ := m.(*mqttp.SubAck)
 
@@ -201,7 +189,7 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.Provider, error) 
 }
 
 // SignalUnSubscribe process UNSUBSCRIBE packet from client
-func (s *session) SignalUnSubscribe(pkt *mqttp.UnSubscribe) (mqttp.Provider, error) {
+func (s *session) SignalUnSubscribe(pkt *mqttp.UnSubscribe) (mqttp.IFace, error) {
 	var retCodes []mqttp.ReasonCode
 
 	for _, t := range pkt.Topics() {
@@ -231,7 +219,7 @@ func (s *session) SignalUnSubscribe(pkt *mqttp.UnSubscribe) (mqttp.Provider, err
 }
 
 // SignalDisconnect process DISCONNECT packet from client
-func (s *session) SignalDisconnect(pkt *mqttp.Disconnect) (mqttp.Provider, error) {
+func (s *session) SignalDisconnect(pkt *mqttp.Disconnect) (mqttp.IFace, error) {
 	var err error
 
 	err = mqttp.CodeSuccess
@@ -262,6 +250,10 @@ func (s *session) SignalDisconnect(pkt *mqttp.Disconnect) (mqttp.Provider, error
 	return nil, err
 }
 
+func (s *session) SignalOnline() {
+	s.subscriber.Online(s.conn.Publish)
+}
+
 // SignalOffline put subscriber in offline mode
 func (s *session) SignalOffline() {
 	s.subscriber.Offline(!s.durable)
@@ -285,17 +277,19 @@ func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 
 	s.connectionClosed(s.id, params.Reason)
 
-	if s.durable && len(params.Packets) > 0 {
-		if err := s.persistence.PacketsStore([]byte(s.id), params.Packets); err != nil {
-			s.log.Error("persisting packets", zap.String("ClientID", s.id), zap.Error(err))
-		}
-	}
-
 	keepContainer := s.durable && s.subscriber.HasSubscriptions()
 
 	if !keepContainer {
 		s.subscriberShutdown(s.id, s.subscriber)
 		s.subscriber = nil
+	}
+
+	if s.durable {
+		if err := s.persistence.PacketsStore([]byte(s.id), params.Packets); err != nil {
+			s.log.Error("persisting packets", zap.String("clientId", s.id), zap.Error(err))
+		}
+	} else {
+		s.persistence.PacketsDelete([]byte(s.id))
 	}
 
 	var exp *expiry
@@ -319,5 +313,6 @@ func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 	s.sessionOffline(s.id, keepContainer, exp)
 
 	s.stopReq.Do(func() {})
+
 	s.conn = nil
 }

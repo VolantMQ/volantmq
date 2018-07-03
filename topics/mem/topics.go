@@ -171,7 +171,7 @@ func (mT *provider) Close() error {
 		mT.retainSearch("/#", &res)
 		mT.retainSearch("$share/#", &res)
 
-		var encoded persistence.PersistedPackets
+		var encoded []*persistence.PersistedPacket
 
 		for _, pkt := range res {
 			// Discard retained expired and QoS0 messages

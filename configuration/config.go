@@ -5,8 +5,15 @@ import (
 	"io/ioutil"
 	"os"
 
+	"github.com/VolantMQ/vlapi/plugin"
 	"gopkg.in/yaml.v2"
 )
+
+// PluginState status
+type PluginState struct {
+	Plugin vlplugin.Plugin
+	Errors []error
+}
 
 // DefaultConfig Load minimum working configuration to allow
 // server start without user provided one

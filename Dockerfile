@@ -32,14 +32,13 @@ RUN \
 
 # build health plugins
 RUN \
-    cd $GOPATH/src/github.com/VolantMQ/vlapi/plugin/health/plugin && \
+    cd $GOPATH/src/github.com/VolantMQ/vlapi/plugin/health && \
     go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -o $VOLANTMQ_WORK_DIR/plugins/health.so
 
 #build persistence plugins
 RUN \
-    go get github.com/VolantMQ/persistence-boltdb && \
-    cd $GOPATH/src/github.com/VolantMQ/persistence-boltdb && \
-    go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -o $VOLANTMQ_WORK_DIR/plugins/persistence_boltdb.so
+    cd $GOPATH/src/github.com/VolantMQ/vlapi/plugin/persistence/bbolt && \
+    go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -o $VOLANTMQ_WORK_DIR/plugins/persistence_bbolt.so
 
 FROM ubuntu
 ENV \

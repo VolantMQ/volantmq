@@ -17,7 +17,7 @@
     "plugin/persistence",
     "subscriber"
   ]
-  revision = "35f354aae0a03767a2c3d83d6ccafe98e0b768b1"
+  revision = "b28b22c3eb856f552b77db50fe8b981b651098a5"
 
 [[projects]]
   branch = "master"
@@ -113,7 +113,7 @@
     "nfs",
     "xfs"
   ]
-  revision = "7d6f385de8bea29190f15ba9931442a0eaef9af7"
+  revision = "40f013a808ec4fa79def444a1a56de4d1727efcb"
 
 [[projects]]
   branch = "master"
@@ -171,7 +171,7 @@
   branch = "master"
   name = "golang.org/x/sys"
   packages = ["unix"]
-  revision = "8883426083c04a2627e6e59d84d5f6fb63d16c91"
+  revision = "7138fd3d9dc8335c567ca206f4333fb75eb05d56"
 
 [[projects]]
   name = "gopkg.in/yaml.v2"

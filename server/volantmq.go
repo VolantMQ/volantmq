@@ -38,7 +38,7 @@ type Config struct {
 	MQTT configuration.MqttConfig
 
 	// Configuration of persistence provider
-	Persistence persistence.Provider
+	Persistence persistence.IFace
 
 	// OnDuplicate notify if there is attempt connect client with id that already exists and active
 	// If not not set than defaults to mock function

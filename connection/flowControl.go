@@ -2,6 +2,7 @@ package connection
 
 import (
 	"errors"
+	"sync"
 	"sync/atomic"
 
 	"github.com/VolantMQ/vlapi/mqttp"
@@ -12,38 +13,47 @@ var (
 	errQuotaExceeded = errors.New("quota exceeded")
 )
 
-func (s *impl) flowReAcquire(id mqttp.IDType) {
-	atomic.AddInt32(&s.txQuota, -1)
-	s.flowInUse.Store(id, true)
+type flow struct {
+	inUse   sync.Map
+	counter uint32
+	quota   int32
 }
 
-func (s *impl) flowAcquire() (mqttp.IDType, error) {
-	select {
-	case <-s.quit:
-		return 0, errExit
-	default:
+func (s *flow) reAcquire(id mqttp.IDType) error {
+	if atomic.AddInt32(&s.quota, -1) == 0 {
+		return errQuotaExceeded
 	}
 
-	var err error
-	if atomic.AddInt32(&s.txQuota, -1) == 0 {
-		err = errQuotaExceeded
+	s.inUse.Store(id, true)
+
+	return nil
+}
+
+func (s *flow) acquire() (mqttp.IDType, error) {
+	//var err error
+	if atomic.AddInt32(&s.quota, -1) == 0 {
+		return mqttp.IDType(0), errQuotaExceeded
 	}
 
 	var id mqttp.IDType
 
 	for count := 0; count <= 0xFFFF; count++ {
-		s.flowCounter++
-		id = mqttp.IDType(s.flowCounter)
-		if _, ok := s.flowInUse.LoadOrStore(id, true); !ok {
+		s.counter++
+		id = mqttp.IDType(s.counter)
+		if _, ok := s.inUse.LoadOrStore(id, true); !ok {
 			break
 		}
 	}
 
-	return id, err
+	return id, nil
 }
 
-func (s *impl) flowRelease(id mqttp.IDType) bool {
-	s.flowInUse.Delete(id)
+func (s *flow) release(id mqttp.IDType) bool {
+	s.inUse.Delete(id)
 
-	return atomic.AddInt32(&s.txQuota, 1) == 1
+	return atomic.AddInt32(&s.quota, 1) == 1
+}
+
+func (s *flow) quotaAvailable() bool {
+	return atomic.LoadInt32(&s.quota) > 0
 }
