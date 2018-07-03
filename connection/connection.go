@@ -678,18 +678,15 @@ func (s *impl) onConnectionCloseStage1(status error) {
 
 	s.tx.stop()
 
-	if err := s.conn.Close(); err != nil {
-		s.log.Error("close connection", zap.String("ClientID", s.id), zap.Error(err))
-	}
-
 	s.rx.shutdown()
 	s.tx.shutdown()
 
 	s.state = stateDisconnected
 
 	if err := s.conn.Close(); err != nil {
-		s.log.Error("close connection", zap.String("clientId", s.id), zap.Error(err))
+		s.log.Warn("close connection", zap.String("clientId", s.id), zap.Error(err))
 	}
+
 	s.conn = nil
 }
 
