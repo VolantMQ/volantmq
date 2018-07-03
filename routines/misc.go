@@ -21,7 +21,7 @@ import (
 	"io"
 	"net"
 
-	"github.com/VolantMQ/mqttp"
+	"github.com/VolantMQ/vlapi/mqttp"
 )
 
 var (
@@ -30,7 +30,7 @@ var (
 )
 
 // WriteMessage write message into connection
-func WriteMessage(conn io.Closer, msg packet.Provider) error {
+func WriteMessage(conn io.Closer, msg mqttp.IFace) error {
 	size, err := msg.Size()
 	if err != nil {
 		return err

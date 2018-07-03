@@ -3,8 +3,8 @@ package topics
 import (
 	"testing"
 
-	"github.com/VolantMQ/mqttp"
-	"github.com/VolantMQ/volantmq/subscriber"
+	"github.com/VolantMQ/vlapi/mqttp"
+	"github.com/VolantMQ/vlapi/subscriber"
 	"github.com/VolantMQ/volantmq/topics/types"
 	"github.com/stretchr/testify/require"
 )
@@ -49,22 +49,22 @@ func TestTopicsOpenCloseProvider(t *testing.T) {
 	}
 }
 
-//func TestTopicsSubscribeInvalidQoS(t *testing.T) {
-//	for _, p := range testProviders {
-//		prov, err := New(p.config)
-//		require.NoError(t, err)
-//
-//		p := &topicsTypes.SubscriptionParams{
-//			Ops: packet.SubscriptionOptions(packet.QosType(3)),
-//		}
-//
-//		_, _, err = prov.Subscribe("test", nil, p)
-//		require.Error(t, packet.ErrInvalidQoS, err.Error())
-//
-//		err = prov.Close()
-//		require.NoError(t, err)
-//	}
-//}
+func TestTopicsSubscribeInvalidQoS(t *testing.T) {
+	for _, p := range testProviders {
+		prov, err := New(p.config)
+		require.NoError(t, err)
+
+		p := &vlsubscriber.SubscriptionParams{
+			Ops: mqttp.SubscriptionOptions(mqttp.QosType(3)),
+		}
+
+		_, _, err = prov.Subscribe("test", nil, p)
+		require.Error(t, mqttp.ErrInvalidQoS, err.Error())
+
+		err = prov.Close()
+		require.NoError(t, err)
+	}
+}
 
 //func TestTopicsSubscribeInvalidMessage(t *testing.T) {
 //	for _, p := range testProviders {
@@ -83,42 +83,42 @@ func TestTopicsOpenCloseProvider(t *testing.T) {
 //	}
 //}
 
-func TestTopicsSubscription(t *testing.T) {
-	for _, p := range testProviders {
-		prov, err := New(p.config)
-		require.NoError(t, err)
-
-		sub1 := &subscriber.Type{}
-		p := &topicsTypes.SubscriptionParams{
-			Ops: packet.SubscriptionOptions(packet.QoS2),
-		}
-
-		qos, _, err := prov.Subscribe("sports/tennis/+/stats", sub1, p)
-
-		require.NoError(t, err)
-		require.Equal(t, packet.QoS2, qos)
-
-		err = prov.UnSubscribe("sports/tennis", sub1)
-
-		require.Error(t, err)
-
-		//var subs types.Subscribers
-		//
-		//subs, err = prov.Subscribers("sports/tennis/anzel/stats", message.QoS2)
-		//
-		//require.NoError(t, err)
-		//require.Equal(t, 1, len(subs))
-		//
-		//subs, err = prov.Subscribers("sports/tennis/anzel/stats", message.QoS1)
-		//
-		//require.NoError(t, err)
-		//require.Equal(t, 1, len(subs))
-
-		err = prov.UnSubscribe("sports/tennis/+/stats", sub1)
-
-		require.NoError(t, err)
-	}
-}
+//func TestTopicsSubscription(t *testing.T) {
+//	for _, p := range testProviders {
+//		prov, err := New(p.config)
+//		require.NoError(t, err)
+//
+//		sub1 := &subscriber.Type{}
+//		p := &topicsTypes.SubscriptionParams{
+//			Ops: packet.SubscriptionOptions(mqttp.QoS2),
+//		}
+//
+//		qos, _, err := prov.Subscribe("sports/tennis/+/stats", sub1, p)
+//
+//		require.NoError(t, err)
+//		require.Equal(t, mqttp.QoS2, qos)
+//
+//		err = prov.UnSubscribe("sports/tennis", sub1)
+//
+//		require.Error(t, err)
+//
+//		//var subs types.Subscribers
+//		//
+//		//subs, err = prov.Subscribers("sports/tennis/anzel/stats", message.QoS2)
+//		//
+//		//require.NoError(t, err)
+//		//require.Equal(t, 1, len(subs))
+//		//
+//		//subs, err = prov.Subscribers("sports/tennis/anzel/stats", message.QoS1)
+//		//
+//		//require.NoError(t, err)
+//		//require.Equal(t, 1, len(subs))
+//
+//		err = prov.UnSubscribe("sports/tennis/+/stats", sub1)
+//
+//		require.NoError(t, err)
+//	}
+//}
 
 //func TestTopicsRetained(t *testing.T) {
 //	for _, p := range testProviders {

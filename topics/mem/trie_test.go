@@ -3,7 +3,8 @@ package mem
 import (
 	"testing"
 
-	"github.com/VolantMQ/mqttp"
+	"github.com/VolantMQ/vlapi/mqttp"
+	"github.com/VolantMQ/vlapi/subscriber"
 	"github.com/VolantMQ/volantmq/subscriber"
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/topics/types"
@@ -37,8 +38,8 @@ func TestMatch1(t *testing.T) {
 	prov := allocProvider(t)
 	sub := &subscriber.Type{}
 
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS1),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 	prov.Subscribe("sport/tennis/player1/#", sub, p) // nolint: errcheck
 
@@ -53,8 +54,8 @@ func TestMatch2(t *testing.T) {
 
 	sub := &subscriber.Type{}
 
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS2),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
 	}
 	prov.Subscribe("sport/tennis/player1/#", sub, p) // nolint: errcheck
 
@@ -69,8 +70,8 @@ func TestSNodeMatch3(t *testing.T) {
 
 	sub := &subscriber.Type{}
 
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS2),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
 	}
 
 	prov.Subscribe("sport/tennis/#", sub, p) // nolint: errcheck
@@ -84,8 +85,8 @@ func TestMatch4(t *testing.T) {
 	prov := allocProvider(t)
 	sub := &subscriber.Type{}
 
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS2),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
 	}
 	prov.Subscribe("#", sub, p) // nolint: errcheck
 
@@ -142,8 +143,8 @@ func TestMatch5(t *testing.T) {
 	sub1 := &subscriber.Type{}
 	sub2 := &subscriber.Type{}
 
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS1),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
 	prov.subscriptionInsert("sport/tennis/+/+/#", sub1, p)
@@ -159,8 +160,8 @@ func TestMatch6(t *testing.T) {
 	prov := allocProvider(t)
 	sub1 := &subscriber.Type{}
 	sub2 := &subscriber.Type{}
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS1),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
 	prov.subscriptionInsert("sport/tennis/+/+/+/+/#", sub1, p)
@@ -176,13 +177,13 @@ func TestMatch7(t *testing.T) {
 
 	sub1 := &subscriber.Type{}
 	sub2 := &subscriber.Type{}
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS2),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
 	}
 
 	prov.subscriptionInsert("sport/tennis/#", sub1, p)
 
-	p.Ops = packet.SubscriptionOptions(packet.QoS1)
+	p.Ops = mqttp.SubscriptionOptions(mqttp.QoS1)
 
 	prov.subscriptionInsert("sport/tennis", sub2, p)
 
@@ -196,8 +197,8 @@ func TestMatch8(t *testing.T) {
 	prov := allocProvider(t)
 
 	sub := &subscriber.Type{}
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS2),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
 	}
 
 	prov.subscriptionInsert("+/+", sub, p)
@@ -212,8 +213,8 @@ func TestMatch9(t *testing.T) {
 	prov := allocProvider(t)
 
 	sub1 := &subscriber.Type{}
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS2),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
 	}
 
 	prov.subscriptionInsert("/+", sub1, p)
@@ -228,8 +229,8 @@ func TestMatch10(t *testing.T) {
 	prov := allocProvider(t)
 
 	sub1 := &subscriber.Type{}
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS2),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
 	}
 
 	prov.subscriptionInsert("+", sub1, p)
@@ -243,8 +244,8 @@ func TestMatch10(t *testing.T) {
 func TestInsertRemove(t *testing.T) {
 	prov := allocProvider(t)
 	sub := &subscriber.Type{}
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS2),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
 	}
 
 	prov.subscriptionInsert("#", sub, p)
@@ -286,8 +287,8 @@ func TestInsert1(t *testing.T) {
 	topic := "sport/tennis/player1/#"
 
 	sub1 := &subscriber.Type{}
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS1),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
 	prov.subscriptionInsert(topic, sub1, p)
@@ -329,8 +330,8 @@ func TestSNodeInsert2(t *testing.T) {
 	topic := "#"
 
 	sub1 := &subscriber.Type{}
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS1),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
 	prov.subscriptionInsert(topic, sub1, p)
@@ -355,8 +356,8 @@ func TestSNodeInsert3(t *testing.T) {
 	topic := "+/tennis/#"
 
 	sub1 := &subscriber.Type{}
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS1),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
 	prov.subscriptionInsert(topic, sub1, p)
@@ -393,8 +394,8 @@ func TestSNodeInsert4(t *testing.T) {
 	topic := "/finance"
 
 	sub1 := &subscriber.Type{}
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS1),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
 	prov.subscriptionInsert(topic, sub1, p)
@@ -425,8 +426,8 @@ func TestSNodeInsertDup(t *testing.T) {
 	topic := "/finance"
 
 	sub1 := &subscriber.Type{}
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS1),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
 	prov.subscriptionInsert(topic, sub1, p)
@@ -459,8 +460,8 @@ func TestSNodeRemove1(t *testing.T) {
 	topic := "sport/tennis/player1/#"
 
 	sub1 := &subscriber.Type{}
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS1),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
 	prov.subscriptionInsert(topic, sub1, p)
@@ -477,8 +478,8 @@ func TestSNodeRemove2(t *testing.T) {
 	topic := "sport/tennis/player1/#"
 
 	sub1 := &subscriber.Type{}
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS1),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
 	prov.subscriptionInsert(topic, sub1, p)
@@ -494,8 +495,8 @@ func TestSNodeRemove3(t *testing.T) {
 	sub1 := &subscriber.Type{}
 	sub2 := &subscriber.Type{}
 
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS1),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
 	prov.subscriptionInsert(topic, sub1, p)
@@ -515,8 +516,8 @@ func TestRetain1(t *testing.T) {
 		prov.retain(m)
 	}
 
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS1),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
 	_, rMsg, _ := prov.Subscribe("#", sub, p)
@@ -537,16 +538,16 @@ func TestRetain2(t *testing.T) {
 		prov.retain(m)
 	}
 
-	msg := newPublishMessageLarge("sport/tennis/player1/ricardo", packet.QoS1)
+	msg := newPublishMessageLarge("sport/tennis/player1/ricardo", mqttp.QoS1)
 	prov.retain(msg)
 
-	p := &topicsTypes.SubscriptionParams{
-		Ops: packet.SubscriptionOptions(packet.QoS1),
+	p := &vlsubscriber.SubscriptionParams{
+		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
 	prov.Subscribe("#", sub, p) // nolint: errcheck
 
-	var rMsg []*packet.Publish
+	var rMsg []*mqttp.Publish
 	prov.retainSearch("#", &rMsg)
 	require.Equal(t, 1, len(rMsg))
 
@@ -590,8 +591,8 @@ func TestRNodeInsertRemove(t *testing.T) {
 	require.Equal(t, 0, len(n5.children))
 	require.NotNil(t, n5.retained)
 
-	var rMsg *packet.Publish
-	rMsg, ok = n5.retained.(*packet.Publish)
+	var rMsg *mqttp.Publish
+	rMsg, ok = n5.retained.(*mqttp.Publish)
 	require.True(t, ok)
 	require.Equal(t, msg.QoS(), rMsg.QoS())
 	require.Equal(t, msg.Topic(), rMsg.Topic())
@@ -599,7 +600,7 @@ func TestRNodeInsertRemove(t *testing.T) {
 
 	// --- Insert msg2
 
-	msg2 := newPublishMessageLarge("sport/tennis/player1/andre", packet.QoS1)
+	msg2 := newPublishMessageLarge("sport/tennis/player1/andre", mqttp.QoS1)
 
 	prov.retain(msg2)
 	require.Equal(t, 2, len(n4.children))
@@ -610,7 +611,7 @@ func TestRNodeInsertRemove(t *testing.T) {
 	require.Equal(t, 0, len(n6.children))
 	require.NotNil(t, n6.retained)
 
-	rMsg, ok = n6.retained.(*packet.Publish)
+	rMsg, ok = n6.retained.(*mqttp.Publish)
 	require.True(t, ok)
 	require.Equal(t, msg2.QoS(), rMsg.QoS())
 	require.Equal(t, msg2.Topic(), rMsg.Topic())
@@ -626,15 +627,15 @@ func TestRNodeInsertRemove(t *testing.T) {
 func TestRNodeMatch(t *testing.T) {
 	prov := allocProvider(t)
 
-	msg1 := newPublishMessageLarge("sport/tennis/ricardo/stats", packet.QoS1)
+	msg1 := newPublishMessageLarge("sport/tennis/ricardo/stats", mqttp.QoS1)
 	prov.retain(msg1)
 
-	msg2 := newPublishMessageLarge("sport/tennis/andre/stats", packet.QoS1)
+	msg2 := newPublishMessageLarge("sport/tennis/andre/stats", mqttp.QoS1)
 	prov.retain(msg2)
-	msg3 := newPublishMessageLarge("sport/tennis/andre/bio", packet.QoS1)
+	msg3 := newPublishMessageLarge("sport/tennis/andre/bio", mqttp.QoS1)
 	prov.retain(msg3)
 
-	var msglist []*packet.Publish
+	var msglist []*mqttp.Publish
 
 	// ---
 
@@ -666,10 +667,10 @@ func TestRNodeMatch(t *testing.T) {
 	require.Equal(t, 3, len(msglist))
 }
 
-func newPublishMessageLarge(topic string, qos packet.QosType) *packet.Publish {
-	m, _ := packet.New(packet.ProtocolV311, packet.PUBLISH)
+func newPublishMessageLarge(topic string, qos mqttp.QosType) *mqttp.Publish {
+	m, _ := mqttp.New(mqttp.ProtocolV311, mqttp.PUBLISH)
 
-	msg := m.(*packet.Publish)
+	msg := m.(*mqttp.Publish)
 
 	msg.SetPayload(make([]byte, 1024))
 	msg.SetTopic(topic) // nolint: errcheck

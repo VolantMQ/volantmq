@@ -26,10 +26,6 @@
 
 
 [[constraint]]
-  name = "github.com/VolantMQ/mqttp"
-  version = "0.0.1"
-
-[[constraint]]
   branch = "master"
   name = "github.com/VolantMQ/vlapi"
 

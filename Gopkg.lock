@@ -2,12 +2,6 @@
 
 
 [[projects]]
-  name = "github.com/VolantMQ/mqttp"
-  packages = ["."]
-  revision = "e20fb4232051bca65b1d623ef69813ea213b38a0"
-  version = "v0.0.1"
-
-[[projects]]
   branch = "master"
   name = "github.com/VolantMQ/vlapi"
   packages = [
@@ -182,6 +176,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "ddce50ec4e80287fc42385ce954b1926cf94ab85625efbb086e86806313961d9"
+  inputs-digest = "15650b22fbbd18c898050b73c033981f84586e89a96fa29276b38a5baefaa192"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -25,7 +25,7 @@ VolantMQ is a high performance MQTT broker that aims to be fully compliant with 
 * $SYS topics
 
 **Persistence providers**
-* [BoltDB](https://github.com/boltdb/bolt)
+* [BBolt](https://github.com/coreos/bbolt)
 * In memory
 
 **TODO**
@@ -34,7 +34,6 @@ VolantMQ is a high performance MQTT broker that aims to be fully compliant with 
 * Cluster
 * Bridge
 * Benchmarking
-* Plugins
 
 ### Compatibility
 
