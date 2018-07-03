@@ -21,8 +21,8 @@ RUN curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
 
 # build server
 RUN \
-    go get github.com/VolantMQ/vlapi/... && \
-    go get github.com/VolantMQ/volantmq && \
+    go get -v github.com/VolantMQ/vlapi/... && \
+    go get -v github.com/VolantMQ/volantmq && \
     cd $GOPATH/src/github.com/VolantMQ/volantmq && \
     go build $VOLANTMQ_BUILD_FLAGS -o $VOLANTMQ_WORK_DIR/bin/volantmq
 
