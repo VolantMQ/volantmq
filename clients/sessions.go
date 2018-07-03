@@ -325,7 +325,6 @@ func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) (err
 			}
 
 			if e != nil || resp == nil {
-				m.log.Error("stop connection", zap.Error(e))
 				cn.Stop(e)
 				cn = nil
 				return nil
