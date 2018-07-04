@@ -59,6 +59,16 @@ type appContext struct {
 
 var _ healthcheck.Checks = (*appContext)(nil)
 
+var logger *zap.SugaredLogger
+
+// provided at compile time
+var GitCommit string
+var GitBranch string
+var GitState string
+var GitSummary string
+var BuildDate string
+var Version string
+
 func loadMqttListeners(defaultAuth *auth.Manager, lCfg *configuration.ListenersConfig) ([]interface{}, error) {
 	var listeners []interface{}
 
@@ -518,8 +528,6 @@ func (ctx *appContext) RemoveReadinessCheck(name string) error {
 	return nil
 }
 
-var logger *zap.SugaredLogger
-
 func main() {
 	defer func() {
 		logger.Info("service stopped")
@@ -531,7 +539,13 @@ func main() {
 
 	logger = configuration.GetHumanLogger()
 	logger.Info("starting service...")
-
+	logger.Infof("\n\tbuild info:\n"+
+		"\t\tcommit : %s\n"+
+		"\t\tbranch : %s\n"+
+		"\t\tstate  : %s\n"+
+		"\t\tsummary: %s\n"+
+		"\t\tdate   : %s\n"+
+		"\t\tversion: %s\n", GitCommit, GitBranch, GitState, GitSummary, BuildDate, Version)
 	config := configuration.ReadConfig()
 	if config == nil {
 		return

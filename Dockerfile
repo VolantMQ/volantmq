@@ -21,10 +21,11 @@ RUN curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
 
 # build server
 RUN \
+    go get -v github.com/ahmetb/govvv && \
     go get -v github.com/VolantMQ/vlapi/... && \
     go get -v github.com/VolantMQ/volantmq && \
     cd $GOPATH/src/github.com/VolantMQ/volantmq && \
-    go build $VOLANTMQ_BUILD_FLAGS -o $VOLANTMQ_WORK_DIR/bin/volantmq
+    govvv build $VOLANTMQ_BUILD_FLAGS -o $VOLANTMQ_WORK_DIR/bin/volantmq
 
 # build debug plugins
 RUN \
