@@ -31,15 +31,22 @@ func (s *flow) reAcquire(id mqttp.IDType) error {
 
 func (s *flow) acquire() (mqttp.IDType, error) {
 	//var err error
-	if atomic.AddInt32(&s.quota, -1) == 0 {
+	if atomic.LoadInt32(&s.quota) == 0 {
 		return mqttp.IDType(0), errQuotaExceeded
 	}
 
+	atomic.AddInt32(&s.quota, -1)
 	var id mqttp.IDType
 
 	for count := 0; count <= 0xFFFF; count++ {
 		s.counter++
 		id = mqttp.IDType(s.counter)
+
+		if id == 0 {
+			s.counter++
+			id = mqttp.IDType(s.counter)
+		}
+
 		if _, ok := s.inUse.LoadOrStore(id, true); !ok {
 			break
 		}

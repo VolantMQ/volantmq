@@ -16,7 +16,7 @@ import (
 )
 
 type sessionEvents interface {
-	sessionOffline(string, bool, *expiry)
+	sessionOffline(string, bool, *expiryConfig)
 	connectionClosed(string, mqttp.ReasonCode)
 	subscriberShutdown(string, vlsubscriber.IFace)
 }
@@ -36,7 +36,6 @@ type sessionConfig struct {
 	subscriber vlsubscriber.IFace
 	will       *mqttp.Publish
 	expireIn   *uint32
-	willDelay  uint32
 	durable    bool
 	version    mqttp.ProtocolVersion
 }
@@ -268,7 +267,14 @@ func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 
 	// valid willMsg pointer tells we have will message
 	// if session is clean send will regardless to will delay
-	if s.will != nil && s.willDelay == 0 {
+	willDelay := uint32(0)
+
+	if s.will != nil {
+		if val := s.will.PropertyGet(mqttp.PropertyWillDelayInterval); val != nil {
+			willDelay, _ = val.AsInt()
+		}
+	}
+	if s.will != nil && willDelay == 0 {
 		if err := s.messenger.Publish(s.will); err != nil {
 			s.log.Error("Publish will message", zap.String("ClientID", s.id), zap.Error(err))
 		}
@@ -277,7 +283,7 @@ func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 
 	s.connectionClosed(s.id, params.Reason)
 
-	keepContainer := s.durable && s.subscriber.HasSubscriptions()
+	keepContainer := (s.durable && s.subscriber.HasSubscriptions()) || (willDelay > 0)
 
 	if !keepContainer {
 		s.subscriberShutdown(s.id, s.subscriber)
@@ -292,19 +298,18 @@ func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 		s.persistence.PacketsDelete([]byte(s.id))
 	}
 
-	var exp *expiry
+	var exp *expiryConfig
 
 	if params.Reason != mqttp.CodeSessionTakenOver {
-		if s.willDelay > 0 || (s.expireIn != nil && *s.expireIn > 0) {
-			exp = newExpiry(
-				expiryConfig{
-					id:        s.id,
-					createdAt: s.createdAt,
-					messenger: s.messenger,
-					will:      s.will,
-					expireIn:  s.expireIn,
-					willDelay: s.willDelay,
-				})
+		if willDelay > 0 || (s.expireIn != nil && *s.expireIn > 0) {
+			exp = &expiryConfig{
+				id:        s.id,
+				createdAt: s.createdAt,
+				messenger: s.messenger,
+				will:      s.will,
+				expireIn:  s.expireIn,
+				willDelay: willDelay,
+			}
 
 			keepContainer = true
 		}

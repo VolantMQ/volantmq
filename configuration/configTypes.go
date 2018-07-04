@@ -122,7 +122,7 @@ type MqttConfig struct {
 		SubsID          bool          `yaml:"subsId,omitempty"`
 		SubsShared      bool          `yaml:"subsShared,omitempty"`
 		SubsWildcard    bool          `yaml:"subsWildcard,omitempty"`
-		ReceiveMax      int           `yaml:"receiveMax,omitempty"`
+		ReceiveMax      uint16        `yaml:"receiveMax,omitempty"`
 		MaxPacketSize   uint32        `yaml:"maxPacketSize,omitempty"`
 		MaxTopicAlias   uint16        `yaml:"maxTopicAlias,omitempty"`
 		MaxQoS          mqttp.QosType `yaml:"maxQoS,omitempty"`

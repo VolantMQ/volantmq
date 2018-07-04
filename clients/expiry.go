@@ -57,14 +57,16 @@ func (s *expiry) start() {
 	}
 
 	s.expiringSince = time.Now()
-	s.timer = time.NewTimer(time.Duration(timerPeriod) * time.Second)
+	s.timerLock.Lock()
+	s.timer = time.AfterFunc(time.Duration(timerPeriod)*time.Second, s.timerCallback)
+	s.timerLock.Unlock()
 }
 
 func (s *expiry) cancel() {
+	s.timerLock.Lock()
 	if !s.timer.Stop() {
-		s.timerLock.Lock()
-		s.timerLock.Unlock() // nolint: megacheck
 	}
+	s.timerLock.Unlock()
 }
 
 func (s *expiry) timerCallback() {
@@ -85,9 +87,6 @@ func (s *expiry) timerCallback() {
 		s.sessionTimer(s.id, false)
 	} else if *s.expireIn == 0 {
 		// session has expired. WIPE IT
-		//if s.subscriber != nil {
-		//	s.shutdownSubscriber(s.subscriber)
-		//}
 		s.sessionTimer(s.id, true)
 	} else {
 		// restart timer and wait again

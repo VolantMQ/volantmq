@@ -295,7 +295,7 @@ func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) (err
 		connection.OnAuth(m.onAuth),
 		connection.NetConn(conn),
 		connection.TxQuota(types.DefaultReceiveMax),
-		connection.RxQuota(types.DefaultReceiveMax),
+		connection.RxQuota(int32(m.Options.ReceiveMax)),
 		connection.Metric(m.Systree.Metric().Packets()),
 		connection.RetainAvailable(m.Options.RetainAvailable),
 		connection.OfflineQoS0(m.Options.OfflineQoS0),
@@ -446,7 +446,6 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 		config := sessionConfig{
 			sessionEvents: m,
 			expireIn:      params.ExpireIn,
-			willDelay:     params.WillDelay,
 			will:          params.Will,
 			durable:       params.Durable,
 			version:       params.Version,
@@ -627,7 +626,6 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 				Clean:     params.CleanStart,
 				Durable:   params.Durable,
 				Timestamp: time.Now().Format(time.RFC3339),
-				WillDelay: strconv.FormatUint(uint64(params.WillDelay), 10),
 			}
 			m.Systree.Sessions().Created(params.ID, status)
 		}
@@ -651,12 +649,13 @@ func (m *Manager) writeSessionProperties(resp *mqttp.ConnAck, id string) error {
 		return 0
 	}
 
-	// [MQTT-3.2.2.3.2] if server receive max less than 65536 than let client to know about
+	// [MQTT-3.2.2.3.2] if server receive max less than 65535 than let client to know about
 	if m.Options.ReceiveMax < types.DefaultReceiveMax {
 		if err := resp.PropertySet(mqttp.PropertyReceiveMaximum, m.Options.ReceiveMax); err != nil {
 			return err
 		}
 	}
+
 	// [MQTT-3.2.2.3.3] if supported server's QoS less than 2 notify client
 	if m.Options.MaxQoS < mqttp.QoS2 {
 		if err := resp.PropertySet(mqttp.PropertyMaximumQoS, byte(m.Options.MaxQoS)); err != nil {
@@ -721,15 +720,18 @@ func (m *Manager) subscriberShutdown(id string, sub vlsubscriber.IFace) {
 	}
 }
 
-func (m *Manager) sessionOffline(id string, keep bool, exp *expiry) {
+func (m *Manager) sessionOffline(id string, keep bool, expCfg *expiryConfig) {
 	if obj, ok := m.sessions.Load(id); ok {
 		if cont, kk := obj.(*container); kk {
 			cont.rmLock.Lock()
 			cont.ses = nil
 
 			if keep {
-				if exp != nil {
+				if expCfg != nil {
+					expCfg.expiryEvent = m
+					exp := newExpiry(*expCfg)
 					cont.expiry.Store(exp)
+
 					exp.start()
 				}
 			} else {

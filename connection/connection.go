@@ -144,7 +144,6 @@ type ConnectParams struct {
 	Will            *mqttp.Publish
 	Username        []byte
 	Password        []byte
-	WillDelay       uint32
 	MaxTxPacketSize uint32
 	SendQuota       uint16
 	KeepAlive       uint16
@@ -372,20 +371,6 @@ func genClientID() string {
 	return base64.URLEncoding.EncodeToString(b)
 }
 
-func (s *impl) getWill(pkt *mqttp.Connect) *mqttp.Publish {
-	var p *mqttp.Publish
-
-	if willTopic, willPayload, willQoS, willRetain, will := pkt.Will(); will {
-		p = mqttp.NewPublish(pkt.Version())
-		if err := p.Set(willTopic, willPayload, willQoS, willRetain, false); err != nil {
-			s.log.Error("Configure will packet", zap.String("ClientID", s.id), zap.Error(err))
-			p = nil
-		}
-	}
-
-	return p
-}
-
 func (s *impl) onConnect(pkt *mqttp.Connect) (mqttp.IFace, error) {
 	if atomic.CompareAndSwapUint32(&s.connectProcessed, 0, 1) {
 		id := string(pkt.ClientID())
@@ -400,7 +385,7 @@ func (s *impl) onConnect(pkt *mqttp.Connect) (mqttp.IFace, error) {
 		params := &ConnectParams{
 			ID:         id,
 			IDGen:      idGen,
-			Will:       s.getWill(pkt),
+			Will:       pkt.Will(),
 			KeepAlive:  pkt.KeepAlive(),
 			Version:    pkt.Version(),
 			CleanStart: pkt.IsClean(),
@@ -503,13 +488,6 @@ func (s *impl) readConnProperties(req *mqttp.Connect, params *ConnectParams) {
 	if prop := req.PropertyGet(mqttp.PropertySessionExpiryInterval); prop != nil {
 		if val, e := prop.AsInt(); e == nil {
 			params.ExpireIn = &val
-		}
-	}
-
-	// [MQTT-3.1.2.11.3]
-	if prop := req.PropertyGet(mqttp.PropertyWillDelayInterval); prop != nil {
-		if val, e := prop.AsInt(); e == nil {
-			params.WillDelay = val
 		}
 	}
 
@@ -796,7 +774,7 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 	switch pkt.QoS() {
 	case mqttp.QoS2:
 		if s.rxQuota == 0 {
-			reason = mqttp.CodeReceiveMaximumExceeded
+			err = mqttp.CodeReceiveMaximumExceeded
 		} else {
 			s.rxQuota--
 			r := mqttp.NewPubRec(s.version)
@@ -816,6 +794,11 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 			r.SetReason(mqttp.CodeSuccess)
 		}
 	case mqttp.QoS1:
+		if s.rxQuota == 0 {
+			err = mqttp.CodeReceiveMaximumExceeded
+			break
+		}
+
 		r := mqttp.NewPubAck(s.version)
 
 		id, _ := pkt.ID()
