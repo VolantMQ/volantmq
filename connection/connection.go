@@ -247,6 +247,7 @@ func New(opts ...Option) Initial {
 	)
 
 	s.rx.setOptions(
+		rdLog(s.log),
 		rdOnConnClose(s.onConnectionClose),
 		rdProcessIncoming(s.processIncoming),
 	)

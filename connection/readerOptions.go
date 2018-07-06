@@ -6,6 +6,7 @@ import (
 	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/transport"
+	"go.uber.org/zap"
 )
 
 func (s *reader) setOptions(opts ...readerOption) error {
@@ -70,6 +71,13 @@ func rdKeepAlive(val time.Duration) readerOption {
 func rdVersion(val mqttp.ProtocolVersion) readerOption {
 	return func(t *reader) error {
 		t.version = val
+		return nil
+	}
+}
+
+func rdLog(val *zap.SugaredLogger) readerOption {
+	return func(t *reader) error {
+		t.log = val
 		return nil
 	}
 }

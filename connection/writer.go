@@ -226,7 +226,7 @@ func (s *writer) sendQoS0(pkt mqttp.IFace) {
 	if (atomic.LoadUint32(&s.qos0Redirect) == 0) && ((cap(s.qos0Messages) - len(s.qos0Messages)) > 0) {
 		s.qos0Messages <- pkt
 	} else {
-		atomic.StoreUint32(&s.qos12Redirect, 1)
+		atomic.StoreUint32(&s.qos0Redirect, 1)
 		if p := s.encodeForPersistence(pkt); p != nil {
 			if err := s.persist.PacketStoreQoS0([]byte(s.id), p); err != nil {
 				s.log.Error("persist packet", zap.String("clientId", s.id), zap.Error(err))

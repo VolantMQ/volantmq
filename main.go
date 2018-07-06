@@ -265,7 +265,7 @@ func (ctx *appContext) loadAuth(cfg *configuration.Config) (*auth.Manager, error
 
 					iface = plObject.(vlauth.IFace)
 				} else {
-					logger.Warnf("\tno enabled plugin of type [%d] for config [%s]", backend, name)
+					logger.Warnf("\tno enabled plugin of type [%s] for config [%s]", backend, name)
 				}
 			} else {
 				logger.Warn("\tno auth plugins loaded")

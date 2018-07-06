@@ -2,6 +2,7 @@ package clients
 
 import (
 	"container/list"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,11 +34,12 @@ type sessionPreConfig struct {
 
 type sessionConfig struct {
 	sessionEvents
-	subscriber vlsubscriber.IFace
-	will       *mqttp.Publish
-	expireIn   *uint32
-	durable    bool
-	version    mqttp.ProtocolVersion
+	subscriber          vlsubscriber.IFace
+	will                *mqttp.Publish
+	expireIn            *uint32
+	durable             bool
+	sharedSubscriptions bool
+	version             mqttp.ProtocolVersion
 }
 
 type session struct {
@@ -123,6 +125,11 @@ func (s *session) SignalPublish(pkt *mqttp.Publish) error {
 	return nil
 }
 
+type tmpSubcribeTopic struct {
+	topic string
+	vlsubscriber.SubscriptionParams
+}
+
 // SignalSubscribe process SUBSCRIBE packet from client
 func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 	m, _ := mqttp.New(s.version, mqttp.SUBACK)
@@ -134,25 +141,43 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 	var retCodes []mqttp.ReasonCode
 	var retainedPublishes []*mqttp.Publish
 
-	pkt.RangeTopics(func(t string, ops mqttp.SubscriptionOptions) {
-		reason := mqttp.CodeSuccess // nolint: ineffassign
+	subsID := uint32(0)
 
-		if err := s.permissions.ACL(s.id, s.username, t, vlauth.AccessRead); err == vlauth.StatusAllow {
-			subsID := uint32(0)
+	// V5.0 [MQTT-3.8.2.1.2]
+	if prop := pkt.PropertyGet(mqttp.PropertySubscriptionIdentifier); prop != nil {
+		if v, e := prop.AsInt(); e == nil {
+			subsID = v
+		}
+	}
 
-			// V5.0 [MQTT-3.8.2.1.2]
-			if prop := pkt.PropertyGet(mqttp.PropertySubscriptionIdentifier); prop != nil {
-				if v, e := prop.AsInt(); e == nil {
-					subsID = v
-				}
-			}
+	var topics []tmpSubcribeTopic
 
-			subsParams := vlsubscriber.SubscriptionParams{
+	err := pkt.ForEachTopic(func(t string, ops mqttp.SubscriptionOptions) error {
+		// V5.0
+		// [MQTT-3.8.3-4] It is a Protocol Error to set the No Local bit to 1 on a Shared Subscription
+		if (ops.NL() || s.sharedSubscriptions) && strings.Contains(t, "$share") {
+			return mqttp.CodeProtocolError
+		}
+
+		topics = append(topics, tmpSubcribeTopic{
+			topic: t,
+			SubscriptionParams: vlsubscriber.SubscriptionParams{
 				ID:  subsID,
 				Ops: ops,
-			}
+			},
+		})
 
-			if grantedQoS, retained, err := s.subscriber.Subscribe(t, &subsParams); err != nil {
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	for _, sub := range topics {
+		var reason mqttp.ReasonCode
+		if err = s.permissions.ACL(s.id, s.username, sub.topic, vlauth.AccessRead); err == vlauth.StatusAllow {
+			if grantedQoS, retained, e := s.subscriber.Subscribe(sub.topic, &sub.SubscriptionParams); e != nil {
 				reason = mqttp.QosFailure
 			} else {
 				reason = mqttp.ReasonCode(grantedQoS)
@@ -168,19 +193,19 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 		}
 
 		retCodes = append(retCodes, reason)
-	})
+	}
 
-	if err := resp.AddReturnCodes(retCodes); err != nil {
+	if err = resp.AddReturnCodes(retCodes); err != nil {
 		return nil, err
 	}
 
 	// Now put retained messages into publish queue
 	for _, rp := range retainedPublishes {
-		if p, err := rp.Clone(s.version); err == nil {
+		if p, e := rp.Clone(s.version); e == nil {
 			p.SetRetain(true)
 			s.conn.Publish(s.id, p)
 		} else {
-			s.log.Error("Couldn't clone PUBLISH message", zap.String("ClientID", s.id), zap.Error(err))
+			s.log.Error("Couldn't clone PUBLISH message", zap.String("clientId", s.id), zap.Error(e))
 		}
 	}
 
@@ -318,6 +343,4 @@ func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 	s.sessionOffline(s.id, keepContainer, exp)
 
 	s.stopReq.Do(func() {})
-
-	s.conn = nil
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/transport"
+	"go.uber.org/zap"
 )
 
 type reader struct {
@@ -16,6 +17,7 @@ type reader struct {
 	connect           chan interface{}
 	onConnectionClose signalConnectionClose
 	processIncoming   signalIncoming
+	log               *zap.SugaredLogger
 	metric            systree.PacketsMetric
 	wg                sync.WaitGroup
 	connWg            sync.WaitGroup
@@ -133,8 +135,8 @@ func (s *reader) readPacket(buf *bufio.Reader) (mqttp.IFace, error) {
 
 		// Get the remaining length of the message
 		remLen, m := binary.Uvarint(header[1:])
-		// Total message length is remlen + 1 (msg type) + m (remlen bytes)
-		s.remaining = int(remLen) + 1 + m
+		// Total message length is 1 (msg type) + remLen + m (remlen bytes)
+		s.remaining = 1 + int(remLen) + m
 		s.recv = make([]byte, s.remaining)
 	}
 
