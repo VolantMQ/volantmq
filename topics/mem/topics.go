@@ -105,6 +105,10 @@ func (mT *provider) Subscribe(filter string, s topicsTypes.Subscriber, p *vlsubs
 	defer mT.smu.Unlock()
 	mT.smu.Lock()
 
+	if s == nil || p == nil {
+		return mqttp.QosType(0), []*mqttp.Publish{}, topicsTypes.ErrInvalidArgs
+	}
+
 	p.Granted = p.Ops.QoS()
 	exists := mT.subscriptionInsert(filter, s, p)
 

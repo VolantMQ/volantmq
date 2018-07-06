@@ -54,11 +54,11 @@ func TestTopicsSubscribeInvalidQoS(t *testing.T) {
 		prov, err := New(p.config)
 		require.NoError(t, err)
 
-		p := &vlsubscriber.SubscriptionParams{
+		ops := &vlsubscriber.SubscriptionParams{
 			Ops: mqttp.SubscriptionOptions(mqttp.QosType(3)),
 		}
 
-		_, _, err = prov.Subscribe("test", nil, p)
+		_, _, err = prov.Subscribe("test", nil, ops)
 		require.Error(t, mqttp.ErrInvalidQoS, err.Error())
 
 		err = prov.Close()
