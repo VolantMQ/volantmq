@@ -34,10 +34,12 @@ type httpServer struct {
 	server *http.Server
 }
 
+// Mux ...
 func (h *httpServer) Mux() *http.ServeMux {
 	return h.mux
 }
 
+// Addr ...
 func (h *httpServer) Addr() string {
 	return h.server.Addr
 }
@@ -61,12 +63,24 @@ var _ healthcheck.Checks = (*appContext)(nil)
 
 var logger *zap.SugaredLogger
 
-// provided at compile time
+// those are provided at compile time
+
+// GitCommit SHA hash
 var GitCommit string
+
+// GitBranch if any
 var GitBranch string
+
+// GitState repository state
 var GitState string
+
+// GitSummary repository info
 var GitSummary string
+
+// BuildDate build date
 var BuildDate string
+
+// Version application version
 var Version string
 
 func loadMqttListeners(defaultAuth *auth.Manager, lCfg *configuration.ListenersConfig) ([]interface{}, error) {
@@ -272,10 +286,11 @@ func (ctx *appContext) loadAuth(cfg *configuration.Config) (*auth.Manager, error
 			}
 		}
 
-		if err := auth.Register(name, iface); err != nil {
-			logger.Error("\tauth provider", zap.String("name", name), zap.String("backend", backend), zap.Error(err))
-
-			return nil, err
+		if iface != nil {
+			if err := auth.Register(name, iface); err != nil {
+				logger.Error("\tauth provider", zap.String("name", name), zap.String("backend", backend), zap.Error(err))
+				return nil, err
+			}
 		}
 	}
 
@@ -451,6 +466,7 @@ func (ctx *appContext) configurePlugin(pl vlplugin.Plugin, c interface{}) (inter
 	return plObject, err
 }
 
+// GetHTTPServer ...
 func (ctx *appContext) GetHTTPServer(port string) vlplugin.HTTPHandler {
 	if port == "" {
 		port = ctx.httpDefaultMux
@@ -472,10 +488,12 @@ func (ctx *appContext) GetHTTPServer(port string) vlplugin.HTTPHandler {
 	return srv
 }
 
+// GetHealth ...
 func (ctx *appContext) GetHealth() healthcheck.Checks {
 	return ctx
 }
 
+// AddLivenessCheck ...
 func (ctx *appContext) AddLivenessCheck(name string, check healthcheck.Check) error {
 	ctx.healthLock.Lock()
 	defer ctx.healthLock.Unlock()
@@ -489,6 +507,7 @@ func (ctx *appContext) AddLivenessCheck(name string, check healthcheck.Check) er
 	return nil
 }
 
+// AddReadinessCheck ...
 func (ctx *appContext) AddReadinessCheck(name string, check healthcheck.Check) error {
 	ctx.healthLock.Lock()
 	defer ctx.healthLock.Unlock()
@@ -502,6 +521,7 @@ func (ctx *appContext) AddReadinessCheck(name string, check healthcheck.Check) e
 	return nil
 }
 
+// RemoveLivenessCheck ...
 func (ctx *appContext) RemoveLivenessCheck(name string) error {
 	ctx.healthLock.Lock()
 	defer ctx.healthLock.Unlock()
@@ -515,6 +535,7 @@ func (ctx *appContext) RemoveLivenessCheck(name string) error {
 	return nil
 }
 
+// RemoveReadinessCheck ...
 func (ctx *appContext) RemoveReadinessCheck(name string) error {
 	ctx.healthLock.Lock()
 	defer ctx.healthLock.Unlock()
@@ -637,7 +658,7 @@ func main() {
 		Persistence:     persist,
 		TransportStatus: listenerStatus,
 		OnDuplicate: func(s string, b bool) {
-			logger.Info("Session duplicate: ClientID: ", s, " allowed: ", b)
+			logger.Info("Session duplicate: clientId: ", s, " allowed: ", b)
 		},
 	}
 
@@ -668,7 +689,7 @@ func main() {
 		logger.Info("service received signal: ", sig.String())
 	}
 
-	if err = srv.Close(); err != nil {
+	if err = srv.Shutdown(); err != nil {
 		logger.Error("shutdown server", zap.Error(err))
 	}
 

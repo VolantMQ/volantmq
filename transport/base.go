@@ -6,7 +6,6 @@ import (
 
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/systree"
-	"github.com/troian/easygo/netpoll"
 	"go.uber.org/zap"
 )
 
@@ -23,7 +22,6 @@ type Config struct {
 // InternalConfig used by server implementation to configure internal specific needs
 type InternalConfig struct {
 	Handler
-	netpoll.EventPoll
 	Metric systree.Metric
 }
 

@@ -24,7 +24,6 @@ import (
 	"github.com/VolantMQ/volantmq/transport"
 	"github.com/VolantMQ/volantmq/types"
 	"github.com/gosuri/uiprogress"
-	"github.com/troian/easygo/netpoll"
 	"go.uber.org/zap"
 )
 
@@ -54,7 +53,6 @@ type Manager struct {
 	persistence     persistence.Sessions
 	log             *zap.SugaredLogger
 	quit            chan struct{}
-	ePoll           netpoll.EventPoll
 	sessionsCount   sync.WaitGroup
 	sessions        sync.Map
 	plSubscribers   map[string]vlsubscriber.IFace
@@ -121,10 +119,6 @@ func NewManager(c *Config) (*Manager, error) {
 		}
 	}
 
-	if m.ePoll, err = netpoll.New(nil); err != nil {
-		m.log.Error("netpoll start: ", zap.Error(err))
-	}
-
 	pCount := m.persistence.Count()
 	if pCount > 0 {
 		m.log.Info("Loading sessions. Might take a while")
@@ -173,8 +167,8 @@ func NewManager(c *Config) (*Manager, error) {
 	return m, nil
 }
 
-// Shutdown gracefully by stopping all active sessions and persist states
-func (m *Manager) Shutdown() error {
+// Stop session manager. Stops any existing connections
+func (m *Manager) Stop() error {
 	select {
 	case <-m.quit:
 		return errors.New("already stopped")
@@ -199,15 +193,20 @@ func (m *Manager) Shutdown() error {
 		if exp != nil {
 			e := exp.(*expiry)
 			e.cancel()
-		}
 
-		//m.persistence.ExpiryStore([]byte(k.(string)), &persistence.SessionDelays{})
+			m.persistence.ExpiryStore([]byte(k.(string)), e.persistedState())
+		}
 
 		return true
 	})
 
 	m.sessionsCount.Wait()
 
+	return nil
+}
+
+// Shutdown gracefully by stopping all active sessions and persist states
+func (m *Manager) Shutdown() error {
 	// shutdown subscribers
 	m.sessions.Range(func(k, v interface{}) bool {
 		wrap := v.(*container)
@@ -216,6 +215,8 @@ func (m *Manager) Shutdown() error {
 				m.log.Error("persist subscriber", zap.Error(err))
 			}
 		}
+
+		m.sessions.Delete(k)
 
 		return true
 	})
@@ -273,7 +274,7 @@ func (m *Manager) LoadSession(context interface{}, id []byte, state *persistence
 	}
 
 	if cfg, ok := ctx.preloadConfigs[sID]; ok && cfg.exp != nil {
-		status.WillDelay = strconv.FormatUint(uint64(cfg.exp.willDelay), 10)
+		status.WillDelay = strconv.FormatUint(uint64(cfg.exp.willIn), 10)
 		if cfg.exp.expireIn != nil {
 			status.ExpiryInterval = strconv.FormatUint(uint64(*cfg.exp.expireIn), 10)
 		}
@@ -285,12 +286,12 @@ func (m *Manager) LoadSession(context interface{}, id []byte, state *persistence
 
 // OnConnection implements transport.Handler interface and handles incoming connection
 func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) (err error) {
-	//defer func() {
-	//	if r := recover(); r != nil {
-	//		fmt.Println(r)
-	//		err = errors.New("panic")
-	//	}
-	//}()
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println(r)
+			err = errors.New("panic")
+		}
+	}()
 	cn := connection.New(
 		connection.OnAuth(m.onAuth),
 		connection.NetConn(conn),
@@ -835,38 +836,38 @@ func (m *Manager) decodeSessionExpiry(ctx *loadContext, id string, state *persis
 		return nil
 	}
 
-	since, err := time.Parse(time.RFC3339, state.Expire.Since)
-	if err != nil {
-		prev := err
-		m.log.Error("Parse expiration value", zap.String("ClientID", id), zap.Error(err))
-		if err = m.persistence.SubscriptionsDelete([]byte(id)); err != nil && err != persistence.ErrNotFound {
-			m.log.Error("Persisted subscriber delete", zap.Error(err))
+	var err error
+	var since time.Time
+
+	if len(state.Expire.Since) > 0 {
+		since, err = time.Parse(time.RFC3339, state.Expire.Since)
+		if err != nil {
+			m.log.Error("parse expiration value", zap.String("clientId", id), zap.Error(err))
+			if e := m.persistence.SubscriptionsDelete([]byte(id)); e != nil && e != persistence.ErrNotFound {
+				m.log.Error("Persisted subscriber delete", zap.Error(e))
+			}
+
+			return err
 		}
-
-		return prev
 	}
-
 	var will *mqttp.Publish
 	var willIn uint32
 	var expireIn uint32
 
 	// if persisted state has delayed will lets check if it has not elapsed its time
-	if len(state.Expire.WillIn) > 0 && len(state.Expire.WillData) > 0 {
-		pkt, _, _ := mqttp.Decode(mqttp.ProtocolVersion(state.Version), state.Expire.WillData)
+	if len(state.Expire.Will) > 0 {
+		pkt, _, _ := mqttp.Decode(mqttp.ProtocolVersion(mqttp.ProtocolV50), state.Expire.Will)
 		will, _ = pkt.(*mqttp.Publish)
-		var val int
-		if val, err = strconv.Atoi(state.Expire.WillIn); err == nil {
-			willIn = uint32(val)
-			willAt := since.Add(time.Duration(willIn) * time.Second)
 
+		if prop := pkt.PropertyGet(mqttp.PropertyWillDelayInterval); prop != nil {
+			willIn, _ = prop.AsInt()
+			willAt := since.Add(time.Duration(willIn) * time.Second)
 			if time.Now().After(willAt) {
 				// will delay elapsed. notify keep in list and publish when all persisted sessions loaded
 				ctx.delayedWills = append(ctx.delayedWills, will)
 				will = nil
 				willIn = 0
 			}
-		} else {
-			m.log.Error("Decode will at", zap.String("ClientID", id), zap.Error(err))
 		}
 	}
 
@@ -884,7 +885,7 @@ func (m *Manager) decodeSessionExpiry(ctx *loadContext, id string, state *persis
 				return nil
 			}
 		} else {
-			m.log.Error("Decode expire at", zap.String("ClientID", id), zap.Error(err))
+			m.log.Error("Decode expire at", zap.String("clientId", id), zap.Error(err))
 		}
 	}
 
@@ -894,7 +895,7 @@ func (m *Manager) decodeSessionExpiry(ctx *loadContext, id string, state *persis
 		var createdAt time.Time
 		if createdAt, err = time.Parse(time.RFC3339, state.Timestamp); err != nil {
 			m.log.Named("persistence").Error("Decode createdAt failed, using current timestamp",
-				zap.String("ClientID", id),
+				zap.String("clientId", id),
 				zap.Error(err))
 			createdAt = time.Now()
 		}
@@ -903,13 +904,24 @@ func (m *Manager) decodeSessionExpiry(ctx *loadContext, id string, state *persis
 			ctx.preloadConfigs[id] = &preloadConfig{}
 		}
 
+		var expiringSince time.Time
+
+		if expireIn > 0 {
+			if expiringSince, err = time.Parse(time.RFC3339, state.Expire.Since); err != nil {
+				m.log.Named("persistence").Error("Decode Expire.Since failed",
+					zap.String("clientId", id),
+					zap.Error(err))
+			}
+		}
+
 		ctx.preloadConfigs[id].exp = &expiryConfig{
-			expiryEvent: m,
-			messenger:   m.TopicsMgr,
-			createdAt:   createdAt,
-			will:        will,
-			willDelay:   willIn,
-			expireIn:    &expireIn,
+			expiryEvent:   m,
+			messenger:     m.TopicsMgr,
+			createdAt:     createdAt,
+			expiringSince: expiringSince,
+			will:          will,
+			willIn:        willIn,
+			expireIn:      &expireIn,
 		}
 	}
 
