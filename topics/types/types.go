@@ -83,7 +83,8 @@ type Provider interface {
 	Publish(interface{}) error
 	Retain(types.RetainObject) error
 	Retained(string) ([]*mqttp.Publish, error)
-	Close() error
+	Stop() error
+	Shutdown() error
 }
 
 // SubscriberInterface used by subscriber to handle messages

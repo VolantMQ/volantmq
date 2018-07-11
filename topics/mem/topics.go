@@ -159,12 +159,16 @@ func (mT *provider) Retained(filter string) ([]*mqttp.Publish, error) {
 	return r, nil
 }
 
-func (mT *provider) Close() error {
+func (mT *provider) Stop() error {
 	close(mT.inbound)
 	close(mT.inRetained)
 
 	mT.wgPublisher.Wait()
 
+	return nil
+}
+
+func (mT *provider) Shutdown() error {
 	defer mT.smu.Unlock()
 	mT.smu.Lock()
 
@@ -173,7 +177,6 @@ func (mT *provider) Close() error {
 		// [MQTT-3.3.1-5]
 		mT.retainSearch("#", &res)
 		mT.retainSearch("/#", &res)
-		mT.retainSearch("$share/#", &res)
 
 		var encoded []*persistence.PersistedPacket
 

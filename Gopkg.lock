@@ -11,7 +11,7 @@
     "plugin/persistence",
     "subscriber"
   ]
-  revision = "c109da3d0d329d8ae0bea52fe51285302e232255"
+  revision = "3850e99d5ff947a5e2f410ade7a182dc551421f1"
 
 [[projects]]
   branch = "master"
@@ -126,12 +126,6 @@
 
 [[projects]]
   branch = "master"
-  name = "github.com/troian/easygo"
-  packages = ["netpoll"]
-  revision = "6aa9ec42b14215a7f293153859340c9e4a34e59d"
-
-[[projects]]
-  branch = "master"
   name = "github.com/troian/healthcheck"
   packages = ["."]
   revision = "28210b882127d82f4af3797c25bcc85e7ea22533"
@@ -165,7 +159,7 @@
   branch = "master"
   name = "golang.org/x/sys"
   packages = ["unix"]
-  revision = "ce36f3865eeb42541ce3f87f32f8462c5687befa"
+  revision = "1b2967e3c290b7c545b3db0deeda16e9be4f98a2"
 
 [[projects]]
   name = "gopkg.in/yaml.v2"
@@ -176,6 +170,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "15650b22fbbd18c898050b73c033981f84586e89a96fa29276b38a5baefaa192"
+  inputs-digest = "295a8ae9d53f6fa95ec9f9d9f3971e3b60bd45c1d6b7756e84fa032fec4bdddf"
   solver-name = "gps-cdcl"
   solver-version = 1

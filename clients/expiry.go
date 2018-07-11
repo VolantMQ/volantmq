@@ -1,10 +1,12 @@
 package clients
 
 import (
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
+	"github.com/VolantMQ/vlapi/plugin/persistence"
 	"github.com/VolantMQ/volantmq/types"
 )
 
@@ -14,19 +16,19 @@ type expiryEvent interface {
 
 type expiryConfig struct {
 	expiryEvent
-	id        string
-	createdAt time.Time
-	messenger types.TopicMessenger
-	will      *mqttp.Publish
-	expireIn  *uint32
-	willDelay uint32
+	id            string
+	createdAt     time.Time
+	expiringSince time.Time
+	messenger     types.TopicMessenger
+	will          *mqttp.Publish
+	expireIn      *uint32
+	willIn        uint32
 }
 
 type expiry struct {
 	expiryConfig
-	expiringSince time.Time
-	timerLock     sync.Mutex
-	timer         *time.Timer
+	timerLock sync.Mutex
+	timer     *time.Timer
 }
 
 func newExpiry(c expiryConfig) *expiry {
@@ -39,8 +41,8 @@ func (s *expiry) start() {
 	var timerPeriod uint32
 
 	// if meet will requirements point that
-	if s.will != nil && s.willDelay > 0 {
-		timerPeriod = s.willDelay
+	if s.will != nil && s.willIn > 0 {
+		timerPeriod = s.willIn
 	} else {
 		s.will = nil
 	}
@@ -56,7 +58,10 @@ func (s *expiry) start() {
 		}
 	}
 
-	s.expiringSince = time.Now()
+	if s.expiringSince.IsZero() {
+		s.expiringSince = time.Now()
+	}
+
 	s.timerLock.Lock()
 	s.timer = time.AfterFunc(time.Duration(timerPeriod)*time.Second, s.timerCallback)
 	s.timerLock.Unlock()
@@ -69,6 +74,22 @@ func (s *expiry) cancel() {
 	s.timerLock.Unlock()
 }
 
+func (s *expiry) persistedState() *persistence.SessionDelays {
+	exp := &persistence.SessionDelays{
+		Since: s.expiringSince.Format(time.RFC3339),
+	}
+
+	if s.will != nil {
+		exp.Will, _ = mqttp.Encode(s.will)
+	}
+
+	if s.expireIn != nil {
+		exp.ExpireIn = strconv.Itoa(int(*s.expireIn))
+	}
+
+	return exp
+}
+
 func (s *expiry) timerCallback() {
 	defer s.timerLock.Unlock()
 	s.timerLock.Lock()
@@ -78,7 +99,7 @@ func (s *expiry) timerCallback() {
 		// publish if exists and wipe state
 		s.messenger.Publish(s.will) // nolint: errcheck
 		s.will = nil
-		s.willDelay = 0
+		s.willIn = 0
 	}
 
 	if s.expireIn == nil {

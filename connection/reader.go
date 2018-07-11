@@ -42,6 +42,7 @@ func newReader() *reader {
 func (s *reader) shutdown() {
 	s.wg.Wait()
 	s.topicAlias = nil
+	s.recv = []byte{}
 	s.connect = nil
 }
 

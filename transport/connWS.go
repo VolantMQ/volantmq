@@ -13,7 +13,7 @@ type connWs struct {
 	conn *websocket.Conn
 	stat systree.BytesMetric
 	prev io.Reader
-	pollDesc
+	//pollDesc
 }
 
 var _ Conn = (*connWs)(nil)

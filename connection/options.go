@@ -43,6 +43,7 @@ func KeepAlive(val int) Option {
 
 func Metric(val systree.PacketsMetric) Option {
 	return func(t *impl) error {
+		t.metric = val
 		wrMetric(val)(t.tx)
 		rdMetric(val)(t.rx)
 		return nil

@@ -28,6 +28,7 @@ import (
 	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/VolantMQ/vlapi/plugin/persistence"
 	"github.com/VolantMQ/volantmq/configuration"
+	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/transport"
 	"github.com/VolantMQ/volantmq/types"
 	"go.uber.org/zap"
@@ -169,6 +170,7 @@ type impl struct {
 	SessionCallbacks
 	id               string
 	conn             transport.Conn
+	metric           systree.PacketsMetric
 	signalAuth       OnAuthCb
 	onConnClose      func(error)
 	callStop         func(error) bool
@@ -331,7 +333,12 @@ func (s *impl) Acknowledge(p *mqttp.ConnAck, opts ...Option) bool {
 
 	buf, _ := mqttp.Encode(p)
 	bufs := net.Buffers{buf}
-	bufs.WriteTo(s.conn)
+
+	if _, err := bufs.WriteTo(s.conn); err != nil {
+		ack = false
+	} else {
+		s.metric.Sent(p.Type())
+	}
 
 	if !ack {
 		s.stopNonAck(nil)
@@ -659,6 +666,8 @@ func (s *impl) onConnectionCloseStage1(status error) {
 
 	s.rx.shutdown()
 	s.tx.shutdown()
+	s.tx = nil
+	s.rx = nil
 
 	s.state = stateDisconnected
 
@@ -712,13 +721,15 @@ func (s *impl) onConnectionCloseStage2(status error) {
 
 	s.rx.shutdown()
 	s.tx.shutdown()
-
 	s.conn = nil
 
 	params := DisconnectParams{
 		Packets: s.tx.getQueuedPackets(),
 		Reason:  mqttp.CodeSuccess,
 	}
+
+	s.tx = nil
+	s.rx = nil
 
 	if rc, ok := err.(mqttp.ReasonCode); ok {
 		params.Reason = rc

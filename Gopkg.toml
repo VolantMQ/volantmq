@@ -47,10 +47,6 @@
 
 [[constraint]]
   branch = "master"
-  name = "github.com/troian/easygo"
-
-[[constraint]]
-  branch = "master"
   name = "github.com/troian/healthcheck"
 
 [[constraint]]

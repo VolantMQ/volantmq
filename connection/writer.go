@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"math/rand"
-	"net"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -50,6 +49,11 @@ type writer struct {
 	topicAliasMax     uint16
 	offlineQoS0       bool
 	version           mqttp.ProtocolVersion
+}
+
+type sendBuffer struct {
+	pktType mqttp.Type
+	buffer  []byte
 }
 
 type packetLoaderCtx struct {
@@ -382,7 +386,7 @@ func (s *writer) routine() {
 
 		select {
 		case <-s.available:
-			sendBuffers := net.Buffers{}
+			var sendBuffers []sendBuffer
 
 			if packets := s.popPackets(); len(packets) > 0 {
 				for _, pkt := range packets {
@@ -403,16 +407,16 @@ func (s *writer) routine() {
 					if buf, e := mqttp.Encode(pkt); e != nil {
 						s.log.Error("packet encode", zap.String("ClientID", s.id), zap.Error(err))
 					} else {
-						// todo (troian) might not be good place to do metrics
-						//s.metric.Sent(pkt.Type())
-						sendBuffers = append(sendBuffers, buf)
+						sendBuffers = append(sendBuffers, sendBuffer{pktType: pkt.Type(), buffer: buf})
 					}
 				}
 			}
 
 			for _, b := range sendBuffers {
-				if _, err = wr.Write(b); err != nil {
+				if _, err = wr.Write(b.buffer); err != nil {
 					return
+				} else {
+					s.metric.Sent(b.pktType)
 				}
 			}
 

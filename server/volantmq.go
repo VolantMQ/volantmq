@@ -62,9 +62,9 @@ type Server interface {
 	// Transport status reported over TransportStatus callback in server configuration
 	ListenAndServe(interface{}) error
 
-	// Close terminates the server by shutting down all the client connections and closing
+	// Shutdown terminates the server by shutting down all the client connections and closing
 	// configured listeners. It does full clean up of the resources and
-	Close() error
+	Shutdown() error
 }
 
 // server is a library implementation of the MQTT server that, as best it can, complies
@@ -145,7 +145,6 @@ func NewServer(config Config) (Server, error) {
 
 	var persisRetained persistence.Retained
 	var retains []types.RetainObject
-	//var dynPublishes []systree.DynamicValue
 
 	if s.sysTree, retains, s.systree.publishes, err = systree.NewTree("$SYS/servers/" + s.NodeName); err != nil {
 		return nil, err
@@ -173,7 +172,6 @@ func NewServer(config Config) (Server, error) {
 		}
 
 		if s.MQTT.Systree.UpdateInterval > 0 {
-			//s.systree.timer = time.AfterFunc(time.Duration(s.MQTT.Systree.UpdateInterval)*time.Second, s.systreeUpdater)
 			s.systree.timer = time.NewTicker(time.Duration(s.MQTT.Systree.UpdateInterval) * time.Second)
 			s.systree.wg.Add(1)
 			go s.systreeUpdater()
@@ -268,8 +266,8 @@ func (s *server) ListenAndServe(config interface{}) error {
 	return nil
 }
 
-// Close server
-func (s *server) Close() error {
+// Shutdown server
+func (s *server) Shutdown() error {
 	// By closing the quit channel, we are telling the server to stop accepting new
 	// connection.
 	s.onClose.Do(func() {
@@ -293,9 +291,7 @@ func (s *server) Close() error {
 			delete(s.transports.list, port)
 		}
 
-		if s.sessionsMgr != nil {
-			s.sessionsMgr.Shutdown() // nolint: errcheck, gas
-		}
+		s.sessionsMgr.Stop() // nolint: errcheck, gas
 
 		// shutdown systree updater
 		if s.systree.timer != nil {
@@ -303,7 +299,11 @@ func (s *server) Close() error {
 			s.systree.wg.Wait()
 		}
 
-		s.topicsMgr.Close() // nolint: errcheck, gas
+		s.topicsMgr.Stop() // nolint: errcheck, gas
+
+		s.sessionsMgr.Shutdown() // nolint: errcheck, gas
+
+		s.topicsMgr.Shutdown() // nolint: errcheck, gas
 	})
 
 	return nil
