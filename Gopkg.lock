@@ -11,7 +11,7 @@
     "plugin/persistence",
     "subscriber"
   ]
-  revision = "3850e99d5ff947a5e2f410ade7a182dc551421f1"
+  revision = "b6c8c1370258f23112edad5918518d1798867b64"
 
 [[projects]]
   branch = "master"
@@ -86,7 +86,7 @@
   branch = "master"
   name = "github.com/prometheus/client_model"
   packages = ["go"]
-  revision = "99fa1f4be8e564e8a6b613da7fa6f46c9edafc6c"
+  revision = "5c3871d89910bfb32f5fcab2aa4b9ec68e65a99f"
 
 [[projects]]
   branch = "master"

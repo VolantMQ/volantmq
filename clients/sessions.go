@@ -50,13 +50,14 @@ type preloadConfig struct {
 
 // Manager clients manager
 type Manager struct {
-	persistence     persistence.Sessions
-	log             *zap.SugaredLogger
-	quit            chan struct{}
-	sessionsCount   sync.WaitGroup
-	sessions        sync.Map
-	plSubscribers   map[string]vlsubscriber.IFace
-	allowedVersions map[mqttp.ProtocolVersion]bool
+	persistence       persistence.Sessions
+	log               *zap.SugaredLogger
+	quit              chan struct{}
+	sessionsCount     sync.WaitGroup
+	sessions          sync.Map
+	sharedSubscribers map[string]subscriber.Shared
+	plSubscribers     map[string]vlsubscriber.IFace
+	allowedVersions   map[mqttp.ProtocolVersion]bool
 	Config
 }
 

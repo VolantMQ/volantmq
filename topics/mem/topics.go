@@ -68,13 +68,15 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 
 		for _, d := range entries {
 			v := mqttp.ProtocolVersion(d.Data[0])
-			pkt, _, err := mqttp.Decode(v, d.Data[1:])
+			var pkt mqttp.IFace
+			pkt, _, err = mqttp.Decode(v, d.Data[1:])
 			if err != nil {
 				p.log.Error("Couldn't decode retained message", zap.Error(err))
 			} else {
 				if m, ok := pkt.(*mqttp.Publish); ok {
 					if len(d.ExpireAt) > 0 {
-						if tm, err := time.Parse(time.RFC3339, d.ExpireAt); err == nil {
+						var tm time.Time
+						if tm, err = time.Parse(time.RFC3339, d.ExpireAt); err == nil {
 							m.SetExpireAt(tm)
 						} else {
 							p.log.Error("Decode publish expire at", zap.Error(err))

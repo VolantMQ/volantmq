@@ -1,8 +1,6 @@
 package clients
 
 import (
-	"container/list"
-	"strings"
 	"sync"
 	"time"
 
@@ -51,26 +49,6 @@ type session struct {
 	sessionConfig
 }
 
-type temporaryPublish struct {
-	gList *list.List
-	qList *list.List
-}
-
-func newTmpPublish() *temporaryPublish {
-	return &temporaryPublish{
-		gList: list.New(),
-		qList: list.New(),
-	}
-}
-
-func (t *temporaryPublish) onPublish(id string, p *mqttp.Publish) {
-	if p.QoS() == mqttp.QoS0 {
-		t.gList.PushBack(p)
-	} else {
-		t.qList.PushBack(p)
-	}
-}
-
 func newSession(c sessionPreConfig) *session {
 	s := &session{
 		sessionPreConfig: c,
@@ -103,31 +81,26 @@ func (s *session) SignalPublish(pkt *mqttp.Publish) error {
 	// [MQTT-3.3.1.3]
 	if pkt.Retain() {
 		if err := s.messenger.Retain(pkt); err != nil {
-			s.log.Error("Error retaining message", zap.String("ClientID", s.id), zap.Error(err))
+			s.log.Error("Error retaining message", zap.String("clientId", s.id), zap.Error(err))
 		}
 
 		// [MQTT-3.3.1-7]
 		if pkt.QoS() == mqttp.QoS0 {
 			retained := mqttp.NewPublish(s.version)
 			if err := retained.SetQoS(pkt.QoS()); err != nil {
-				s.log.Error("set retained QoS", zap.String("ClientID", s.id), zap.Error(err))
+				s.log.Error("set retained QoS", zap.String("clientId", s.id), zap.Error(err))
 			}
 			if err := retained.SetTopic(pkt.Topic()); err != nil {
-				s.log.Error("set retained topic", zap.String("ClientID", s.id), zap.Error(err))
+				s.log.Error("set retained topic", zap.String("clientId", s.id), zap.Error(err))
 			}
 		}
 	}
 
 	if err := s.messenger.Publish(pkt); err != nil {
-		s.log.Error("Couldn't publish", zap.String("ClientID", s.id), zap.Error(err))
+		s.log.Error("Couldn't publish", zap.String("clientId", s.id), zap.Error(err))
 	}
 
 	return nil
-}
-
-type tmpSubcribeTopic struct {
-	topic string
-	vlsubscriber.SubscriptionParams
 }
 
 // SignalSubscribe process SUBSCRIBE packet from client
@@ -150,22 +123,16 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 		}
 	}
 
-	var topics []tmpSubcribeTopic
-
-	err := pkt.ForEachTopic(func(t string, ops mqttp.SubscriptionOptions) error {
+	err := pkt.ForEachTopic(func(t *mqttp.Topic) error {
 		// V5.0
 		// [MQTT-3.8.3-4] It is a Protocol Error to set the No Local bit to 1 on a Shared Subscription
-		if (ops.NL() || s.sharedSubscriptions) && strings.Contains(t, "$share") {
+		if t.Ops().NL() && (t.ShareName() != "") {
 			return mqttp.CodeProtocolError
 		}
 
-		topics = append(topics, tmpSubcribeTopic{
-			topic: t,
-			SubscriptionParams: vlsubscriber.SubscriptionParams{
-				ID:  subsID,
-				Ops: ops,
-			},
-		})
+		if !s.sharedSubscriptions && (t.ShareName() != "") {
+			return mqttp.CodeSharedSubscriptionNotSupported
+		}
 
 		return nil
 	})
@@ -174,10 +141,10 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 		return nil, err
 	}
 
-	for _, sub := range topics {
+	err = pkt.ForEachTopic(func(t *mqttp.Topic) error {
 		var reason mqttp.ReasonCode
-		if err = s.permissions.ACL(s.id, s.username, sub.topic, vlauth.AccessRead); err == vlauth.StatusAllow {
-			if grantedQoS, retained, e := s.subscriber.Subscribe(sub.topic, &sub.SubscriptionParams); e != nil {
+		if err = s.permissions.ACL(s.id, s.username, t.Filter(), vlauth.AccessRead); err == vlauth.StatusAllow {
+			if grantedQoS, retained, e := s.subscriber.Subscribe(t.Filter(), &vlsubscriber.SubscriptionParams{ID: subsID, Ops: t.Ops()}); e != nil {
 				reason = mqttp.QosFailure
 			} else {
 				reason = mqttp.ReasonCode(grantedQoS)
@@ -193,7 +160,8 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 		}
 
 		retCodes = append(retCodes, reason)
-	}
+		return nil
+	})
 
 	if err = resp.AddReturnCodes(retCodes); err != nil {
 		return nil, err
@@ -216,10 +184,10 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 func (s *session) SignalUnSubscribe(pkt *mqttp.UnSubscribe) (mqttp.IFace, error) {
 	var retCodes []mqttp.ReasonCode
 
-	for _, t := range pkt.Topics() {
+	pkt.ForEachTopic(func(t *mqttp.Topic) error {
 		reason := mqttp.CodeSuccess
-		if err := s.permissions.ACL(s.id, s.username, t, vlauth.AccessRead); err == vlauth.StatusAllow {
-			if err = s.subscriber.UnSubscribe(t); err != nil {
+		if err := s.permissions.ACL(s.id, s.username, t.Full(), vlauth.AccessRead); err == vlauth.StatusAllow {
+			if err = s.subscriber.UnSubscribe(t.Full()); err != nil {
 				s.log.Error("Couldn't unsubscribe from topic", zap.Error(err))
 				reason = mqttp.CodeNoSubscriptionExisted
 			}
@@ -228,7 +196,8 @@ func (s *session) SignalUnSubscribe(pkt *mqttp.UnSubscribe) (mqttp.IFace, error)
 		}
 
 		retCodes = append(retCodes, reason)
-	}
+		return nil
+	})
 
 	m, _ := mqttp.New(s.version, mqttp.UNSUBACK)
 	resp, _ := m.(*mqttp.UnSubAck)
