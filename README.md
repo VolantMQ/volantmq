@@ -37,8 +37,8 @@ Best option is to run prebuilt docker image
 docker run --rm -p 1883:1883 -p 8080:8080 -v $(pwd)/examples/config.yaml:/etc/volantmq/config.yaml --env VOLANTMQ_CONFIG=/etc/volantmq/config.yaml volantmq/volantmq
 ```
 
-In example above port 1883 is mqtt listener with default user/password testuser/testpassword
-Port 8080 exposes healthcheck endpoints as well as pprof at http://localhost:8080/debug/pprof
+- In example above port 1883 is mqtt listener with default user/password testuser/testpassword
+- Port 8080 exposes healthcheck endpoints as well as pprof at http://localhost:8080/debug/pprof
 
 #### 
 ### [Contributing guidelines](https://github.com/volantmq/volantmq/blob/master/CONTRIBUTING.md)
