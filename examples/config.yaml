@@ -1,0 +1,80 @@
+version: v0.0.1
+system:
+  log:
+    console:
+      timestamp:
+        format: RFC3339
+      level: info # available levels: debug, info, warn, error, dpanic, panic, fatal
+  http:
+    defaultPort: 8080
+plugins:
+  enabled:
+  - debug
+  - health
+  - persistence_bbolt
+  config:
+    debug:
+      - backend: prof.profiler
+        config:
+          cpu: true
+          mem: false
+          mutex: false
+    health:
+      - backend: health
+        config:
+          livenessEndpoint: live
+          readinessEndpoint: ready
+    persistence:            # plugin type
+      - backend: bbolt      # plugin internal name
+        config:
+          file: "/usr/lib/volantmq/persistence/data/bbolt.db"
+    auth:                   # plugin type
+      - name: internal      # authenticator name, used by listeners
+        backend: simpleAuth # authenticator type
+        config:
+          users:
+            testuser: "9f735e0df9a1ddc702bf0a1a7b83033f9f7153a00c29de82cedadc9957289b05" # password must be sha-256 hashed
+auth:
+  anonymous: false
+  order:
+    - internal
+mqtt:
+  version:
+  - v3.1.1
+  - v3.1
+  - v5.0
+  keepAlive:
+    period: 60               # KeepAlive The number of seconds to keep the connection live if there's no data.
+                             # Default is 60 seconds
+    force: false             # Force connection to use server keep alive interval (MQTT 5.0 only)
+                             # Default is false
+  systree:
+    enabled: true            # Either systree available or not
+                             # Default is false
+    updateInterval: 10       # Systree update interval
+                             # Default is 10 seconds
+  options:
+    connectTimeout: 5        # The number of seconds to wait for the CONNECT message before disconnecting.
+                             # If not set then default to 2 seconds.
+    offlineQoS0: true        # OfflineQoS0 tell server to either persist (true) or ignore (false) QoS 0 messages for non-clean sessions
+                             # If not set than default is false
+    sessionDups: true        # AllowDuplicates Either allow or deny replacing of existing session if there new client with same clientID
+                             # If not set than default is false
+    retainAvailable: true    # don't set to use default
+    subsOverlap: false       # tells server how to handle overlapping subscriptions from within one client
+                             # if true server will send only one publish with max subscribed QoS even there are n subscriptions
+                             # if false server will send as many publishes as amount of subscriptions matching publish topic exists
+                             # Default is false
+    subsId: false            # don't set to use default
+    subsShared: false        # don't set to use default
+    subsWildcard: true       # don't set to use default
+    receiveMax: 65530        # don't set to use default
+    maxPacketSize: 268435455 # don't set to use default
+    maxTopicAlias: 65535     # don't set to use default
+    maxQoS: 2
+listeners:
+  defaultAddr: "0.0.0.0" # default 127.0.0.1
+  mqtt:
+    tcp:
+      1883:
+        auth:

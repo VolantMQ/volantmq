@@ -7,33 +7,21 @@ VolantMQ
 [![codecov.io](https://codecov.io/gh/VolantMQ/volantmq/coverage.svg?branch=master)](https://codecov.io/gh/VolantMQ/volantmq?branch=master)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-### Warning
-**It's currently in active development thus highly not recommended for production**
-**This project should be considered unstable until further notice.**
-
-VolantMQ is a high performance MQTT broker that aims to be fully compliant with MQTT 3.1 and 3.1.1 specs .
+VolantMQ is a high performance MQTT broker that aims to be fully compliant with MQTT specs
 
 ### Features, Limitations, and Future
 
 **Features**
 * [MQTT v3.1 - V3.1.1](http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html)
-* [MQTT V5.0](http://docs.oasis-open.org/mqtt/mqtt/v5.0/mqtt-v5.0.html), in progress refer to [TODO](#TODO)
-* Full support of WebSockets transport
+* [MQTT V5.0](http://docs.oasis-open.org/mqtt/mqtt/v5.0/mqtt-v5.0.html)
+* WebSockets transport
 * SSL for both plain tcp and WebSockets transports
 * Independent auth providers for each transport
 * Persistence providers
-* $SYS topics
 
 **Persistence providers**
 * [BBolt](https://github.com/coreos/bbolt)
 * In memory
-
-**TODO**
-* V5.0:
-    * Packets testing
-* Cluster
-* Bridge
-* Benchmarking
 
 ### Compatibility
 
@@ -43,26 +31,14 @@ Project has been tested with the following client libraries
 * Paho C Client library (in C)
   * Pass with all of the test cases
 
-### License
+### How to use
+Best option is to run prebuilt docker image
+```bash
+docker run --rm -p 1883:1883 -p 8080:8080 -v $(pwd)/examples/config.yaml:/etc/volantmq/config.yaml --env VOLANTMQ_CONFIG=/etc/volantmq/config.yaml volantmq/volantmq
+```
 
-Copyright (c) 2016 Artur Troian. All rights reserved.<br/>
-Copyright (c) 2014 Dataence, LLC. All rights reserved.
+In example above port 1883 is mqtt listener with default user/password testuser/testpassword
+Port 8080 exposes healthcheck endpoints as well as pprof at http://localhost:8080/debug/pprof
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-
-### Examples
-
-Look into examples
-
+#### 
 ### [Contributing guidelines](https://github.com/volantmq/volantmq/blob/master/CONTRIBUTING.md)
