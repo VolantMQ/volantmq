@@ -9,11 +9,6 @@ import (
 	"github.com/VolantMQ/volantmq/types"
 )
 
-//var (
-//	// ErrUnknownProvider unknown provider
-//	ErrUnknownProvider = errors.New("Unknown provider")
-//)
-
 const (
 	// MWC is the multi-level wildcard
 	MWC = "#"
@@ -22,13 +17,7 @@ const (
 	SWC = "+"
 
 	// SEP is the topic level separator
-	//SEP = "/"
-
-	// SYS is the starting character of the system level topics
-	//SYS = "$"
-
-	// Both wildcards
-	//BWC = "#+"
+	SEP = "/"
 )
 
 var (
@@ -58,11 +47,6 @@ var (
 
 	// ErrNotFound object not found
 	ErrNotFound = errors.New("topics: not found")
-
-	// ErrNotOpen storage is not open
-	//ErrNotOpen = errors.New("not open")
-
-	//ErrOverflow = errors.New("overflow")
 )
 
 // Subscriber used inside each session as an object to provide to topic manager upon subscribe

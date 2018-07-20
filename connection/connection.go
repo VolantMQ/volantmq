@@ -113,8 +113,6 @@ type DisconnectParams struct {
 	Packets persistence.PersistedPackets
 }
 
-//type onDisconnect func(*DisconnectParams)
-
 // Callbacks provided by sessions manager to signal session state
 type Callbacks struct {
 	// OnStop called when session stopped net connection and should be either suspended or deleted
@@ -779,9 +777,6 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 	//   - ignore the message but send acks
 	//   - return error leading to disconnect
 	// TODO: publish permissions
-	//if status := s.ACL(s.ID, pkt.Topic(), auth.AccessTypeWrite); status == auth.StatusDeny {
-	//	reason = mqttp.CodeAdministrativeAction
-	//}
 
 	switch pkt.QoS() {
 	case mqttp.QoS2:
@@ -822,14 +817,13 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 	case mqttp.QoS0: // QoS 0
 		// [MQTT-4.3.1]
 		// [MQTT-4.3.2-4]
-		// if reason < mqttp.CodeUnspecifiedError {
+		// TODO(troian): ignore if publish permissions not validated
 		if err = s.publishToTopic(pkt); err != nil {
 			s.log.Error("Couldn't publish message",
 				zap.String("ClientID", s.id),
 				zap.Uint8("QoS", uint8(pkt.QoS())),
 				zap.Error(err))
 		}
-		// }
 	}
 
 	return resp, err

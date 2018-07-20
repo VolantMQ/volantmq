@@ -400,6 +400,8 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 
 		if cn.Acknowledge(ack, connection.KeepAlive(keepAlive)) {
 			ses.start()
+
+			// TODO(troian): add remote address
 			status := &systree.ClientConnectStatus{
 				Username:          string(params.Username),
 				Timestamp:         time.Now().Format(time.RFC3339),
@@ -407,12 +409,11 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 				MaximumPacketSize: params.MaxTxPacketSize,
 				GeneratedID:       params.IDGen,
 				SessionPresent:    ack.SessionPresent(),
-				//Address:           cn.RemoteAddr().String(),
-				KeepAlive:    uint16(keepAlive),
-				ConnAckCode:  ack.ReturnCode(),
-				Protocol:     params.Version,
-				CleanSession: params.CleanStart,
-				Durable:      params.Durable,
+				KeepAlive:         uint16(keepAlive),
+				ConnAckCode:       ack.ReturnCode(),
+				Protocol:          params.Version,
+				CleanSession:      params.CleanStart,
+				Durable:           params.Durable,
 			}
 
 			m.Systree.Clients().Connected(params.ID, status)

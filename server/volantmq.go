@@ -125,20 +125,6 @@ func NewServer(config Config) (Server, error) {
 		return nil, err
 	}
 
-	//generateNodeID := func() string {
-	//	return uuid.New() + "@volantmq.io"
-	//}
-
-	//if systemState.NodeName == "" || s.RewriteNodeName {
-	//	if s.NodeName == "" {
-	//		s.NodeName = generateNodeID()
-	//	}
-	//
-	//	systemState.NodeName = s.NodeName
-	//} else {
-	//	s.NodeName = systemState.NodeName
-	//}
-
 	if err = systemPersistence.SetInfo(systemState); err != nil {
 		return nil, err
 	}

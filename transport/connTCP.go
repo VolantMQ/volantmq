@@ -12,8 +12,6 @@ import (
 type connTCP struct {
 	conn net.Conn
 	stat systree.BytesMetric
-	//pollDesc
-	//timer *time.Timer
 }
 
 var _ Conn = (*connTCP)(nil)
@@ -34,8 +32,6 @@ func (c *connTCP) Write(b []byte) (int, error) {
 }
 
 func (c *connTCP) Close() error {
-	//c.ePoll.Stop(c.desc)
-	//c.desc.Close()
 	return c.conn.Close()
 }
 
@@ -52,17 +48,6 @@ func (c *connTCP) SetDeadline(t time.Time) error {
 }
 
 func (c *connTCP) SetReadDeadline(t time.Time) error {
-	//if t.IsZero() && c.timer != nil {
-	//	if !c.timer.Stop() {
-	//		return errors.New("keepAlive expired")
-	//	}
-	//} else {
-	//	if c.timer == nil {
-	//		c.timer = time.AfterFunc(t.Sub(time.Now()), c.keepAlive)
-	//	} else {
-	//		c.timer.Reset(t.Sub(time.Now()))
-	//	}
-	//}
 	return c.conn.SetReadDeadline(t)
 }
 
