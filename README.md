@@ -6,6 +6,7 @@ VolantMQ
 [![Codacy Badge](https://api.codacy.com/project/badge/Grade/1a43f2f6e0534fd180d0a1b0b8c93614)](https://www.codacy.com/app/VolantMQ/volantmq?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=VolantMQ/volantmq&amp;utm_campaign=Badge_Grade)
 [![codecov.io](https://codecov.io/gh/VolantMQ/volantmq/coverage.svg?branch=master)](https://codecov.io/gh/VolantMQ/volantmq?branch=master)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2FVolantMQ%2Fvolantmq.svg?type=shield)](https://app.fossa.io/projects/git%2Bgithub.com%2FVolantMQ%2Fvolantmq?ref=badge_shield)
 
 VolantMQ is a high performance MQTT broker that aims to be fully compliant with MQTT specs
 
@@ -42,3 +43,6 @@ docker run --rm -p 1883:1883 -p 8080:8080 -v $(pwd)/examples/config.yaml:/etc/vo
 
 #### 
 ### [Contributing guidelines](https://github.com/volantmq/volantmq/blob/master/CONTRIBUTING.md)
+
+## License
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2FVolantMQ%2Fvolantmq.svg?type=large)](https://app.fossa.io/projects/git%2Bgithub.com%2FVolantMQ%2Fvolantmq?ref=badge_large)
