@@ -44,7 +44,10 @@ func TestTopicsOpenCloseProvider(t *testing.T) {
 		prov, err := New(p.config)
 		require.NoError(t, err)
 
-		err = prov.Close()
+		err = prov.Stop()
+		require.NoError(t, err)
+
+		err = prov.Shutdown()
 		require.NoError(t, err)
 	}
 }
@@ -61,7 +64,10 @@ func TestTopicsSubscribeInvalidQoS(t *testing.T) {
 		_, _, err = prov.Subscribe("test", nil, ops)
 		require.Error(t, mqttp.ErrInvalidQoS, err.Error())
 
-		err = prov.Close()
+		err = prov.Stop()
+		require.NoError(t, err)
+
+		err = prov.Shutdown()
 		require.NoError(t, err)
 	}
 }
