@@ -25,8 +25,8 @@ type dynamicValue struct {
 }
 
 type dynamicValueInteger struct {
-	dynamicValue
 	val uint64
+	dynamicValue
 }
 
 type dynamicValueUpTime struct {
