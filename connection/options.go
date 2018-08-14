@@ -35,8 +35,8 @@ func OfflineQoS0(val bool) Option {
 // KeepAlive keep alive period
 func KeepAlive(val int) Option {
 	return func(t *impl) error {
-		vl := time.Duration(val) * time.Second
-		rdKeepAlive(vl + (vl / 2))(t.rx)
+		vl := time.Duration(val+(val/2)) * time.Second
+		rdKeepAlive(vl)(t.rx)
 		return nil
 	}
 }

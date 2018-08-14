@@ -685,7 +685,12 @@ func (s *impl) onConnectionCloseStage2(status error) {
 
 	// clean up transmitter to allow send disconnect command to client if needed
 	s.onStop.Do(func() {
+		// gracefully shutdown receiver by setting some small ReadDeadline
+		s.conn.SetReadDeadline(time.Now().Add(time.Microsecond))
+		s.rx.shutdown()
+
 		s.SignalOffline()
+
 		s.tx.stop()
 	})
 
@@ -717,7 +722,6 @@ func (s *impl) onConnectionCloseStage2(status error) {
 		s.log.Error("close connection", zap.String("clientId", s.id), zap.Error(err))
 	}
 
-	s.rx.shutdown()
 	s.tx.shutdown()
 	s.conn = nil
 
