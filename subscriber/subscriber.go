@@ -82,12 +82,12 @@ func (s *Type) Subscriptions() vlsubscriber.Subscriptions {
 }
 
 // Subscribe to given topic
-func (s *Type) Subscribe(topic string, params *vlsubscriber.SubscriptionParams) (mqttp.QosType, []*mqttp.Publish, error) {
-	q, r, err := s.Topics.Subscribe(topic, s, params)
+func (s *Type) Subscribe(topic string, params *vlsubscriber.SubscriptionParams) ([]*mqttp.Publish, error) {
+	r, err := s.Topics.Subscribe(topic, s, params)
 
 	s.subscriptions[topic] = params
 
-	return q, r, err
+	return r, err
 }
 
 // UnSubscribe from given topic

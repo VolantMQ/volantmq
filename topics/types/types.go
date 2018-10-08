@@ -62,7 +62,7 @@ type Subscribers []Subscriber
 
 // Provider interface
 type Provider interface {
-	Subscribe(string, Subscriber, *vlsubscriber.SubscriptionParams) (mqttp.QosType, []*mqttp.Publish, error)
+	Subscribe(string, Subscriber, *vlsubscriber.SubscriptionParams) ([]*mqttp.Publish, error)
 	UnSubscribe(string, Subscriber) error
 	Publish(interface{}) error
 	Retain(types.RetainObject) error
@@ -74,7 +74,7 @@ type Provider interface {
 // SubscriberInterface used by subscriber to handle messages
 type SubscriberInterface interface {
 	Publish(interface{}) error
-	Subscribe(string, Subscriber, *vlsubscriber.SubscriptionParams) (mqttp.QosType, []*mqttp.Publish, error)
+	Subscribe(string, Subscriber, *vlsubscriber.SubscriptionParams) ([]*mqttp.Publish, error)
 	UnSubscribe(string, Subscriber) error
 	Retain(types.RetainObject) error
 	Retained(string) ([]*mqttp.Publish, error)

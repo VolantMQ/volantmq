@@ -103,12 +103,12 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 	return p, nil
 }
 
-func (mT *provider) Subscribe(filter string, s topicsTypes.Subscriber, p *vlsubscriber.SubscriptionParams) (mqttp.QosType, []*mqttp.Publish, error) {
+func (mT *provider) Subscribe(filter string, s topicsTypes.Subscriber, p *vlsubscriber.SubscriptionParams) ([]*mqttp.Publish, error) {
 	defer mT.smu.Unlock()
 	mT.smu.Lock()
 
 	if s == nil || p == nil {
-		return mqttp.QosType(0), []*mqttp.Publish{}, topicsTypes.ErrInvalidArgs
+		return []*mqttp.Publish{}, topicsTypes.ErrInvalidArgs
 	}
 
 	p.Granted = p.Ops.QoS()
@@ -122,7 +122,7 @@ func (mT *provider) Subscribe(filter string, s topicsTypes.Subscriber, p *vlsubs
 		mT.retainSearch(filter, &r)
 	}
 
-	return p.Granted, r, nil
+	return r, nil
 }
 
 func (mT *provider) UnSubscribe(topic string, sub topicsTypes.Subscriber) error {

@@ -67,11 +67,15 @@ func (s *expiry) start() {
 	s.timerLock.Unlock()
 }
 
-func (s *expiry) cancel() {
+func (s *expiry) cancel() bool {
+	defer s.timerLock.Unlock()
 	s.timerLock.Lock()
-	if !s.timer.Stop() {
+
+	res := s.timer.Stop()
+	if !res {
+		<-s.timer.C
 	}
-	s.timerLock.Unlock()
+	return res
 }
 
 func (s *expiry) persistedState() *persistence.SessionDelays {

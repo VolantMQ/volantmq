@@ -3,7 +3,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:0dd42db839908d83984545043d719ffa63c572f9b223d1b196d305f506dd4c75"
+  digest = "1:6705b53a82db7d77a9474ebbd4934898392d89a31137959526581555599a085b"
   name = "github.com/VolantMQ/vlapi"
   packages = [
     "mqttp",
@@ -13,7 +13,7 @@
     "subscriber",
   ]
   pruneopts = "UT"
-  revision = "1b4221fe002928c3487c98ec0cfc4b572af6e86a"
+  revision = "c67318fed86b0a3d64372ca8fc809f4948ada0f6"
 
 [[projects]]
   branch = "master"
