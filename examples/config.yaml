@@ -11,7 +11,7 @@ plugins:
   enabled:
   - debug
   - health
-  - persistence_bbolt
+#  - persistence_bbolt
   config:
     debug:
       - backend: prof.profiler
