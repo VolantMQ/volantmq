@@ -19,7 +19,7 @@ plugins:
           users:
             testuser: "9f735e0df9a1ddc702bf0a1a7b83033f9f7153a00c29de82cedadc9957289b05" # password must be sha-256 hashed
 auth:
-  defaultOrder:
+  order:
     - internal
 mqtt:
   version:
