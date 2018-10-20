@@ -54,6 +54,7 @@ type Manager struct {
 	log             *zap.SugaredLogger
 	quit            chan struct{}
 	sessionsCount   sync.WaitGroup
+	expiryCount     sync.WaitGroup
 	sessions        sync.Map
 	plSubscribers   map[string]vlsubscriber.IFace
 	allowedVersions map[mqttp.ProtocolVersion]bool
@@ -192,15 +193,18 @@ func (m *Manager) Stop() error {
 		exp := wrap.expiry.Load()
 		if exp != nil {
 			e := exp.(*expiry)
-			e.cancel()
-
-			m.persistence.ExpiryStore([]byte(k.(string)), e.persistedState())
+			if !e.cancel() {
+				m.persistence.ExpiryStore([]byte(k.(string)), e.persistedState())
+			} else {
+				m.expiryCount.Done()
+			}
 		}
 
 		return true
 	})
 
 	m.sessionsCount.Wait()
+	m.expiryCount.Wait()
 
 	return nil
 }
@@ -563,7 +567,10 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 		// MQTT5.0 cancel expiry if set
 		if val := currContainer.expiry.Load(); val != nil {
 			exp := val.(*expiry)
-			exp.cancel()
+			if exp.cancel() {
+				m.expiryCount.Done()
+			}
+
 			currContainer.expiry = atomic.Value{}
 		}
 
@@ -734,6 +741,7 @@ func (m *Manager) sessionOffline(id string, keep bool, expCfg *expiryConfig) {
 					exp := newExpiry(*expCfg)
 					cont.expiry.Store(exp)
 
+					m.expiryCount.Add(1)
 					exp.start()
 				}
 			} else {
@@ -775,6 +783,10 @@ func (m *Manager) sessionTimer(id string, expired bool) {
 	}
 
 	m.Systree.Sessions().Removed(id, state)
+
+	if expired {
+		m.expiryCount.Done()
+	}
 }
 
 func (m *Manager) configurePersistedSubscribers(ctx *loadContext) {
@@ -788,7 +800,7 @@ func (m *Manager) configurePersistedSubscribers(ctx *loadContext) {
 			})
 
 		for topic, ops := range t.sub.topics {
-			if _, _, err := sub.Subscribe(topic, ops); err != nil {
+			if _, err := sub.Subscribe(topic, ops); err != nil {
 				m.log.Error("Couldn't subscribe", zap.Error(err))
 			}
 		}
@@ -810,6 +822,8 @@ func (m *Manager) configurePersistedExpiry(ctx *loadContext) {
 			removable: true,
 			removed:   false,
 		}
+
+		m.expiryCount.Add(1)
 
 		exp := newExpiry(*t.exp)
 

@@ -1,4 +1,4 @@
-FROM golang:1.10.3 as builder
+FROM golang:1.11.1 as builder
 LABEL stage=intermediate
 
 #compile linux only

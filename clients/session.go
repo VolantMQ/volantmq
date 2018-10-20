@@ -144,10 +144,15 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 	err = pkt.ForEachTopic(func(t *mqttp.Topic) error {
 		var reason mqttp.ReasonCode
 		if err = s.permissions.ACL(s.id, s.username, t.Filter(), vlauth.AccessRead); err == vlauth.StatusAllow {
-			if grantedQoS, retained, e := s.subscriber.Subscribe(t.Filter(), &vlsubscriber.SubscriptionParams{ID: subsID, Ops: t.Ops()}); e != nil {
+			params := vlsubscriber.SubscriptionParams{
+				ID:  subsID,
+				Ops: t.Ops(),
+			}
+
+			if retained, e := s.subscriber.Subscribe(t.Filter(), &params); e != nil {
 				reason = mqttp.QosFailure
 			} else {
-				reason = mqttp.ReasonCode(grantedQoS)
+				reason = mqttp.ReasonCode(params.Granted)
 				retainedPublishes = append(retainedPublishes, retained...)
 			}
 		} else {
@@ -243,6 +248,7 @@ func (s *session) SignalDisconnect(pkt *mqttp.Disconnect) (mqttp.IFace, error) {
 	return nil, err
 }
 
+// SignalOnline signal state is get online
 func (s *session) SignalOnline() {
 	s.subscriber.Online(s.conn.Publish)
 }

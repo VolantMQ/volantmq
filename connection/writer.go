@@ -2,7 +2,6 @@ package connection
 
 import (
 	"bufio"
-	"fmt"
 	"math/rand"
 	"reflect"
 	"sync"
@@ -31,7 +30,6 @@ type writer struct {
 	gMessages         chan mqttp.IFace
 	qos0Messages      chan interface{}
 	qos12Messages     chan interface{}
-	available         chan int
 	quit              chan struct{}
 	topicAlias        map[string]uint16
 	wg                sync.WaitGroup
@@ -51,11 +49,6 @@ type writer struct {
 	version           mqttp.ProtocolVersion
 }
 
-type sendBuffer struct {
-	pktType mqttp.Type
-	buffer  []byte
-}
-
 type packetLoaderCtx struct {
 	unAck   bool
 	count   int
@@ -67,7 +60,6 @@ func newWriter() *writer {
 		gMessages:     make(chan mqttp.IFace, 0xFFFF),
 		qos0Messages:  make(chan interface{}, 0xFFFF),
 		qos12Messages: make(chan interface{}, 0xFFFF),
-		available:     make(chan int, 1),
 		topicAlias:    make(map[string]uint16),
 		quit:          make(chan struct{}),
 		topicAliasMax: 0,
@@ -124,6 +116,14 @@ func (s *writer) start(start bool) {
 			ctx.count = cap(s.qos0Messages) - len(s.qos0Messages)
 			s.persist.PacketsForEachQoS0([]byte(s.id), ctx, s.packetLoader)
 
+			if (cap(s.qos12Messages) - len(s.qos12Messages)) > 0 {
+				s.qos12Redirect = 0
+			}
+
+			if (cap(s.qos0Messages) - len(s.qos0Messages)) > 0 {
+				s.qos0Redirect = 0
+			}
+
 			s.signalAndRun()
 		}
 	})
@@ -175,18 +175,18 @@ func (s *writer) stop() {
 	s.onStop.Do(func() {
 		s.wgStarted.Wait()
 		close(s.quit)
-		atomic.StoreUint32(&s.running, 0)
+		// atomic.StoreUint32(&s.running, 0)
 
 		s.wg.Wait()
 
 		atomic.StoreUint32(&s.qos0Redirect, 1)
 		atomic.StoreUint32(&s.qos12Redirect, 1)
 
-		close(s.available)
-		select {
-		case <-s.available:
-		default:
-		}
+		// close(s.available)
+		// select {
+		// case <-s.available:
+		// default:
+		// }
 	})
 }
 
@@ -217,7 +217,6 @@ func (s *writer) send(pkt mqttp.IFace) {
 }
 
 func (s *writer) signalAndRun() {
-	s.signalAvailable()
 	s.run()
 }
 
@@ -237,6 +236,7 @@ func (s *writer) sendQoS0(pkt mqttp.IFace) {
 			}
 		}
 	}
+
 	s.signalAndRun()
 }
 
@@ -253,17 +253,6 @@ func (s *writer) sendQoS12(pkt mqttp.IFace) {
 	}
 
 	s.signalAndRun()
-}
-
-func (s *writer) signalAvailable() {
-	if !s.isAlive() {
-		return
-	}
-
-	select {
-	case s.available <- 1:
-	default:
-	}
 }
 
 func (s *writer) signalTxQuotaAvailable() {
@@ -293,6 +282,10 @@ func (s *writer) qos0Available() bool {
 
 func (s *writer) qos12Available() bool {
 	return s.flow.quotaAvailable() && (len(s.qos12Messages) > 0)
+}
+
+func (s *writer) packetsAvailable() bool {
+	return s.gAvailable() || s.qos0Available() || s.qos12Available()
 }
 
 func (s *writer) gPopPacket() mqttp.IFace {
@@ -338,12 +331,6 @@ func (s *writer) qos12PopPacket() mqttp.IFace {
 }
 
 func (s *writer) routine() {
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Println(r)
-		}
-	}()
-
 	var err error
 
 	// waiting previous routine finished
@@ -366,7 +353,7 @@ func (s *writer) routine() {
 		}
 
 		if err == nil {
-			if len(s.available) > 0 {
+			if s.packetsAvailable() {
 				s.run()
 			}
 		}
@@ -379,65 +366,47 @@ func (s *writer) routine() {
 		}
 	}()
 
-	for atomic.LoadUint32(&s.running) == 1 {
-		if !s.isAlive() {
-			return
-		}
+	for {
+		packets := s.popPackets()
 
-		select {
-		case <-s.available:
-			var sendBuffers []sendBuffer
-
-			if packets := s.popPackets(); len(packets) > 0 {
-				for _, pkt := range packets {
-					switch pack := pkt.(type) {
-					case *mqttp.Publish:
-						if _, expireLeft, expired := pack.Expired(); expired {
-							continue
-						} else {
-							if expireLeft > 0 {
-								if err = pkt.PropertySet(mqttp.PropertyPublicationExpiry, expireLeft); err != nil {
-									s.log.Error("Set publication expire", zap.String("ClientID", s.id), zap.Error(err))
-								}
-							}
-							s.setTopicAlias(pack)
-						}
-					}
-
-					if buf, e := mqttp.Encode(pkt); e != nil {
-						s.log.Error("packet encode", zap.String("ClientID", s.id), zap.Error(err))
+		if len(packets) > 0 {
+			for _, p := range packets {
+				switch pack := p.(type) {
+				case *mqttp.Publish:
+					if _, expireLeft, expired := pack.Expired(); expired {
+						continue
 					} else {
-						sendBuffers = append(sendBuffers, sendBuffer{pktType: pkt.Type(), buffer: buf})
+						if expireLeft > 0 {
+							if err = p.PropertySet(mqttp.PropertyPublicationExpiry, expireLeft); err != nil {
+								s.log.Error("Set publication expire", zap.String("ClientID", s.id), zap.Error(err))
+							}
+						}
+						s.setTopicAlias(pack)
+					}
+				}
+
+				if buf, e := mqttp.Encode(p); e != nil {
+					s.log.Error("packet encode", zap.String("ClientID", s.id), zap.Error(err))
+				} else {
+					if _, err = wr.Write(buf); err != nil {
+						return
+					} else {
+						s.metric.Sent(p.Type())
 					}
 				}
 			}
-
-			for _, b := range sendBuffers {
-				if _, err = wr.Write(b.buffer); err != nil {
-					return
-				} else {
-					s.metric.Sent(b.pktType)
-				}
-			}
-
-			if s.qos12Available() || s.qos0Available() || s.gAvailable() {
-				s.signalAvailable()
-			}
-		default:
+		} else {
 			// when no messages to transmit see if persistence has anything
 			// running it as separate goroutine allows to gracefully handle
 			// SUBSCRIBE/UNSUBSCRIBE/PING message if load from persistence takes a while
-
-			atomic.StoreUint32(&s.qos0Redirect, 1)
-			atomic.StoreUint32(&s.qos12Redirect, 1)
-
-			if atomic.LoadUint32(&s.pLoaderRunning) == 0 {
+			if atomic.CompareAndSwapUint32(&s.pLoaderRunning, 0, 1) {
 				s.wg.Add(1)
+				atomic.StoreUint32(&s.qos0Redirect, 1)
+				atomic.StoreUint32(&s.qos12Redirect, 1)
 				atomic.StoreUint32(&s.pLoaderRunning, 1)
 				go s.loadFromPersistence()
 			}
-
-			return
+			break
 		}
 	}
 }

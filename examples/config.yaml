@@ -11,7 +11,7 @@ plugins:
   enabled:
   - debug
   - health
-  - persistence_bbolt
+#  - persistence_bbolt
   config:
     debug:
       - backend: prof.profiler
@@ -24,10 +24,10 @@ plugins:
         config:
           livenessEndpoint: live
           readinessEndpoint: ready
-    persistence:            # plugin type
-      - backend: bbolt      # plugin internal name
-        config:
-          file: "/usr/lib/volantmq/persistence/data/bbolt.db"
+#    persistence:            # plugin type
+#      - backend: bbolt      # plugin internal name
+#        config:
+#          file: "/usr/lib/volantmq/persistence/data/bbolt.db"
     auth:                   # plugin type
       - name: internal      # authenticator name, used by listeners
         backend: simpleAuth # authenticator type
@@ -35,7 +35,7 @@ plugins:
           users:
             testuser: "9f735e0df9a1ddc702bf0a1a7b83033f9f7153a00c29de82cedadc9957289b05" # password must be sha-256 hashed
 auth:
-  anonymous: false
+  anonymous: true
   order:
     - internal
 mqtt:
