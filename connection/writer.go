@@ -17,6 +17,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const maxPacketCount = 0xFFFF
+
 type writerOption func(*writer) error
 
 type writer struct {
@@ -27,9 +29,9 @@ type writer struct {
 	persist           persistence.Packets
 	flow              flow
 	pubOut            ackQueue
-	gMessages         chan mqttp.IFace
-	qos0Messages      chan interface{}
-	qos12Messages     chan interface{}
+	gMessages         *types.Queue
+	qos0Messages      *types.Queue
+	qos12Messages     *types.Queue
 	quit              chan struct{}
 	topicAlias        map[string]uint16
 	wg                sync.WaitGroup
@@ -52,14 +54,11 @@ type writer struct {
 type packetLoaderCtx struct {
 	unAck   bool
 	count   int
-	packets chan interface{}
+	packets *types.Queue
 }
 
 func newWriter() *writer {
 	w := &writer{
-		gMessages:     make(chan mqttp.IFace, 0xFFFF),
-		qos0Messages:  make(chan interface{}, 0xFFFF),
-		qos12Messages: make(chan interface{}, 0xFFFF),
 		topicAlias:    make(map[string]uint16),
 		quit:          make(chan struct{}),
 		topicAliasMax: 0,
@@ -71,6 +70,9 @@ func newWriter() *writer {
 		running:       0,
 		packetMaxSize: 0xFFFFFFF,
 	}
+	w.gMessages = types.NewQueue()
+	w.qos0Messages = types.NewQueue()
+	w.qos12Messages = types.NewQueue()
 
 	w.wgStarted.Add(1)
 
@@ -98,7 +100,7 @@ func (s *writer) start(start bool) {
 		if start {
 			ctx := &packetLoaderCtx{
 				unAck:   true,
-				count:   cap(s.qos12Messages),
+				count:   0xFFFF,
 				packets: s.qos12Messages,
 			}
 
@@ -106,21 +108,21 @@ func (s *writer) start(start bool) {
 
 			ctx.unAck = false
 
-			ctx.count = cap(s.qos12Messages) - len(s.qos12Messages)
+			ctx.count = s.qos12Messages.Length()
 
 			if ctx.count > 0 {
 				s.persist.PacketsForEachQoS12([]byte(s.id), ctx, s.packetLoader)
 			}
 
 			ctx.packets = s.qos0Messages
-			ctx.count = cap(s.qos0Messages) - len(s.qos0Messages)
+			ctx.count = s.qos0Messages.Length()
 			s.persist.PacketsForEachQoS0([]byte(s.id), ctx, s.packetLoader)
 
-			if (cap(s.qos12Messages) - len(s.qos12Messages)) > 0 {
+			if s.qos12Messages.Length() < maxPacketCount {
 				s.qos12Redirect = 0
 			}
 
-			if (cap(s.qos0Messages) - len(s.qos0Messages)) > 0 {
+			if s.qos0Messages.Length() < maxPacketCount {
 				s.qos0Redirect = 0
 			}
 
@@ -160,7 +162,7 @@ func (s *writer) packetLoader(c interface{}, entry *persistence.PersistedPacket)
 		}
 	}
 
-	ctx.packets <- pkt
+	ctx.packets.Add(pkt)
 
 	ctx.count--
 
@@ -175,26 +177,15 @@ func (s *writer) stop() {
 	s.onStop.Do(func() {
 		s.wgStarted.Wait()
 		close(s.quit)
-		// atomic.StoreUint32(&s.running, 0)
 
 		s.wg.Wait()
 
 		atomic.StoreUint32(&s.qos0Redirect, 1)
 		atomic.StoreUint32(&s.qos12Redirect, 1)
-
-		// close(s.available)
-		// select {
-		// case <-s.available:
-		// default:
-		// }
 	})
 }
 
 func (s *writer) shutdown() {
-	close(s.gMessages)
-	close(s.qos0Messages)
-	close(s.qos12Messages)
-
 	s.topicAlias = nil
 }
 
@@ -221,13 +212,13 @@ func (s *writer) signalAndRun() {
 }
 
 func (s *writer) sendGeneric(pkt mqttp.IFace) {
-	s.gMessages <- pkt
+	s.gMessages.Add(pkt)
 	s.signalAndRun()
 }
 
 func (s *writer) sendQoS0(pkt mqttp.IFace) {
-	if (atomic.LoadUint32(&s.qos0Redirect) == 0) && ((cap(s.qos0Messages) - len(s.qos0Messages)) > 0) {
-		s.qos0Messages <- pkt
+	if (atomic.LoadUint32(&s.qos0Redirect) == 0) && (s.qos0Messages.Length() > 0) {
+		s.qos0Messages.Add(pkt)
 	} else {
 		atomic.StoreUint32(&s.qos0Redirect, 1)
 		if p := s.encodeForPersistence(pkt); p != nil {
@@ -241,8 +232,8 @@ func (s *writer) sendQoS0(pkt mqttp.IFace) {
 }
 
 func (s *writer) sendQoS12(pkt mqttp.IFace) {
-	if (atomic.LoadUint32(&s.qos12Redirect) == 0) && ((cap(s.qos12Messages) - len(s.qos12Messages)) > 0) {
-		s.qos12Messages <- pkt
+	if (atomic.LoadUint32(&s.qos12Redirect) == 0) && (maxPacketCount-s.qos12Messages.Length() > 0) {
+		s.qos12Messages.Add(pkt)
 	} else {
 		atomic.StoreUint32(&s.qos12Redirect, 1)
 		if p := s.encodeForPersistence(pkt); p != nil {
@@ -256,7 +247,7 @@ func (s *writer) sendQoS12(pkt mqttp.IFace) {
 }
 
 func (s *writer) signalTxQuotaAvailable() {
-	if len(s.qos12Messages) > 0 {
+	if s.qos12Messages.Length() > 0 {
 		s.signalAndRun()
 	}
 }
@@ -273,44 +264,26 @@ func (s *writer) run() {
 }
 
 func (s *writer) gAvailable() bool {
-	return len(s.gMessages) > 0
+	return s.gMessages.Length() > 0
 }
 
 func (s *writer) qos0Available() bool {
-	return len(s.gMessages) > 0
+	return s.qos0Messages.Length() > 0
 }
 
 func (s *writer) qos12Available() bool {
-	return s.flow.quotaAvailable() && (len(s.qos12Messages) > 0)
+	return s.flow.quotaAvailable() && (s.qos12Messages.Length() > 0)
 }
 
 func (s *writer) packetsAvailable() bool {
 	return s.gAvailable() || s.qos0Available() || s.qos12Available()
 }
 
-func (s *writer) gPopPacket() mqttp.IFace {
-	select {
-	case p := <-s.gMessages:
-		return p
-	default:
-		return nil
-	}
-}
-
-func (s *writer) qos0PopPacket() mqttp.IFace {
-	select {
-	case p := <-s.qos0Messages:
-		return p.(mqttp.IFace)
-	default:
-		return nil
-	}
-}
-
 func (s *writer) qos12PopPacket() mqttp.IFace {
 	var pkt mqttp.IFace
 
-	if s.flow.quotaAvailable() && len(s.qos12Messages) > 0 {
-		value := <-s.qos12Messages
+	if s.flow.quotaAvailable() && s.qos12Messages.Length() > 0 {
+		value := s.qos12Messages.Remove()
 		switch m := value.(type) {
 		case *mqttp.Publish:
 			// try acquire packet id
@@ -414,16 +387,18 @@ func (s *writer) routine() {
 func (s *writer) popPackets() []mqttp.IFace {
 	var packets []mqttp.IFace
 	if s.isAlive() {
-		if pkt := s.gPopPacket(); pkt != nil {
-			packets = append(packets, pkt)
+		if pkt := s.gMessages.Remove(); pkt != nil {
+			p := pkt.(mqttp.IFace)
+			packets = append(packets, p)
 		}
 
 		if pkt := s.qos12PopPacket(); pkt != nil {
 			packets = append(packets, pkt)
 		}
 
-		if pkt := s.qos0PopPacket(); pkt != nil {
-			packets = append(packets, pkt)
+		if pkt := s.qos0Messages.Remove(); pkt != nil {
+			p := pkt.(mqttp.IFace)
+			packets = append(packets, p)
 		}
 	}
 	return packets
@@ -466,7 +441,7 @@ func (s *writer) loadFromPersistence() {
 
 	signal := false
 
-	toLoad := cap(s.qos0Messages) - len(s.qos0Messages)
+	toLoad := maxPacketCount - s.qos0Messages.Length()
 	if toLoad > 0 {
 		if cnt, _ := s.persist.PacketCountQoS0([]byte(s.id)); cnt > 0 {
 			signal = true
@@ -486,7 +461,7 @@ func (s *writer) loadFromPersistence() {
 		}
 	}
 
-	toLoad = cap(s.qos12Messages) - len(s.qos12Messages)
+	toLoad = maxPacketCount - s.qos12Messages.Length()
 	if toLoad > 0 {
 		if cnt, _ := s.persist.PacketCountQoS12([]byte(s.id)); cnt > 0 {
 			signal = true
@@ -632,13 +607,15 @@ func (s *writer) getQueuedPackets() persistence.PersistedPackets {
 		return nil
 	}
 
-	for m := range s.qos0Messages {
+	var m interface{}
+
+	for m = s.qos0Messages.Remove(); m != nil; m = s.qos0Messages.Remove() {
 		if s.offlineQoS0 {
 			packets.QoS0 = append(packets.QoS0, packetEncode(m))
 		}
 	}
 
-	for m := range s.qos12Messages {
+	for m = s.qos12Messages.Remove(); m != nil; m = s.qos12Messages.Remove() {
 		packets.QoS12 = append(packets.QoS12, packetEncode(m))
 	}
 

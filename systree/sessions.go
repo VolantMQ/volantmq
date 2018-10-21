@@ -82,7 +82,6 @@ func (t *sessions) Removed(id string, status *SessionDeletedStatus) {
 		notifyMsg, _ = nm.(*mqttp.Publish)
 		notifyMsg.SetRetain(false)
 		notifyMsg.SetQoS(mqttp.QoS0)                  // nolint: errcheck
-		notifyMsg.SetTopic(t.topic + id)              // nolint: errcheck
 		notifyMsg.SetTopic(t.topic + id + "/removed") // nolint: errcheck
 		if out, err := json.Marshal(&status); err != nil {
 			notifyMsg.SetPayload([]byte("data error"))
