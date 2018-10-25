@@ -69,14 +69,14 @@ func (mT *provider) leafInsertNode(levels []string) *node {
 	root := mT.root
 	for _, level := range levels {
 		// Add node if it doesn't already exist
-		node, ok := root.children[level]
+		n, ok := root.children[level]
 		if !ok {
-			node = newNode(mT.allowOverlapping, root)
+			n = newNode(mT.allowOverlapping, root)
 
-			root.children[level] = node
+			root.children[level] = n
 		}
 
-		root = node
+		root = n
 	}
 
 	return root

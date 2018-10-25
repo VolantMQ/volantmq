@@ -161,6 +161,7 @@ func (s *Type) Offline(shutdown bool) {
 			s.Topics.UnSubscribe(topic, s) // nolint: errcheck
 			delete(s.subscriptions, topic)
 		}
+		s.access.Wait()
 	} else {
 		s.lock.Lock()
 		s.publisher = s.OfflinePublish

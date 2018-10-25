@@ -119,11 +119,11 @@ func (s *writer) start(start bool) {
 			s.persist.PacketsForEachQoS0([]byte(s.id), ctx, s.packetLoader)
 
 			if s.qos12Messages.Length() < maxPacketCount {
-				s.qos12Redirect = 0
+				atomic.StoreUint32(&s.qos12Redirect, 0)
 			}
 
 			if s.qos0Messages.Length() < maxPacketCount {
-				s.qos0Redirect = 0
+				atomic.StoreUint32(&s.qos0Redirect, 0)
 			}
 
 			s.signalAndRun()

@@ -234,9 +234,7 @@ func (mT *provider) retain(obj types.RetainObject) {
 }
 
 func (mT *provider) retainer() {
-	defer func() {
-		mT.wgPublisher.Done()
-	}()
+	defer mT.wgPublisher.Done()
 	mT.wgPublisherStarted.Done()
 
 	for obj := range mT.inRetained {
@@ -253,6 +251,7 @@ func (mT *provider) publisher() {
 
 		mT.smu.Lock()
 		mT.subscriptionSearch(msg.Topic(), msg.PublishID(), &pubEntries)
+		mT.smu.Unlock()
 
 		for _, pub := range pubEntries {
 			for _, e := range pub {
@@ -262,7 +261,5 @@ func (mT *provider) publisher() {
 				e.s.Release()
 			}
 		}
-
-		mT.smu.Unlock()
 	}
 }

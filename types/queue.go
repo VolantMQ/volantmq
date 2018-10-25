@@ -35,8 +35,8 @@ func (q *Queue) Length() int {
 // resize the queue to fit exactly twice its current contents
 // this can result in shrinking if the queue is less than half-full
 func (q *Queue) resize() {
-	defer q.lock.Unlock()
-	q.lock.Lock()
+	// defer q.lock.Unlock()
+	// q.lock.Lock()
 
 	newBuf := make([]interface{}, q.count<<1)
 

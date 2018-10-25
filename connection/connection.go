@@ -681,12 +681,13 @@ func (s *impl) onConnectionCloseStage2(status error) {
 	close(s.quit)
 
 	var err error
-	s.conn.SetReadDeadline(time.Time{})
+	// s.conn.SetReadDeadline(time.Time{})
 
 	// clean up transmitter to allow send disconnect command to client if needed
 	s.onStop.Do(func() {
 		// gracefully shutdown receiver by setting some small ReadDeadline
 		s.conn.SetReadDeadline(time.Now().Add(time.Microsecond))
+
 		s.rx.shutdown()
 
 		s.SignalOffline()
@@ -702,7 +703,7 @@ func (s *impl) onConnectionCloseStage2(status error) {
 
 		var buf []byte
 		if buf, err = mqttp.Encode(pkt); err != nil {
-			s.log.Error("encode disconnect packet", zap.String("ClientID", s.id), zap.Error(err))
+			s.log.Error("encode disconnect packet", zap.String("clientId", s.id), zap.Error(err))
 		} else {
 			var written int
 			if written, err = s.conn.Write(buf); written != len(buf) {
