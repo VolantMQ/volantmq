@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	errExit          = errors.New("exit")
+	// errExit          = errors.New("exit")
 	errQuotaExceeded = errors.New("quota exceeded")
 )
 
@@ -30,7 +30,6 @@ func (s *flow) reAcquire(id mqttp.IDType) error {
 }
 
 func (s *flow) acquire() (mqttp.IDType, error) {
-	//var err error
 	if atomic.LoadInt32(&s.quota) == 0 {
 		return mqttp.IDType(0), errQuotaExceeded
 	}

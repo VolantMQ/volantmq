@@ -1,7 +1,9 @@
-package mem
+package memLockFree
 
 import (
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/VolantMQ/vlapi/subscriber"
@@ -13,9 +15,8 @@ import (
 type topicSubscriber struct {
 	s topicsTypes.Subscriber
 	p *vlsubscriber.SubscriptionParams
+	sync.RWMutex
 }
-
-type subscribers map[uintptr]*topicSubscriber
 
 func (s *topicSubscriber) acquire() *publish {
 	s.s.Acquire()
@@ -41,26 +42,27 @@ type publish struct {
 
 type publishes map[uintptr][]*publish
 
-type node struct {
-	retained       interface{}
-	subs           subscribers
-	parent         *node
-	children       map[string]*node
-	getSubscribers func(uintptr, *publishes)
+type retainer struct {
+	val interface{}
 }
 
-func newNode(overlap bool, parent *node) *node {
+type node struct {
+	retained  atomic.Value
+	wgDeleted sync.WaitGroup
+	subs      sync.Map
+	children  sync.Map
+	kidsCount int32
+	subsCount int32
+	remove    int32
+	parent    *node
+}
+
+func newNode(parent *node) *node {
 	n := &node{
-		subs:     make(subscribers),
-		children: make(map[string]*node),
-		parent:   parent,
+		parent: parent,
 	}
 
-	if overlap {
-		n.getSubscribers = n.overlappingSubscribers
-	} else {
-		n.getSubscribers = n.nonOverlappingSubscribers
-	}
+	n.retained.Store(retainer{})
 
 	return n
 }
@@ -68,18 +70,30 @@ func newNode(overlap bool, parent *node) *node {
 func (mT *provider) leafInsertNode(levels []string) *node {
 	root := mT.root
 
-	for _, level := range levels {
-		// Add node if it doesn't already exist
-		n, ok := root.children[level]
-		if !ok {
-			n = newNode(mT.allowOverlapping, root)
+	for i, level := range levels {
+		for {
+			atomic.AddInt32(&root.kidsCount, 1)
 
-			root.children[level] = n
-		} else {
+			value, ok := root.children.LoadOrStore(level, newNode(root))
+			n := value.(*node)
 
+			atomic.AddInt32(&n.subsCount, 1)
+
+			if ok {
+				atomic.AddInt32(&root.kidsCount, -1)
+				if atomic.LoadInt32(&n.remove) == 1 {
+					atomic.AddInt32(&n.subsCount, -1)
+					n.wgDeleted.Wait()
+					continue
+				}
+			}
+
+			if i != len(levels)-1 {
+				atomic.AddInt32(&n.subsCount, -1)
+			}
+			root = n
+			break
 		}
-
-		root = n
 	}
 
 	return root
@@ -90,12 +104,12 @@ func (mT *provider) leafSearchNode(levels []string) *node {
 
 	// run down and try get path matching given topic
 	for _, token := range levels {
-		n, ok := root.children[token]
+		n, ok := root.children.Load(token)
 		if !ok {
 			return nil
 		}
 
-		root = n
+		root = n.(*node)
 	}
 
 	return root
@@ -108,18 +122,19 @@ func (mT *provider) subscriptionInsert(filter string, sub topicsTypes.Subscriber
 
 	// Let's see if the subscriber is already on the list and just update QoS if so
 	// Otherwise create new entry
-	exists := false
-	if s, ok := root.subs[sub.Hash()]; !ok {
-		root.subs[sub.Hash()] = &topicSubscriber{
-			s: sub,
-			p: p,
+	if s, ok := root.subs.LoadOrStore(sub.Hash(), &topicSubscriber{s: sub, p: p}); ok {
+		atomic.AddInt32(&root.subsCount, -1)
+		ts := s.(*topicSubscriber)
+		if ok {
+			ts.Lock()
+			ts.p = p
+			ts.Unlock()
 		}
-	} else {
-		s.p = p
-		exists = true
+
+		return true
 	}
 
-	return exists
+	return false
 }
 
 func (mT *provider) subscriptionRemove(topic string, sub topicsTypes.Subscriber) error {
@@ -137,54 +152,74 @@ func (mT *provider) subscriptionRemove(topic string, sub topicsTypes.Subscriber)
 	// otherwise try remove subscriber or set error if not exists
 	if sub == nil {
 		// If subscriber == nil, then it's signal to remove ALL subscribers
-		root.subs = make(subscribers)
+		root.subs.Range(func(key, value interface{}) bool {
+			atomic.AddInt32(&root.subsCount, -1)
+			root.subs.Delete(key)
+			return true
+		})
 	} else {
-		id := sub.Hash()
-		if _, ok := root.subs[id]; ok {
-			delete(root.subs, id)
-		} else {
+		if _, ok := root.subs.Load(sub.Hash()); !ok {
 			err = topicsTypes.ErrNotFound
+		} else {
+			atomic.AddInt32(&root.subsCount, -1)
+			root.subs.Delete(sub.Hash())
 		}
 	}
 
-	// Run up and on each level and check if level has subscriptions and nested nodes
-	// If both are empty tell parent node to remove that token
-	level := len(levels)
-	for leafNode := root; leafNode != nil; leafNode = leafNode.parent {
-		// If there are no more subscribers or inner nodes or retained messages remove this node from parent
-		if len(leafNode.subs) == 0 && len(leafNode.children) == 0 && leafNode.retained == nil {
-			// if this is not root node
-			mT.onCleanUnsubscribe(levels[:level])
-			if leafNode.parent != nil {
-				delete(leafNode.parent.children, levels[level-1])
-			}
-		}
-
-		level--
-	}
+	mT.nodesCleanup(root, levels)
 
 	return err
 }
 
-func subscriptionRecurseSearch(root *node, levels []string, publishID uintptr, p *publishes) {
+func (mT *provider) nodesCleanup(root *node, levels []string) {
+	// Run up and on each level and check if level has subscriptions and nested nodes
+	// If both are empty tell parent node to remove that token
+	level := len(levels)
+
+	for leafNode := root; leafNode != nil; leafNode = leafNode.parent {
+		// If there are no more subscribers or inner nodes or retained messages remove this node from parent
+		if atomic.LoadInt32(&leafNode.subsCount) == 0 &&
+			atomic.LoadInt32(&leafNode.kidsCount) == 0 &&
+			leafNode.retained.Load().(retainer).val == nil {
+			leafNode.wgDeleted.Add(1)
+			atomic.StoreInt32(&leafNode.remove, 1)
+
+			if atomic.LoadInt32(&leafNode.subsCount) == 0 &&
+				atomic.LoadInt32(&leafNode.kidsCount) == 0 &&
+				leafNode.retained.Load().(retainer).val == nil {
+				mT.onCleanUnsubscribe(levels[:level])
+				// if this is not root node
+				if leafNode.parent != nil {
+					leafNode.parent.children.Delete(levels[level-1])
+				}
+			}
+
+			leafNode.wgDeleted.Done()
+		}
+
+		level--
+	}
+}
+
+func (mT *provider) subscriptionRecurseSearch(root *node, levels []string, publishID uintptr, p *publishes) {
 	if len(levels) == 0 {
 		// leaf level of the topic
 		// get all subscribers and return
-		root.getSubscribers(publishID, p)
-		if n, ok := root.children[topicsTypes.MWC]; ok {
-			n.getSubscribers(publishID, p)
+		mT.nodeSubscribers(root, publishID, p)
+		if n, ok := root.children.Load(topicsTypes.MWC); ok {
+			mT.nodeSubscribers(n.(*node), publishID, p)
 		}
 	} else {
-		if n, ok := root.children[topicsTypes.MWC]; ok && len(levels[0]) != 0 {
-			n.getSubscribers(publishID, p)
+		if n, ok := root.children.Load(topicsTypes.MWC); ok && len(levels[0]) != 0 {
+			mT.nodeSubscribers(n.(*node), publishID, p)
 		}
 
-		if n, ok := root.children[levels[0]]; ok {
-			subscriptionRecurseSearch(n, levels[1:], publishID, p)
+		if n, ok := root.children.Load(levels[0]); ok {
+			mT.subscriptionRecurseSearch(n.(*node), levels[1:], publishID, p)
 		}
 
-		if n, ok := root.children[topicsTypes.SWC]; ok {
-			subscriptionRecurseSearch(n, levels[1:], publishID, p)
+		if n, ok := root.children.Load(topicsTypes.SWC); ok {
+			mT.subscriptionRecurseSearch(n.(*node), levels[1:], publishID, p)
 		}
 	}
 }
@@ -195,9 +230,9 @@ func (mT *provider) subscriptionSearch(topic string, publishID uintptr, p *publi
 	level := levels[0]
 
 	if !strings.HasPrefix(level, "$") {
-		subscriptionRecurseSearch(root, levels, publishID, p)
-	} else if n, ok := root.children[level]; ok {
-		subscriptionRecurseSearch(n, levels[1:], publishID, p)
+		mT.subscriptionRecurseSearch(root, levels, publishID, p)
+	} else if n, ok := root.children.Load(level); ok {
+		mT.subscriptionRecurseSearch(n.(*node), levels[1:], publishID, p)
 	}
 }
 
@@ -206,7 +241,8 @@ func (mT *provider) retainInsert(topic string, obj types.RetainObject) {
 
 	root := mT.leafInsertNode(levels)
 
-	root.retained = obj
+	root.retained.Store(retainer{val: obj})
+	atomic.AddInt32(&root.subsCount, -1)
 }
 
 func (mT *provider) retainRemove(topic string) error {
@@ -217,22 +253,9 @@ func (mT *provider) retainRemove(topic string) error {
 		return topicsTypes.ErrNotFound
 	}
 
-	root.retained = nil
+	root.retained.Store(retainer{})
 
-	// Run up and on each level and check if level has subscriptions and nested nodes
-	// If both are empty tell parent node to remove that token
-	level := len(levels)
-	for leafNode := root; leafNode != nil; leafNode = leafNode.parent {
-		// If there are no more subscribers or inner nodes or retained messages remove this node from parent
-		if len(leafNode.subs) == 0 && len(leafNode.children) == 0 && leafNode.retained == nil {
-			// if this is not root node
-			if leafNode.parent != nil {
-				delete(leafNode.parent.children, levels[level-1])
-			}
-		}
-
-		level--
-	}
+	mT.nodesCleanup(root, levels)
 
 	return nil
 }
@@ -241,7 +264,8 @@ func retainRecurseSearch(root *node, levels []string, retained *[]*mqttp.Publish
 	if len(levels) == 0 {
 		// leaf level of the topic
 		root.getRetained(retained)
-		if n, ok := root.children[topicsTypes.MWC]; ok {
+		if value, ok := root.children.Load(topicsTypes.MWC); ok {
+			n := value.(*node)
 			n.allRetained(retained)
 		}
 	} else {
@@ -252,12 +276,14 @@ func retainRecurseSearch(root *node, levels []string, retained *[]*mqttp.Publish
 			return
 		case topicsTypes.SWC:
 			// If '+', check all nodes at this level. Next levels must be matched.
-			for _, n := range root.children {
-				retainRecurseSearch(n, levels[1:], retained)
-			}
+			root.children.Range(func(key, value interface{}) bool {
+				retainRecurseSearch(value.(*node), levels[1:], retained)
+
+				return true
+			})
 		default:
-			if n, ok := root.children[levels[0]]; ok {
-				retainRecurseSearch(n, levels[1:], retained)
+			if value, ok := root.children.Load(levels[0]); ok {
+				retainRecurseSearch(value.(*node), levels[1:], retained)
 			}
 		}
 	}
@@ -268,23 +294,36 @@ func (mT *provider) retainSearch(filter string, retained *[]*mqttp.Publish) {
 	level := levels[0]
 
 	if level == topicsTypes.MWC {
-		for t, n := range mT.root.children {
+		mT.root.children.Range(func(key, value interface{}) bool {
+			t := key.(string)
+			n := value.(*node)
+
 			if t != "" && !strings.HasPrefix(t, "$") {
 				n.allRetained(retained)
 			}
+
+			return true
+		})
+	} else if strings.HasPrefix(level, "$") {
+		value, ok := mT.root.children.Load(level)
+		var n *node
+		if ok {
+			n = value.(*node)
 		}
-	} else if strings.HasPrefix(level, "$") && mT.root.children[level] != nil {
-		retainRecurseSearch(mT.root.children[level], levels[1:], retained)
+		retainRecurseSearch(n, levels[1:], retained)
 	} else {
 		retainRecurseSearch(mT.root, levels, retained)
 	}
 }
 
 func (sn *node) getRetained(retained *[]*mqttp.Publish) {
-	if sn.retained != nil {
+	rt := sn.retained.Load().(retainer)
+
+	switch val := rt.val.(type) {
+	case types.RetainObject:
 		var p *mqttp.Publish
 
-		switch t := sn.retained.(type) {
+		switch t := val.(type) {
 		case *mqttp.Publish:
 			p = t
 		case systree.DynamicValue:
@@ -296,7 +335,7 @@ func (sn *node) getRetained(retained *[]*mqttp.Publish) {
 			*retained = append(*retained, p)
 		} else {
 			// publish has expired, thus nobody should get it
-			sn.retained = nil
+			sn.retained.Store(retainer{})
 		}
 	}
 }
@@ -304,13 +343,18 @@ func (sn *node) getRetained(retained *[]*mqttp.Publish) {
 func (sn *node) allRetained(retained *[]*mqttp.Publish) {
 	sn.getRetained(retained)
 
-	for _, n := range sn.children {
+	sn.children.Range(func(key, value interface{}) bool {
+		n := value.(*node)
 		n.allRetained(retained)
-	}
+		return true
+	})
 }
 
-func (sn *node) overlappingSubscribers(publishID uintptr, p *publishes) {
-	for id, sub := range sn.subs {
+func overlappingSubscribers(sn *node, publishID uintptr, p *publishes) {
+	sn.subs.Range(func(key, value interface{}) bool {
+		id := key.(uintptr)
+		sub := value.(*topicSubscriber)
+
 		if s, ok := (*p)[id]; ok {
 			if sub.p.ID > 0 {
 				s[0].ids = append(s[0].ids, sub.p.ID)
@@ -325,11 +369,16 @@ func (sn *node) overlappingSubscribers(publishID uintptr, p *publishes) {
 				(*p)[id] = append((*p)[id], pe)
 			}
 		}
-	}
+
+		return true
+	})
 }
 
-func (sn *node) nonOverlappingSubscribers(publishID uintptr, p *publishes) {
-	for id, sub := range sn.subs {
+func nonOverlappingSubscribers(sn *node, publishID uintptr, p *publishes) {
+	sn.subs.Range(func(key, value interface{}) bool {
+		id := key.(uintptr)
+		sub := value.(*topicSubscriber)
+
 		if !sub.p.Ops.NL() || id != publishID {
 			pe := sub.acquire()
 			if _, ok := (*p)[id]; ok {
@@ -338,5 +387,7 @@ func (sn *node) nonOverlappingSubscribers(publishID uintptr, p *publishes) {
 				(*p)[id] = []*publish{pe}
 			}
 		}
-	}
+
+		return true
+	})
 }

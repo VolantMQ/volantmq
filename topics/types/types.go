@@ -60,24 +60,42 @@ type Subscriber interface {
 // Subscribers used by topic manager to return list of subscribers matching topic
 type Subscribers []Subscriber
 
-// Provider interface
-type Provider interface {
-	Subscribe(string, Subscriber, *vlsubscriber.SubscriptionParams) ([]*mqttp.Publish, error)
-	UnSubscribe(string, Subscriber) error
-	Publish(interface{}) error
-	Retain(types.RetainObject) error
-	Retained(string) ([]*mqttp.Publish, error)
-	Stop() error
-	Shutdown() error
-}
-
 // SubscriberInterface used by subscriber to handle messages
 type SubscriberInterface interface {
 	Publish(interface{}) error
-	Subscribe(string, Subscriber, *vlsubscriber.SubscriptionParams) ([]*mqttp.Publish, error)
-	UnSubscribe(string, Subscriber) error
+	Subscribe(SubscribeReq) error
+	UnSubscribe(UnSubscribeReq) error
 	Retain(types.RetainObject) error
 	Retained(string) ([]*mqttp.Publish, error)
+}
+
+// Provider interface
+type Provider interface {
+	SubscriberInterface
+	Shutdown() error
+}
+
+type SubscribeReq struct {
+	Filter string
+	S      Subscriber
+	Params *vlsubscriber.SubscriptionParams
+	Chan   chan<- SubscribeResp
+}
+
+type SubscribeResp struct {
+	Granted  mqttp.QosType
+	Retained []*mqttp.Publish
+	Err      error
+}
+
+type UnSubscribeReq struct {
+	Filter string
+	S      Subscriber
+	Chan   chan<- UnSubscribeResp
+}
+
+type UnSubscribeResp struct {
+	Err error
 }
 
 var (

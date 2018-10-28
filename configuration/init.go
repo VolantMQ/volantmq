@@ -107,8 +107,6 @@ var configTimeFormatMap = map[string]string{
 
 func ConfigureLoggers(c *LogConfig) error {
 	// initialize startup logger
-	//logCfg := zap.NewProductionConfig()
-
 	logCfg := zap.NewDevelopmentEncoderConfig()
 
 	var level zapcore.Level
@@ -134,7 +132,6 @@ func ConfigureLoggers(c *LogConfig) error {
 	logCfg.StacktraceKey = ""
 	consoleEncoder := zapcore.NewConsoleEncoder(logCfg)
 
-	//logger, _ = logCfg.Build()
 	// High-priority output should also go to standard error, and low-priority
 	// output should also go to standard out.
 	consoleDebugging := zapcore.Lock(os.Stdout)

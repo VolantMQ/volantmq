@@ -27,6 +27,8 @@ type Type struct {
 	publisher     vlsubscriber.Publisher
 	log           *zap.SugaredLogger
 	access        sync.WaitGroup
+	subSignal     chan topicsTypes.SubscribeResp
+	unSubSignal   chan topicsTypes.UnSubscribeResp
 	Config
 }
 
@@ -38,6 +40,8 @@ func New(c Config) *Type {
 		subscriptions: make(vlsubscriber.Subscriptions),
 		Config:        c,
 		log:           configuration.GetLogger().Named("subscriber"),
+		subSignal:     make(chan topicsTypes.SubscribeResp),
+		unSubSignal:   make(chan topicsTypes.UnSubscribeResp),
 	}
 
 	p.publisher = c.OfflinePublish
@@ -83,17 +87,40 @@ func (s *Type) Subscriptions() vlsubscriber.Subscriptions {
 
 // Subscribe to given topic
 func (s *Type) Subscribe(topic string, params *vlsubscriber.SubscriptionParams) ([]*mqttp.Publish, error) {
-	r, err := s.Topics.Subscribe(topic, s, params)
+
+	s.Topics.Subscribe(topicsTypes.SubscribeReq{
+		Filter: topic,
+		Params: params,
+		S:      s,
+		Chan:   s.subSignal,
+	})
+
+	resp := <-s.subSignal
+
+	if resp.Err != nil {
+		return []*mqttp.Publish{}, resp.Err
+	}
+
+	params.Granted = resp.Granted
 
 	s.subscriptions[topic] = params
 
-	return r, err
+	return resp.Retained, nil
 }
 
 // UnSubscribe from given topic
 func (s *Type) UnSubscribe(topic string) error {
+	s.Topics.UnSubscribe(topicsTypes.UnSubscribeReq{
+		Filter: topic,
+		S:      s,
+		Chan:   s.unSubSignal,
+	})
+
+	resp := <-s.unSubSignal
+
 	delete(s.subscriptions, topic)
-	return s.Topics.UnSubscribe(topic, s)
+
+	return resp.Err
 }
 
 // Publish message accordingly to subscriber state
@@ -158,10 +185,21 @@ func (s *Type) Offline(shutdown bool) {
 	// if session is clean then remove all remaining subscriptions
 	if shutdown {
 		for topic := range s.subscriptions {
-			s.Topics.UnSubscribe(topic, s) // nolint: errcheck
-			delete(s.subscriptions, topic)
+			s.UnSubscribe(topic)
 		}
+
 		s.access.Wait()
+		select {
+		case <-s.subSignal:
+		default:
+			close(s.subSignal)
+		}
+
+		select {
+		case <-s.unSubSignal:
+		default:
+			close(s.unSubSignal)
+		}
 	} else {
 		s.lock.Lock()
 		s.publisher = s.OfflinePublish

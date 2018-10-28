@@ -285,11 +285,13 @@ func (s *server) Shutdown() error {
 			s.systree.wg.Wait()
 		}
 
-		s.topicsMgr.Stop() // nolint: errcheck, gas
+		if err := s.sessionsMgr.Shutdown(); err != nil {
+			s.log.Error("stop session manager", zap.Error(err))
+		}
 
-		s.sessionsMgr.Shutdown() // nolint: errcheck, gas
-
-		s.topicsMgr.Shutdown() // nolint: errcheck, gas
+		if err := s.topicsMgr.Shutdown(); err != nil {
+			s.log.Error("stop topics manager manager", zap.Error(err))
+		}
 	})
 
 	return nil

@@ -17,13 +17,13 @@
 // - / in topic name separates the string into "topic levels"
 // - # is a multi-level wildcard, and it must be the last character in the
 //   topic name. It represents the parent and all children levels.
-// - + is a single level wildwcard. It must be the only character in the
+// - + is a single level wildcard. It must be the only character in the
 //   topic level. It represents all names in the current level.
 // - $ is a special character that says the topic is a system level topic
 package topics
 
 import (
-	"github.com/VolantMQ/volantmq/topics/mem"
+	"github.com/VolantMQ/volantmq/topics/memLockFree"
 	"github.com/VolantMQ/volantmq/topics/types"
 )
 
@@ -35,7 +35,7 @@ func New(config topicsTypes.ProviderConfig) (topicsTypes.Provider, error) {
 
 	switch cfg := config.(type) {
 	case *topicsTypes.MemConfig:
-		return mem.NewMemProvider(cfg)
+		return memLockFree.NewMemProvider(cfg)
 	default:
 		return nil, topicsTypes.ErrUnknownProvider
 	}

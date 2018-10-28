@@ -143,7 +143,7 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 
 	err = pkt.ForEachTopic(func(t *mqttp.Topic) error {
 		var reason mqttp.ReasonCode
-		if err = s.permissions.ACL(s.id, s.username, t.Filter(), vlauth.AccessRead); err == vlauth.StatusAllow {
+		if e := s.permissions.ACL(s.id, s.username, t.Filter(), vlauth.AccessRead); e == vlauth.StatusAllow {
 			params := vlsubscriber.SubscriptionParams{
 				ID:  subsID,
 				Ops: t.Ops(),
@@ -178,7 +178,7 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 			p.SetRetain(true)
 			s.conn.Publish(s.id, p)
 		} else {
-			s.log.Error("Couldn't clone PUBLISH message", zap.String("clientId", s.id), zap.Error(e))
+			s.log.Error("clone PUBLISH message", zap.String("clientId", s.id), zap.Error(e))
 		}
 	}
 
@@ -191,13 +191,18 @@ func (s *session) SignalUnSubscribe(pkt *mqttp.UnSubscribe) (mqttp.IFace, error)
 
 	pkt.ForEachTopic(func(t *mqttp.Topic) error {
 		reason := mqttp.CodeSuccess
-		if err := s.permissions.ACL(s.id, s.username, t.Full(), vlauth.AccessRead); err == vlauth.StatusAllow {
-			if err = s.subscriber.UnSubscribe(t.Full()); err != nil {
-				s.log.Error("Couldn't unsubscribe from topic", zap.Error(err))
+		if e := s.permissions.ACL(s.id, s.username, t.Full(), vlauth.AccessRead); e == vlauth.StatusAllow {
+			if e = s.subscriber.UnSubscribe(t.Full()); e != nil {
+				s.log.Error("unsubscribe from topic", zap.String("clientId", s.id), zap.Error(e))
 				reason = mqttp.CodeNoSubscriptionExisted
 			}
 		} else {
-			reason = mqttp.CodeNotAuthorized
+			// [MQTT-3.9.3]
+			if s.version == mqttp.ProtocolV50 {
+				reason = mqttp.CodeNotAuthorized
+			} else {
+				reason = mqttp.QosFailure
+			}
 		}
 
 		retCodes = append(retCodes, reason)
@@ -210,7 +215,7 @@ func (s *session) SignalUnSubscribe(pkt *mqttp.UnSubscribe) (mqttp.IFace, error)
 	id, _ := pkt.ID()
 	resp.SetPacketID(id)
 	if err := resp.AddReturnCodes(retCodes); err != nil {
-		s.log.Error("unsubscribe set return codes", zap.String("ClientID", s.id), zap.Error(err))
+		s.log.Error("unsubscribe set return codes", zap.String("clientId", s.id), zap.Error(err))
 	}
 
 	return resp, nil

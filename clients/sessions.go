@@ -402,7 +402,9 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 			}
 		}
 
-		if cn.Acknowledge(ack, connection.KeepAlive(keepAlive)) {
+		if cn.Acknowledge(ack,
+			connection.KeepAlive(keepAlive),
+			connection.Permissions(authMngr)) {
 			ses.start()
 
 			// TODO(troian): add remote address

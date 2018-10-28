@@ -110,6 +110,7 @@ func (s *reader) connectionRoutine() {
 func (s *reader) readPacket(buf *bufio.Reader) (mqttp.IFace, error) {
 	var err error
 
+	// fixme(troian) think to optimize it
 	if len(s.recv) == 0 {
 		var header []byte
 		peekCount := 2

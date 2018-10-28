@@ -53,6 +53,7 @@ func NewManager(p []string, allowAnonymous bool) (*Manager, error) {
 	return &m, nil
 }
 
+// AllowAnonymous allow anonymous connections
 func (m *Manager) AllowAnonymous() error {
 	if m.anonymous {
 		return vlauth.StatusAllow

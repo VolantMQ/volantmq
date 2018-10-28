@@ -16,9 +16,12 @@ plugins:
     debug:
       - backend: prof.profiler
         config:
+          cmdline: true
           cpu: true
-          mem: false
-          mutex: false
+          mem: true
+          trace: true
+          block: 1000000
+          mutex: 1000000
     health:
       - backend: health
         config:

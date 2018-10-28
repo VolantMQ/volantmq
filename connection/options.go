@@ -5,15 +5,19 @@ import (
 	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
+	"github.com/VolantMQ/vlapi/plugin/auth"
 	"github.com/VolantMQ/vlapi/plugin/persistence"
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/transport"
 )
 
+// OnAuthCb ...
 type OnAuthCb func(string, *AuthParams) (mqttp.IFace, error)
 
+// Option callback for connection option
 type Option func(*impl) error
 
+// SetOptions set connection options
 func (s *impl) SetOptions(opts ...Option) error {
 	for _, opt := range opts {
 		if err := opt(s); err != nil {
@@ -132,5 +136,12 @@ func AttachSession(val SessionCallbacks) Option {
 func Persistence(val persistence.Packets) Option {
 	return func(t *impl) error {
 		return wrPersistence(val)(t.tx)
+	}
+}
+
+func Permissions(val vlauth.Permissions) Option {
+	return func(t *impl) error {
+		t.permissions = val
+		return nil
 	}
 }
