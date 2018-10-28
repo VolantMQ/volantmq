@@ -17,7 +17,6 @@ package connection
 import (
 	"crypto/rand"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -26,6 +25,7 @@ import (
 	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
+	"github.com/VolantMQ/vlapi/plugin/auth"
 	"github.com/VolantMQ/vlapi/plugin/persistence"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/systree"
@@ -46,10 +46,10 @@ const (
 )
 
 // nolint: golint
-var (
-	ErrOverflow    = errors.New("session: overflow")
-	ErrPersistence = errors.New("session: error during persistence restore")
-)
+// var (
+// 	ErrOverflow    = errors.New("session: overflow")
+// 	ErrPersistence = errors.New("session: error during persistence restore")
+// )
 
 var expectedPacketType = map[state]map[mqttp.Type]bool{
 	stateConnecting: {mqttp.CONNECT: true},
@@ -169,6 +169,7 @@ type impl struct {
 	id               string
 	conn             transport.Conn
 	metric           systree.PacketsMetric
+	permissions      vlauth.Permissions
 	signalAuth       OnAuthCb
 	onConnClose      func(error)
 	callStop         func(error) bool
@@ -556,7 +557,7 @@ func (s *impl) processIncoming(p mqttp.IFace) error {
 	//                   until it has received a CONNACK packet
 	if _, ok := expectedPacketType[s.state][p.Type()]; !ok {
 		s.log.Debug("Unexpected packet for current state",
-			zap.String("ClientID", s.id),
+			zap.String("clientId", s.id),
 			zap.String("state", s.state.desc()),
 			zap.String("packet", p.Type().Name()))
 		return mqttp.CodeProtocolError
@@ -611,7 +612,7 @@ func (s *impl) publishToTopic(p *mqttp.Publish) error {
 						// do not check for error as topic has been validated when arrived
 						if err = p.SetTopic(topic); err != nil {
 							s.log.Error("publish to topic",
-								zap.String("ClientID", s.id),
+								zap.String("clientId", s.id),
 								zap.String("topic", topic),
 								zap.Error(err))
 						}
@@ -628,7 +629,7 @@ func (s *impl) publishToTopic(p *mqttp.Publish) error {
 		if prop := p.PropertyGet(mqttp.PropertyPublicationExpiry); prop != nil {
 			if val, err := prop.AsInt(); err == nil {
 				s.log.Debug("Set pub expiration",
-					zap.String("ClientID", s.id),
+					zap.String("clientId", s.id),
 					zap.Duration("val", time.Duration(val)*time.Second))
 				p.SetExpireAt(time.Now().Add(time.Duration(val) * time.Second))
 			} else {
@@ -782,6 +783,9 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 	//   - ignore the message but send acks
 	//   - return error leading to disconnect
 	// TODO: publish permissions
+	if e := s.permissions.ACL(s.id, "", pkt.Topic(), vlauth.AccessWrite); e != vlauth.StatusAllow {
+		reason = mqttp.CodeRefusedNotAuthorized
+	}
 
 	switch pkt.QoS() {
 	case mqttp.QoS2:
@@ -818,6 +822,11 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 		r.SetPacketID(id)
 		r.SetReason(reason)
 		resp = r
+
+		if reason >= mqttp.CodeUnspecifiedError {
+			break
+		}
+
 		fallthrough
 	case mqttp.QoS0: // QoS 0
 		// [MQTT-4.3.1]
@@ -825,7 +834,7 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 		// TODO(troian): ignore if publish permissions not validated
 		if err = s.publishToTopic(pkt); err != nil {
 			s.log.Error("Couldn't publish message",
-				zap.String("ClientID", s.id),
+				zap.String("clientId", s.id),
 				zap.Uint8("QoS", uint8(pkt.QoS())),
 				zap.Error(err))
 		}
@@ -883,7 +892,7 @@ func (s *impl) onAck(pkt mqttp.IFace) (mqttp.IFace, error) {
 			s.tx.pubOut.release(pkt)
 		default:
 			s.log.Error("Unsupported ack message type",
-				zap.String("ClientID", s.id),
+				zap.String("clientId", s.id),
 				zap.String("type", pkt.Type().Name()))
 		}
 	}
