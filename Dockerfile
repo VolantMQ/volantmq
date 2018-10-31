@@ -39,7 +39,7 @@ RUN \
 
 #build persistence plugins
 RUN \
-    cd $GOPATH/src/github.com/VolantMQ/vlapi/plugin/persistence/bbolt && \
+    cd $GOPATH/src/github.com/VolantMQ/vlapi/plugin/persistence/bbolt/plugin && \
     go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -o $VOLANTMQ_WORK_DIR/plugins/persistence_bbolt.so
 
 FROM ubuntu
