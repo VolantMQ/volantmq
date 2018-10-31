@@ -29,8 +29,6 @@ func DefaultConfig() *Config {
 // ReadConfig read service configuration
 func ReadConfig() *Config {
 	log := GetHumanLogger()
-	log.Info("loading config")
-
 	flag.Parse()
 
 	c := DefaultConfig()

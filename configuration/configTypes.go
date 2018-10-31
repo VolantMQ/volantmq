@@ -24,6 +24,7 @@ type LogConfigBase struct {
 	Backtrace bool   `yaml:"backtrace"`
 }
 
+// UnmarshalYAML unmarshal log config
 func (s *LogConfigBase) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	type rawStuff LogConfigBase
 
@@ -71,12 +72,19 @@ type LogConfig struct {
 	File    *FileLogConfig   `yaml:"file,omitempty"`
 }
 
+// AcceptorConfig amount of connections server can handle at same time
+type AcceptorConfig struct {
+	MaxIncoming int `yaml:"maxIncoming"`
+	PreSpawn    int `yaml:"preSpawn"`
+}
+
 // SystemConfig entry in system
 type SystemConfig struct {
 	Log  LogConfig `yaml:"log"`
 	Http struct {
 		DefaultPort string `yaml:"defaultPort"`
 	} `yaml:"http"`
+	Acceptor AcceptorConfig `yaml:"acceptor"`
 }
 
 // TLSConfig used by SecurityConfig or ssl/ws listeners

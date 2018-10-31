@@ -6,6 +6,8 @@ import (
 
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/systree"
+	"github.com/VolantMQ/volantmq/types"
+	"github.com/troian/easygo/netpoll"
 	"go.uber.org/zap"
 )
 
@@ -22,7 +24,9 @@ type Config struct {
 // InternalConfig used by server implementation to configure internal specific needs
 type InternalConfig struct {
 	Handler
-	Metric systree.Metric
+	EPoll      netpoll.EventPoll
+	AcceptPool types.Pool
+	Metric     systree.Metric
 }
 
 type baseConfig struct {
@@ -46,6 +50,7 @@ type Provider interface {
 }
 
 var (
+	// ErrListenerIsOff ...
 	ErrListenerIsOff = errors.New("listener is off")
 )
 

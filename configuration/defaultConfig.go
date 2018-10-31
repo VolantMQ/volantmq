@@ -10,6 +10,9 @@ system:
       level: info # available levels: debug, info, warn, error, dpanic, panic, fatal
   http:
     defaultPort: 8080
+  acceptor:
+    maxIncoming: 1000
+    preSpawn: 100
 plugins:
   config:
     auth: # plugin type

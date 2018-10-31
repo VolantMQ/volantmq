@@ -5,9 +5,11 @@ import (
 	"net"
 	"time"
 
+	"github.com/VolantMQ/volantmq/types"
+	"go.uber.org/zap"
+
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/systree"
-	"go.uber.org/zap"
 )
 
 // ConfigTCP configuration of tcp transport
@@ -59,6 +61,7 @@ func NewTCP(config *ConfigTCP, internal *InternalConfig) (Provider, error) {
 	return l, nil
 }
 
+// Ready ...
 func (l *tcp) Ready() error {
 	if err := l.baseReady(); err != nil {
 		return err
@@ -67,6 +70,7 @@ func (l *tcp) Ready() error {
 	return nil
 }
 
+// Alive ...
 func (l *tcp) Alive() error {
 	if err := l.baseReady(); err != nil {
 		return err
@@ -83,7 +87,6 @@ func (l *tcp) Close() error {
 		close(l.quit)
 
 		err = l.listener.Close()
-		l.onConnection.Wait()
 
 		l.listener = nil
 		l.log = nil
@@ -92,74 +95,78 @@ func (l *tcp) Close() error {
 	return err
 }
 
-// newConnTCP initiate connection with net.Conn tcp object and stat
-func (l *tcp) newConnTCP(conn net.Conn, stat systree.BytesMetric) (Conn, error) {
-	//desc, err := netpoll.HandleReadOnce(conn)
-	//if err != nil {
-	//	return nil, err
-	//}
-
-	newConn := &connTCP{
-		conn: conn,
-		stat: stat,
-		//pollDesc: pollDesc{
-		//	desc:  desc,
-		//	ePoll: l.EventPoll,
-		//},
+func (l *tcp) newConn(cn net.Conn, stat systree.BytesMetric) (Conn, error) {
+	c, err := newConn(l.EPoll, cn, stat)
+	if err != nil {
+		return nil, err
 	}
 
 	if l.tls != nil {
-		newConn.conn = tls.Server(conn, l.tls)
+		c.Conn = tls.Server(cn, l.tls)
 	}
 
-	return newConn, nil
+	return c, nil
 }
 
 // Serve start serving connections
 func (l *tcp) Serve() error {
-	var tempDelay time.Duration // how long to sleep on accept failure
+
+	// accept is a channel to signal about next incoming connection Accept()
+	// results.
+	accept := make(chan error, 1)
+
+	defer close(accept)
 
 	for {
-		var cn net.Conn
-		var err error
+		// Try to accept incoming connection inside free pool worker.
+		// If there no free workers for 1ms, do not accept anything and try later.
+		// This will help us to prevent many self-ddos or out of resource limit cases.
+		err := l.AcceptPool.ScheduleTimeout(time.Millisecond, func() {
+			var cn net.Conn
+			var er error
 
-		if cn, err = l.listener.Accept(); err != nil {
-			// http://zhen.org/blog/graceful-shutdown-of-go-net-dot-listeners/
-			select {
-			case <-l.quit:
-				return nil
-			default:
-			}
+			defer func() {
+				accept <- er
+			}()
 
-			// Borrowed from go1.3.3/src/pkg/net/http/server.go:1699
-			if ne, ok := err.(net.Error); ok && ne.Temporary() {
-				if tempDelay == 0 {
-					tempDelay = 5 * time.Millisecond
+			if cn, er = l.listener.Accept(); er == nil {
+				select {
+				case <-l.quit:
+					er = types.ErrClosed
+					return
+				default:
+				}
+
+				if inConn, e := l.newConn(cn, l.Metric.Bytes()); e != nil {
+					l.log.Error("create connection interface", zap.Error(e))
 				} else {
-					tempDelay *= 2
+					l.handleConnection(inConn)
 				}
-				if max := 1 * time.Second; tempDelay > max {
-					tempDelay = max
-				}
-				l.log.Error("accept connection. Retrying",
-					zap.Error(err),
-					zap.Duration("retryIn", tempDelay))
-
-				time.Sleep(tempDelay)
-				continue
 			}
-			return err
+		})
+
+		// We do not want to accept incoming connection when goroutine pool is
+		// busy. So if there are no free goroutines during 1ms we want to
+		// cooldown the server and do not receive connection for some short
+		// time.
+		if err != nil && err != types.ErrScheduleTimeout {
+			break
+		} else if err == types.ErrScheduleTimeout {
+			continue
 		}
 
-		l.onConnection.Add(1)
-		go func(cn net.Conn) {
-			defer l.onConnection.Done()
+		err = <-accept
 
-			if inConn, e := l.newConnTCP(cn, l.Metric.Bytes()); e != nil {
-				l.log.Error("create connection interface", zap.Error(e))
+		if err != nil {
+			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+				delay := 5 * time.Millisecond
+				time.Sleep(delay)
 			} else {
-				l.handleConnection(inConn)
+				// unknown error stop listener
+				break
 			}
-		}(cn)
+		}
 	}
+
+	return nil
 }

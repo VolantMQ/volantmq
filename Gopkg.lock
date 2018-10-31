@@ -3,17 +3,18 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:1a02fdc4f901ef3f1391f4459ad25201d6ffc314fa6ef7279ebcefc0fa83c065"
+  digest = "1:c775ed5e825e9d49f8f3d531368d321895dc9774859de89e3daf1f9187aa18bb"
   name = "github.com/VolantMQ/vlapi"
   packages = [
     "mqttp",
     "plugin",
     "plugin/auth",
     "plugin/persistence",
+    "plugin/persistence/mem",
     "subscriber",
   ]
   pruneopts = "UT"
-  revision = "688aadbd5d2f329faaac854031f12c86b69af528"
+  revision = "4dd6d00c48cd29979d063397dd29128ca11659f1"
 
 [[projects]]
   branch = "master"
@@ -30,6 +31,38 @@
   pruneopts = "UT"
   revision = "8991bc29aa16c548c550c7ff78260e27b9ab7c73"
   version = "v1.1.1"
+
+[[projects]]
+  branch = "master"
+  digest = "1:368ba96ddacaae2fe265afcac3062a199908f7dc0c6569d6e05a7a13042cccf1"
+  name = "github.com/gobwas/httphead"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "2c6c146eadee0b69f856f87e3e9f1d0cd6aad2f5"
+
+[[projects]]
+  digest = "1:bdfe3b97ff03e4f7252c74cfaefb20050a360c8fb760701014ebf99c9540abd1"
+  name = "github.com/gobwas/pool"
+  packages = [
+    ".",
+    "internal/pmath",
+    "pbufio",
+    "pbytes",
+  ]
+  pruneopts = "UT"
+  revision = "fa3125c39d7eca32e1387bb69b1b38dcb31b1e0b"
+  version = "v0.2.0"
+
+[[projects]]
+  digest = "1:0170d57f475b654098594498fbd9c94a57464b91d6dd855fe409d87656d4aa5e"
+  name = "github.com/gobwas/ws"
+  packages = [
+    ".",
+    "wsutil",
+  ]
+  pruneopts = "UT"
+  revision = "469ccd6afe52b489eee1e662098562dd7d77a4f8"
+  version = "v1.0.0"
 
 [[projects]]
   digest = "1:97df918963298c287643883209a2c3f642e6593379f97ab400c2a2e219ab647d"
@@ -160,6 +193,14 @@
 
 [[projects]]
   branch = "master"
+  digest = "1:af91cd0e9e9fde54136b3fe0160d28a1fb8d71d6e2d47f736e33185d40e761f1"
+  name = "github.com/troian/easygo"
+  packages = ["netpoll"]
+  pruneopts = "UT"
+  revision = "6aa9ec42b14215a7f293153859340c9e4a34e59d"
+
+[[projects]]
+  branch = "master"
   digest = "1:03209c34dead96c8802809591d37e1e441283ebce3c7815be9c95be4788a3004"
   name = "github.com/troian/healthcheck"
   packages = ["."]
@@ -199,11 +240,11 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:f22e437d9328275884d0ae018ed0de4c280871c944a5ab332aa37fd71fb5801b"
+  digest = "1:466e5917ea5f69d435d0ab3015dc4b57b80d34a6caf1104097ac82ab462b86e4"
   name = "golang.org/x/sys"
   packages = ["unix"]
   pruneopts = "UT"
-  revision = "95b1ffbd15a57cc5abb3f04402b9e8ec0016a52c"
+  revision = "7e31e0c00fa05cb5fbf4347b585621d6709e19a4"
 
 [[projects]]
   digest = "1:342378ac4dcb378a5448dd723f0784ae519383532f5e70ade24132c4c8693202"
@@ -221,11 +262,14 @@
     "github.com/VolantMQ/vlapi/plugin",
     "github.com/VolantMQ/vlapi/plugin/auth",
     "github.com/VolantMQ/vlapi/plugin/persistence",
+    "github.com/VolantMQ/vlapi/plugin/persistence/mem",
     "github.com/VolantMQ/vlapi/subscriber",
+    "github.com/gobwas/ws/wsutil",
     "github.com/gorilla/websocket",
     "github.com/gosuri/uiprogress",
     "github.com/pkg/errors",
     "github.com/stretchr/testify/require",
+    "github.com/troian/easygo/netpoll",
     "github.com/troian/healthcheck",
     "go.uber.org/zap",
     "go.uber.org/zap/zapcore",

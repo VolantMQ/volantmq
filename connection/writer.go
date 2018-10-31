@@ -41,10 +41,7 @@ type writer struct {
 	onStart           sync.Once
 	onStop            types.Once
 	running           uint32
-	pLoaderRunning    uint32
 	packetMaxSize     uint32
-	qos0Redirect      uint32
-	qos12Redirect     uint32
 	topicAliasCurrMax uint16
 	topicAliasMax     uint16
 	offlineQoS0       bool
@@ -65,8 +62,6 @@ func newWriter() *writer {
 		flow: flow{
 			quota: 0xFFFF,
 		},
-		qos0Redirect:  1,
-		qos12Redirect: 1,
 		running:       0,
 		packetMaxSize: 0xFFFFFFF,
 	}
@@ -116,15 +111,8 @@ func (s *writer) start(start bool) {
 
 			ctx.packets = s.qos0Messages
 			ctx.count = s.qos0Messages.Length()
+
 			s.persist.PacketsForEachQoS0([]byte(s.id), ctx, s.packetLoader)
-
-			if s.qos12Messages.Length() < maxPacketCount {
-				atomic.StoreUint32(&s.qos12Redirect, 0)
-			}
-
-			if s.qos0Messages.Length() < maxPacketCount {
-				atomic.StoreUint32(&s.qos0Redirect, 0)
-			}
 
 			s.signalAndRun()
 		}
@@ -179,9 +167,6 @@ func (s *writer) stop() {
 		close(s.quit)
 
 		s.wg.Wait()
-
-		atomic.StoreUint32(&s.qos0Redirect, 1)
-		atomic.StoreUint32(&s.qos12Redirect, 1)
 	})
 }
 
@@ -217,31 +202,33 @@ func (s *writer) sendGeneric(pkt mqttp.IFace) {
 }
 
 func (s *writer) sendQoS0(pkt mqttp.IFace) {
-	if (atomic.LoadUint32(&s.qos0Redirect) == 0) && (s.qos0Messages.Length() > 0) {
-		s.qos0Messages.Add(pkt)
-	} else {
-		atomic.StoreUint32(&s.qos0Redirect, 1)
-		if p := s.encodeForPersistence(pkt); p != nil {
-			if err := s.persist.PacketStoreQoS0([]byte(s.id), p); err != nil {
-				s.log.Error("persist packet", zap.String("clientId", s.id), zap.Error(err))
-			}
-		}
-	}
+	s.qos0Messages.Add(pkt)
+	// if (atomic.LoadUint32(&s.qos0Redirect) == 0) && (s.qos0Messages.Length() > 0) {
+	// 	s.qos0Messages.Add(pkt)
+	// } else {
+	// 	atomic.StoreUint32(&s.qos0Redirect, 1)
+	// 	if p := s.encodeForPersistence(pkt); p != nil {
+	// 		if err := s.persist.PacketStoreQoS0([]byte(s.id), p); err != nil {
+	// 			s.log.Error("persist packet", zap.String("clientId", s.id), zap.Error(err))
+	// 		}
+	// 	}
+	// }
 
 	s.signalAndRun()
 }
 
 func (s *writer) sendQoS12(pkt mqttp.IFace) {
-	if (atomic.LoadUint32(&s.qos12Redirect) == 0) && (maxPacketCount-s.qos12Messages.Length() > 0) {
-		s.qos12Messages.Add(pkt)
-	} else {
-		atomic.StoreUint32(&s.qos12Redirect, 1)
-		if p := s.encodeForPersistence(pkt); p != nil {
-			if err := s.persist.PacketStoreQoS12([]byte(s.id), p); err != nil {
-				s.log.Error("persist packet", zap.String("clientId", s.id), zap.Error(err))
-			}
-		}
-	}
+	s.qos12Messages.Add(pkt)
+	// if (atomic.LoadUint32(&s.qos12Redirect) == 0) && (maxPacketCount-s.qos12Messages.Length() > 0) {
+	// 	s.qos12Messages.Add(pkt)
+	// } else {
+	// 	atomic.StoreUint32(&s.qos12Redirect, 1)
+	// 	if p := s.encodeForPersistence(pkt); p != nil {
+	// 		if err := s.persist.PacketStoreQoS12([]byte(s.id), p); err != nil {
+	// 			s.log.Error("persist packet", zap.String("clientId", s.id), zap.Error(err))
+	// 		}
+	// 	}
+	// }
 
 	s.signalAndRun()
 }
@@ -372,13 +359,14 @@ func (s *writer) routine() {
 			// when no messages to transmit see if persistence has anything
 			// running it as separate goroutine allows to gracefully handle
 			// SUBSCRIBE/UNSUBSCRIBE/PING message if load from persistence takes a while
-			if atomic.CompareAndSwapUint32(&s.pLoaderRunning, 0, 1) {
-				s.wg.Add(1)
-				atomic.StoreUint32(&s.qos0Redirect, 1)
-				atomic.StoreUint32(&s.qos12Redirect, 1)
-				atomic.StoreUint32(&s.pLoaderRunning, 1)
-				go s.loadFromPersistence()
-			}
+
+			// if atomic.CompareAndSwapUint32(&s.pLoaderRunning, 0, 1) {
+			// 	s.wg.Add(1)
+			// 	atomic.StoreUint32(&s.qos0Redirect, 1)
+			// 	atomic.StoreUint32(&s.qos12Redirect, 1)
+			// 	atomic.StoreUint32(&s.pLoaderRunning, 1)
+			// 	go s.loadFromPersistence()
+			// }
 			break
 		}
 	}
@@ -422,67 +410,6 @@ func (s *writer) setTopicAlias(pkt *mqttp.Publish) {
 		if err := pkt.PropertySet(mqttp.PropertyTopicAlias, alias); err == nil && exists {
 			pkt.SetTopic("") // nolint: errcheck
 		}
-	}
-}
-
-func (s *writer) loadFromPersistence() {
-	var err error
-	defer func() {
-		atomic.StoreUint32(&s.pLoaderRunning, 0)
-		s.wg.Done()
-
-		if r := recover(); r != nil {
-			s.onConnectionClose(errors.New("close on panic"))
-		}
-		if err != nil {
-			s.onConnectionClose(err)
-		}
-	}()
-
-	signal := false
-
-	toLoad := maxPacketCount - s.qos0Messages.Length()
-	if toLoad > 0 {
-		if cnt, _ := s.persist.PacketCountQoS0([]byte(s.id)); cnt > 0 {
-			signal = true
-
-			ctx := &packetLoaderCtx{
-				count:   toLoad,
-				packets: s.qos0Messages,
-			}
-
-			s.persist.PacketsForEachQoS0([]byte(s.id), ctx, s.packetLoader)
-
-			if cnt, _ = s.persist.PacketCountQoS0([]byte(s.id)); cnt == 0 {
-				atomic.StoreUint32(&s.qos0Redirect, 0)
-			}
-		} else {
-			atomic.StoreUint32(&s.qos0Redirect, 0)
-		}
-	}
-
-	toLoad = maxPacketCount - s.qos12Messages.Length()
-	if toLoad > 0 {
-		if cnt, _ := s.persist.PacketCountQoS12([]byte(s.id)); cnt > 0 {
-			signal = true
-
-			ctx := &packetLoaderCtx{
-				count:   toLoad,
-				packets: s.qos12Messages,
-			}
-
-			s.persist.PacketsForEachQoS12([]byte(s.id), ctx, s.packetLoader)
-
-			if cnt, _ = s.persist.PacketCountQoS12([]byte(s.id)); cnt == 0 {
-				atomic.StoreUint32(&s.qos12Redirect, 0)
-			}
-		} else {
-			atomic.StoreUint32(&s.qos12Redirect, 0)
-		}
-	}
-
-	if signal {
-		s.signalAndRun()
 	}
 }
 
@@ -630,3 +557,64 @@ func (s *writer) getQueuedPackets() persistence.PersistedPackets {
 
 	return packets
 }
+
+// func (s *writer) loadFromPersistence() {
+// 	var err error
+// 	defer func() {
+// 		atomic.StoreUint32(&s.pLoaderRunning, 0)
+// 		s.wg.Done()
+//
+// 		if r := recover(); r != nil {
+// 			s.onConnectionClose(errors.New("close on panic"))
+// 		}
+// 		if err != nil {
+// 			s.onConnectionClose(err)
+// 		}
+// 	}()
+//
+// 	signal := false
+//
+// 	toLoad := maxPacketCount - s.qos0Messages.Length()
+// 	if toLoad > 0 {
+// 		if cnt, _ := s.persist.PacketCountQoS0([]byte(s.id)); cnt > 0 {
+// 			signal = true
+//
+// 			ctx := &packetLoaderCtx{
+// 				count:   toLoad,
+// 				packets: s.qos0Messages,
+// 			}
+//
+// 			s.persist.PacketsForEachQoS0([]byte(s.id), ctx, s.packetLoader)
+//
+// 			if cnt, _ = s.persist.PacketCountQoS0([]byte(s.id)); cnt == 0 {
+// 				atomic.StoreUint32(&s.qos0Redirect, 0)
+// 			}
+// 		} else {
+// 			atomic.StoreUint32(&s.qos0Redirect, 0)
+// 		}
+// 	}
+//
+// 	toLoad = maxPacketCount - s.qos12Messages.Length()
+// 	if toLoad > 0 {
+// 		if cnt, _ := s.persist.PacketCountQoS12([]byte(s.id)); cnt > 0 {
+// 			signal = true
+//
+// 			ctx := &packetLoaderCtx{
+// 				count:   toLoad,
+// 				packets: s.qos12Messages,
+// 			}
+//
+// 			s.persist.PacketsForEachQoS12([]byte(s.id), ctx, s.packetLoader)
+//
+// 			if cnt, _ = s.persist.PacketCountQoS12([]byte(s.id)); cnt == 0 {
+// 				atomic.StoreUint32(&s.qos12Redirect, 0)
+// 			}
+// 		} else {
+// 			atomic.StoreUint32(&s.qos12Redirect, 0)
+// 		}
+// 	}
+//
+// 	if signal {
+// 		s.signalAndRun()
+// 	}
+// }

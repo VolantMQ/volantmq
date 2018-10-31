@@ -405,9 +405,10 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 		if cn.Acknowledge(ack,
 			connection.KeepAlive(keepAlive),
 			connection.Permissions(authMngr)) {
+
 			ses.start()
 
-			// TODO(troian): add remote address
+			// fixme(troian): add remote address
 			status := &systree.ClientConnectStatus{
 				Username:          string(params.Username),
 				Timestamp:         time.Now().Format(time.RFC3339),
@@ -612,7 +613,7 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 
 	if params.CleanStart {
 		if err = m.persistence.Delete([]byte(params.ID)); err != nil && err != persistence.ErrNotFound {
-			m.log.Error("Couldn't wipe session", zap.String("ClientID", params.ID), zap.Error(err))
+			m.log.Error("Couldn't wipe session", zap.String("clientId", params.ID), zap.Error(err))
 		} else {
 			err = nil
 		}

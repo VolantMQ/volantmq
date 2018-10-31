@@ -137,7 +137,7 @@ func (s *reader) readPacket(buf *bufio.Reader) (mqttp.IFace, error) {
 
 		// Get the remaining length of the message
 		remLen, m := binary.Uvarint(header[1:])
-		// Total message length is 1 (msg type) + remLen + m (remlen bytes)
+		// Total message length is 1 (msg type) + remLen + m (remLen bytes)
 		s.remaining = 1 + int(remLen) + m
 		s.recv = make([]byte, s.remaining)
 	}

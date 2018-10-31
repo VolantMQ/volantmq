@@ -17,6 +17,7 @@ import (
 	"github.com/VolantMQ/volantmq/topics/types"
 	"github.com/VolantMQ/volantmq/transport"
 	"github.com/VolantMQ/volantmq/types"
+	"github.com/troian/easygo/netpoll"
 	"github.com/troian/healthcheck"
 	"go.uber.org/zap"
 )
@@ -35,7 +36,8 @@ var (
 
 // Config configuration of the MQTT server
 type Config struct {
-	MQTT configuration.MqttConfig
+	MQTT     configuration.MqttConfig
+	Acceptor configuration.AcceptorConfig
 
 	// Configuration of persistence provider
 	Persistence persistence.IFace
@@ -78,6 +80,8 @@ type server struct {
 	quit        chan struct{}
 	lock        sync.Mutex
 	onClose     sync.Once
+	ePoll       netpoll.EventPoll
+	acceptPool  types.Pool
 	transports  struct {
 		list map[string]transport.Provider
 		wg   sync.WaitGroup
@@ -112,21 +116,6 @@ func NewServer(config Config) (Server, error) {
 
 	if s.Persistence == nil {
 		return nil, errors.New("persistence provider cannot be nil")
-	}
-
-	var systemPersistence persistence.System
-	var systemState *persistence.SystemState
-
-	if systemPersistence, err = s.Persistence.System(); err != nil {
-		return nil, err
-	}
-
-	if systemState, err = systemPersistence.GetInfo(); err != nil {
-		return nil, err
-	}
-
-	if err = systemPersistence.SetInfo(systemState); err != nil {
-		return nil, err
 	}
 
 	var persisRetained persistence.Retained
@@ -164,6 +153,12 @@ func NewServer(config Config) (Server, error) {
 		}
 	}
 
+	if s.ePoll, err = netpoll.New(nil); err != nil {
+		return nil, err
+	}
+
+	s.acceptPool = types.NewPool(s.Config.Acceptor.MaxIncoming, 1, s.Config.Acceptor.PreSpawn)
+
 	mConfig := &clients.Config{
 		MqttConfig:       s.MQTT,
 		TopicsMgr:        s.topicsMgr,
@@ -192,15 +187,18 @@ func (s *server) ListenAndServe(config interface{}) error {
 	var err error
 
 	internalConfig := transport.InternalConfig{
-		Handler: s.sessionsMgr,
-		Metric:  s.sysTree.Metric(),
+		Handler:    s.sessionsMgr,
+		EPoll:      s.ePoll,
+		AcceptPool: s.acceptPool,
+		Metric:     s.sysTree.Metric(),
 	}
 
 	switch c := config.(type) {
 	case *transport.ConfigTCP:
 		l, err = transport.NewTCP(c, &internalConfig)
-	case *transport.ConfigWS:
-		l, err = transport.NewWS(c, &internalConfig)
+	// todo (troian) proper websocket implementation
+	// case *transport.ConfigWS:
+	// 	l, err = transport.NewWS(c, &internalConfig)
 	default:
 		return errors.New("invalid listener type")
 	}
@@ -292,6 +290,8 @@ func (s *server) Shutdown() error {
 		if err := s.topicsMgr.Shutdown(); err != nil {
 			s.log.Error("stop topics manager manager", zap.Error(err))
 		}
+
+		s.acceptPool.Close()
 	})
 
 	return nil

@@ -45,12 +45,6 @@ const (
 	stateConnectFailed
 )
 
-// nolint: golint
-// var (
-// 	ErrOverflow    = errors.New("session: overflow")
-// 	ErrPersistence = errors.New("session: error during persistence restore")
-// )
-
 var expectedPacketType = map[state]map[mqttp.Type]bool{
 	stateConnecting: {mqttp.CONNECT: true},
 	stateAuth: {
@@ -345,6 +339,7 @@ func (s *impl) Acknowledge(p *mqttp.ConnAck, opts ...Option) bool {
 		s.onConnClose = s.onConnectionCloseStage2
 		s.callStop = s.onConnectionClose
 		s.SignalOnline()
+
 		s.rx.run()
 		s.tx.start(true)
 	}

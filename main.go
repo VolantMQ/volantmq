@@ -16,6 +16,7 @@ import (
 	"github.com/VolantMQ/vlapi/plugin"
 	"github.com/VolantMQ/vlapi/plugin/auth"
 	"github.com/VolantMQ/vlapi/plugin/persistence"
+	"github.com/VolantMQ/vlapi/plugin/persistence/mem"
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/server"
@@ -397,12 +398,16 @@ func (ctx *appContext) configureHealthPlugins(cfg interface{}) error {
 }
 
 func (ctx *appContext) loadPersistence(cfg interface{}) (persistence.IFace, error) {
-	persist := persistence.Default()
+	var persist persistence.IFace
 
 	logger.Info("loading persistence")
 	if cfg == nil {
 		logger.Warn("\tno persistence backend provided\n\tusing in-memory. Data will be lost on shutdown")
+		persist, _ = persistenceMem.Load(nil, nil)
 	} else {
+		var backend string
+		var config interface{}
+
 		persistenceConfigs := cfg.([]interface{})
 		if len(persistenceConfigs) > 1 {
 			logger.Warn("\tplugins.config.persistence: multiple persistence providers not supported")
@@ -411,8 +416,6 @@ func (ctx *appContext) loadPersistence(cfg interface{}) (persistence.IFace, erro
 
 		persistenceConfig := persistenceConfigs[0].(map[interface{}]interface{})
 		var ok bool
-		var backend string
-		var config interface{}
 
 		if backend, ok = persistenceConfig["backend"].(string); !ok {
 			logger.Error("\tplugins.config.persistence[0] must contain key \"backend\"")
@@ -438,6 +441,9 @@ func (ctx *appContext) loadPersistence(cfg interface{}) (persistence.IFace, erro
 
 				persist = plObject.(persistence.IFace)
 			}
+		} else {
+			logger.Fatal("no plugins loaded")
+			return nil, errors.New("")
 		}
 	}
 
@@ -558,15 +564,6 @@ func main() {
 		}
 	}()
 
-	logger = configuration.GetHumanLogger()
-	logger.Info("starting service...")
-	logger.Infof("\n\tbuild info:\n"+
-		"\t\tcommit : %s\n"+
-		"\t\tbranch : %s\n"+
-		"\t\tstate  : %s\n"+
-		"\t\tsummary: %s\n"+
-		"\t\tdate   : %s\n"+
-		"\t\tversion: %s\n", GitCommit, GitBranch, GitState, GitSummary, BuildDate, Version)
 	config := configuration.ReadConfig()
 	if config == nil {
 		return
@@ -577,6 +574,16 @@ func main() {
 	}
 
 	logger = configuration.GetHumanLogger()
+
+	logger = configuration.GetHumanLogger()
+	logger.Info("starting service...")
+	logger.Infof("\n\tbuild info:\n"+
+		"\t\tcommit : %s\n"+
+		"\t\tbranch : %s\n"+
+		"\t\tstate  : %s\n"+
+		"\t\tsummary: %s\n"+
+		"\t\tdate   : %s\n"+
+		"\t\tversion: %s\n", GitCommit, GitBranch, GitState, GitSummary, BuildDate, Version)
 
 	logger.Info("working directory: ", configuration.WorkDir)
 	logger.Info("plugins directory: ", configuration.PluginsDir)
@@ -655,6 +662,7 @@ func main() {
 	serverConfig := server.Config{
 		Health:          ctx,
 		MQTT:            config.Mqtt,
+		Acceptor:        config.System.Acceptor,
 		Persistence:     persist,
 		TransportStatus: listenerStatus,
 		OnDuplicate: func(s string, b bool) {

@@ -11,7 +11,7 @@ plugins:
   enabled:
   - debug
   - health
-#  - persistence_bbolt
+  - persistence_bbolt
   config:
     debug:
       - backend: prof.profiler
@@ -20,16 +20,17 @@ plugins:
           cpu: true
           mem: true
           trace: true
-          block: 1000000
+          block: 100000
           mutex: 1000000
     health:
       - backend: health
         config:
           livenessEndpoint: live
           readinessEndpoint: ready
-#    persistence:            # plugin type
-#      - backend: bbolt      # plugin internal name
-#        config:
+    persistence:            # plugin type
+      - backend: bbolt      # plugin internal name
+        config:
+          file: "./persistence/data/bbolt.db"
 #          file: "/usr/lib/volantmq/persistence/data/bbolt.db"
     auth:                   # plugin type
       - name: internal      # authenticator name, used by listeners
