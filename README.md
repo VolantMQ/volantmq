@@ -8,6 +8,9 @@ VolantMQ
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 <a href="https://jetbrains.com/go"> <img src="https://raw.githubusercontent.com/VolantMQ/volantmq/master/3rd-party/logo/jetbrains/logo-text.svg?sanitize=true" width="120"/></a>
 
+![VolantMQ image](doc/images/logo-2.svg)
+*VolantMQ image by [Marina Troian ][rf], licensed under [Creative Commons 3.0 Attributions license][cc3-by].*
+
 VolantMQ is a high performance MQTT broker that aims to be fully compliant with MQTT specs
 
 ### Features, Limitations, and Future
