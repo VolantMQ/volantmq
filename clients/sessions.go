@@ -11,6 +11,8 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/schollz/progressbar"
+
 	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/VolantMQ/vlapi/plugin/auth"
 	"github.com/VolantMQ/vlapi/plugin/persistence"
@@ -23,7 +25,6 @@ import (
 	"github.com/VolantMQ/volantmq/topics/types"
 	"github.com/VolantMQ/volantmq/transport"
 	"github.com/VolantMQ/volantmq/types"
-	"github.com/gosuri/uiprogress"
 	"go.uber.org/zap"
 )
 
@@ -76,7 +77,7 @@ type containerInfo struct {
 }
 
 type loadContext struct {
-	bar            *uiprogress.Bar
+	bar            *progressbar.ProgressBar
 	preloadConfigs map[string]*preloadConfig
 	delayedWills   []mqttp.IFace
 }
@@ -125,15 +126,11 @@ func NewManager(c *Config) (*Manager, error) {
 		m.log.Info("Loading sessions. Might take a while")
 		m.log.Sync()
 
-		uiprogress.Start()
-		bar := uiprogress.AddBar(int(pCount)).AppendCompleted().PrependElapsed()
-
-		bar.PrependFunc(func(b *uiprogress.Bar) string {
-			return fmt.Sprintf("Session load (%d/%d)", b.Current(), int(pCount))
-		})
-
 		context := &loadContext{
-			bar:            bar,
+			bar: progressbar.NewOptions(
+				int(pCount),
+				progressbar.OptionShowCount(),
+				progressbar.OptionShowIts()),
 			preloadConfigs: make(map[string]*preloadConfig),
 		}
 
@@ -141,7 +138,8 @@ func NewManager(c *Config) (*Manager, error) {
 		// those sessions having either will delay or expire are created with and timer started
 		err = m.persistence.LoadForEach(m, context)
 
-		uiprogress.Stop()
+		context.bar.Finish()
+		fmt.Printf("\n")
 
 		if err != nil {
 			return nil, err
@@ -248,7 +246,7 @@ func (m *Manager) LoadSession(context interface{}, id []byte, state *persistence
 	sID := string(id)
 	ctx := context.(*loadContext)
 
-	defer ctx.bar.Incr()
+	defer ctx.bar.Add(1)
 
 	if len(state.Errors) != 0 {
 		m.log.Error("Session load", zap.String("ClientID", sID), zap.Errors("errors", state.Errors))
