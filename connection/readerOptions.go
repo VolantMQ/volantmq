@@ -1,6 +1,7 @@
 package connection
 
 import (
+	"bufio"
 	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
@@ -36,6 +37,7 @@ func rdProcessIncoming(val signalIncoming) readerOption {
 func rdConn(val transport.Conn) readerOption {
 	return func(t *reader) error {
 		t.conn = val
+		t.buf = bufio.NewReader(t.conn)
 		return nil
 	}
 }

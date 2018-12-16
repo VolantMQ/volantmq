@@ -14,6 +14,7 @@ import (
 
 type reader struct {
 	conn              transport.Conn
+	buf               *bufio.Reader
 	connect           chan interface{}
 	onConnectionClose signalConnectionClose
 	processIncoming   signalIncoming
@@ -65,23 +66,8 @@ func (s *reader) routine() {
 		s.onConnectionClose(err)
 	}()
 
-	buf := bufio.NewReader(s.conn)
-
 	for {
-		var pkt mqttp.IFace
-
-		if s.keepAlive.Nanoseconds() > 0 {
-			if err = s.conn.SetReadDeadline(time.Now().Add(s.keepAlive)); err != nil {
-				return
-			}
-		}
-
-		if pkt, err = s.readPacket(buf); err != nil {
-			return
-		}
-
-		s.metric.Received(pkt.Type())
-		if err = s.processIncoming(pkt); err != nil {
+		if err = s.readAndProcess(); err != nil {
 			return
 		}
 	}
@@ -89,27 +75,29 @@ func (s *reader) routine() {
 
 func (s *reader) connectionRoutine() {
 	defer s.connWg.Done()
-
-	if s.keepAlive.Nanoseconds() > 0 {
-		if err := s.conn.SetReadDeadline(time.Now().Add(s.keepAlive)); err != nil {
-			s.connect <- err
-			return
-		}
-	}
-
-	buf := bufio.NewReader(s.conn)
-
-	if pkt, err := s.readPacket(buf); err == nil {
-		s.metric.Received(pkt.Type())
-		err = s.processIncoming(pkt)
-	} else {
+	if err := s.readAndProcess(); err != nil {
 		s.connect <- err
 	}
 }
 
-func (s *reader) readPacket(buf *bufio.Reader) (mqttp.IFace, error) {
+func (s *reader) readAndProcess() (err error) {
+	if s.keepAlive.Nanoseconds() > 0 {
+		if err := s.conn.SetReadDeadline(time.Now().Add(s.keepAlive)); err != nil {
+			return err
+		}
+	}
+	var pkt mqttp.IFace
+	if pkt, err = s.readPacket(); err == nil {
+		s.metric.Received(pkt.Type())
+		err = s.processIncoming(pkt)
+	}
+	return
+}
+
+func (s *reader) readPacket() (mqttp.IFace, error) {
 	var err error
 
+	buf := s.buf
 	// fixme(troian) think to optimize it
 	if len(s.recv) == 0 {
 		var header []byte
