@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/plugin/auth"
+	vlauth "github.com/VolantMQ/vlapi/plugin/auth"
 	"github.com/VolantMQ/vlapi/plugin/persistence"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/systree"
@@ -809,6 +809,7 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 			err = mqttp.CodeReceiveMaximumExceeded
 			break
 		}
+		s.rxQuota--
 
 		r := mqttp.NewPubAck(s.version)
 
@@ -847,6 +848,7 @@ func (s *impl) onAck(pkt mqttp.IFace) (mqttp.IFace, error) {
 		case mqttp.PUBACK:
 			// remote acknowledged PUBLISH QoS 1 message sent by this server
 			s.tx.pubOut.release(pkt)
+			s.rxQuota++
 		case mqttp.PUBREC:
 			// remote received PUBLISH message sent by this server
 			s.tx.pubOut.release(pkt)
