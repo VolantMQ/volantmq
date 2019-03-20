@@ -9,7 +9,6 @@ import (
 )
 
 var (
-	// errExit          = errors.New("exit")
 	errQuotaExceeded = errors.New("quota exceeded")
 )
 
@@ -20,7 +19,7 @@ type flow struct {
 }
 
 func (s *flow) reAcquire(id mqttp.IDType) error {
-	if atomic.AddInt32(&s.quota, -1) == 0 {
+	if atomicDecNZ(&s.quota) == 0 {
 		return errQuotaExceeded
 	}
 
@@ -30,11 +29,10 @@ func (s *flow) reAcquire(id mqttp.IDType) error {
 }
 
 func (s *flow) acquire() (mqttp.IDType, error) {
-	if atomic.LoadInt32(&s.quota) == 0 {
+	if atomicDecNZ(&s.quota) == 0 {
 		return mqttp.IDType(0), errQuotaExceeded
 	}
 
-	atomic.AddInt32(&s.quota, -1)
 	var id mqttp.IDType
 
 	for count := 0; count <= 0xFFFF; count++ {
@@ -62,4 +60,21 @@ func (s *flow) release(id mqttp.IDType) bool {
 
 func (s *flow) quotaAvailable() bool {
 	return atomic.LoadInt32(&s.quota) > 0
+}
+
+func atomicDecNZ(val *int32) int32 {
+	var prev int32
+	for {
+		prev = atomic.LoadInt32(val)
+
+		if prev == 0 {
+			return 0
+		}
+
+		if atomic.CompareAndSwapInt32(val, prev, prev-1) {
+			break
+		}
+	}
+
+	return prev
 }
