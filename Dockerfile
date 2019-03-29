@@ -17,7 +17,7 @@ RUN mkdir -p $VOLANTMQ_PLUGINS_DIR
 ENV PATH $VOLANTMQ_WORK_DIR/bin:$PATH
 
 # install dep tool
-RUN curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
+RUN go get -u github.com/golang/dep/cmd/dep
 
 # build server
 RUN \
