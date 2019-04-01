@@ -1,0 +1,8 @@
+#!/bin/bash
+# thanks https://stackoverflow.com/questions/54578066/how-to-build-a-docker-image-on-a-specific-architecture-with-docker-hub
+docker build \
+    --file "${DOCKERFILE_PATH}" \
+    --build-arg BUILD_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+    --build-arg VCS_REF="$(git rev-parse --short HEAD)" \
+    --tag "$IMAGE_NAME" \
+    .
