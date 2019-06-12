@@ -44,7 +44,6 @@ docker run --rm -p 1883:1883 -p 8080:8080 -v $(pwd)/examples/config.yaml:/etc/vo
 - In example above port 1883 is mqtt listener with default user/password testuser/testpassword
 - Port 8080 exposes healthcheck endpoints as well as pprof at http://localhost:8080/debug/pprof
 
-#### 
 ### [Contributing guidelines](https://github.com/volantmq/volantmq/blob/master/CONTRIBUTING.md)
 
 ### Credits
