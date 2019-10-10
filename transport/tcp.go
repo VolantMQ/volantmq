@@ -5,8 +5,9 @@ import (
 	"net"
 	"time"
 
-	"github.com/VolantMQ/volantmq/types"
 	"go.uber.org/zap"
+
+	"github.com/VolantMQ/volantmq/types"
 
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/systree"
@@ -96,7 +97,7 @@ func (l *tcp) Close() error {
 }
 
 func (l *tcp) newConn(cn net.Conn, stat systree.BytesMetric) (Conn, error) {
-	c, err := newConn(l.EPoll, cn, stat)
+	c, err := newConn(cn, stat)
 	if err != nil {
 		return nil, err
 	}

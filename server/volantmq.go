@@ -7,19 +7,19 @@ import (
 	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/plugin"
-	"github.com/VolantMQ/vlapi/plugin/persistence"
-	"github.com/VolantMQ/vlapi/subscriber"
+	"github.com/VolantMQ/vlapi/vlplugin"
+	"github.com/VolantMQ/vlapi/vlplugin/vlpersistence"
+	"github.com/VolantMQ/vlapi/vlsubscriber"
+	"github.com/troian/healthcheck"
+	"go.uber.org/zap"
+
 	"github.com/VolantMQ/volantmq/clients"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/topics"
-	"github.com/VolantMQ/volantmq/topics/types"
+	topicsTypes "github.com/VolantMQ/volantmq/topics/types"
 	"github.com/VolantMQ/volantmq/transport"
 	"github.com/VolantMQ/volantmq/types"
-	"github.com/troian/easygo/netpoll"
-	"github.com/troian/healthcheck"
-	"go.uber.org/zap"
 )
 
 var (
@@ -40,7 +40,7 @@ type Config struct {
 	Acceptor configuration.AcceptorConfig
 
 	// Configuration of persistence provider
-	Persistence persistence.IFace
+	Persistence vlpersistence.IFace
 
 	// OnDuplicate notify if there is attempt connect client with id that already exists and active
 	// If not not set than defaults to mock function
@@ -80,9 +80,9 @@ type server struct {
 	quit        chan struct{}
 	lock        sync.Mutex
 	onClose     sync.Once
-	ePoll       netpoll.EventPoll
-	acceptPool  types.Pool
-	transports  struct {
+	// ePoll       netpoll.EventPoll
+	acceptPool types.Pool
+	transports struct {
 		list map[string]transport.Provider
 		wg   sync.WaitGroup
 	}
@@ -118,10 +118,11 @@ func NewServer(config Config) (Server, error) {
 		return nil, errors.New("persistence provider cannot be nil")
 	}
 
-	var persisRetained persistence.Retained
+	var persisRetained vlpersistence.Retained
 	var retains []types.RetainObject
 
 	if s.sysTree, retains, s.systree.publishes, err = systree.NewTree("$SYS/servers/" + s.NodeName); err != nil {
+		s.log.Errorf("cannot create systree")
 		return nil, err
 	}
 
@@ -134,6 +135,7 @@ func NewServer(config Config) (Server, error) {
 	topicsConfig.OverlappingSubscriptions = s.MQTT.Options.SubsOverlap
 
 	if s.topicsMgr, err = topics.New(topicsConfig); err != nil {
+		s.log.Errorf("cannot create topics")
 		return nil, err
 	}
 
@@ -142,6 +144,7 @@ func NewServer(config Config) (Server, error) {
 
 		for _, o := range retains {
 			if err = s.topicsMgr.Retain(o); err != nil {
+				s.log.Errorf("cannot start retain")
 				return nil, err
 			}
 		}
@@ -153,9 +156,10 @@ func NewServer(config Config) (Server, error) {
 		}
 	}
 
-	if s.ePoll, err = netpoll.New(nil); err != nil {
-		return nil, err
-	}
+	// if s.ePoll, err = netpoll.New(nil); err != nil {
+	// 	s.log.Errorf("cannot create netpoll")
+	// 	return nil, err
+	// }
 
 	s.acceptPool = types.NewPool(s.Config.Acceptor.MaxIncoming, 1, s.Config.Acceptor.PreSpawn)
 
@@ -169,6 +173,7 @@ func NewServer(config Config) (Server, error) {
 	}
 
 	if s.sessionsMgr, err = clients.NewManager(mConfig); err != nil {
+		s.log.Errorf("cannot create client manager")
 		return nil, err
 	}
 
@@ -187,8 +192,8 @@ func (s *server) ListenAndServe(config interface{}) error {
 	var err error
 
 	internalConfig := transport.InternalConfig{
-		Handler:    s.sessionsMgr,
-		EPoll:      s.ePoll,
+		Handler: s.sessionsMgr,
+		// EPoll:      s.ePoll,
 		AcceptPool: s.acceptPool,
 		Metric:     s.sysTree.Metric(),
 	}
@@ -211,7 +216,7 @@ func (s *server) ListenAndServe(config interface{}) error {
 	s.lock.Lock()
 
 	if _, ok := s.transports.list[l.Port()]; ok {
-		l.Close() // nolint: errcheck
+		_ = l.Close() // nolint: errcheck
 		return errors.New("already exists")
 	}
 
@@ -224,7 +229,7 @@ func (s *server) ListenAndServe(config interface{}) error {
 
 		status := "stopped"
 
-		s.Health.AddReadinessCheck("listener:"+l.Port(), func() error {
+		_ = s.Health.AddReadinessCheck("listener:"+l.Port(), func() error {
 			if e := l.Ready(); e != nil {
 				return e
 			}
@@ -232,7 +237,7 @@ func (s *server) ListenAndServe(config interface{}) error {
 			return healthcheck.TCPDialCheck(":"+l.Port(), 1*time.Second)()
 		})
 
-		s.Health.AddLivenessCheck("listener:"+l.Port(), func() error {
+		_ = s.Health.AddLivenessCheck("listener:"+l.Port(), func() error {
 			if e := l.Alive(); e != nil {
 				return e
 			}
@@ -275,7 +280,7 @@ func (s *server) Shutdown() error {
 			delete(s.transports.list, port)
 		}
 
-		s.sessionsMgr.Stop() // nolint: errcheck, gas
+		_ = s.sessionsMgr.Stop() // nolint: errcheck, gas
 
 		// shutdown systree updater
 		if s.systree.timer != nil {
@@ -291,7 +296,7 @@ func (s *server) Shutdown() error {
 			s.log.Error("stop topics manager manager", zap.Error(err))
 		}
 
-		s.acceptPool.Close()
+		_ = s.acceptPool.Close()
 	})
 
 	return nil
@@ -309,9 +314,9 @@ func (s *server) systreeUpdater() {
 			pkt := mqttp.NewPublish(mqttp.ProtocolV311)
 
 			pkt.SetPayload(p.Payload())
-			pkt.SetTopic(p.Topic())  // nolint: errcheck
-			pkt.SetQoS(p.QoS())      // nolint: errcheck
-			s.topicsMgr.Publish(pkt) // nolint: errcheck
+			_ = pkt.SetTopic(p.Topic())  // nolint: errcheck
+			_ = pkt.SetQoS(p.QoS())      // nolint: errcheck
+			_ = s.topicsMgr.Publish(pkt) // nolint: errcheck
 		}
 	case <-s.quit:
 		return

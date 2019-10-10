@@ -4,9 +4,10 @@ import (
 	"strings"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/subscriber"
+	"github.com/VolantMQ/vlapi/vlsubscriber"
+
 	"github.com/VolantMQ/volantmq/systree"
-	"github.com/VolantMQ/volantmq/topics/types"
+	topicsTypes "github.com/VolantMQ/volantmq/topics/types"
 	"github.com/VolantMQ/volantmq/types"
 )
 
@@ -289,6 +290,8 @@ func (sn *node) getRetained(retained *[]*mqttp.Publish) {
 			p = t
 		case systree.DynamicValue:
 			p = t.Retained()
+		default:
+			panic("unknown retained type")
 		}
 
 		// if publish has expiration set check if there time left to live

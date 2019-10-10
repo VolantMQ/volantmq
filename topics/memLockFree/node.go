@@ -6,9 +6,10 @@ import (
 	"sync/atomic"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/subscriber"
+	"github.com/VolantMQ/vlapi/vlsubscriber"
+
 	"github.com/VolantMQ/volantmq/systree"
-	"github.com/VolantMQ/volantmq/topics/types"
+	topicsTypes "github.com/VolantMQ/volantmq/topics/types"
 	"github.com/VolantMQ/volantmq/types"
 )
 
@@ -118,12 +119,12 @@ func (mT *provider) leafSearchNode(levels []string) *node {
 func (mT *provider) subscriptionInsert(filter string, sub topicsTypes.Subscriber, p *vlsubscriber.SubscriptionParams) bool {
 	levels := strings.Split(filter, "/")
 
-	root := mT.leafInsertNode(levels)
+	leaf := mT.leafInsertNode(levels)
 
 	// Let's see if the subscriber is already on the list and just update QoS if so
 	// Otherwise create new entry
-	if s, ok := root.subs.LoadOrStore(sub.Hash(), &topicSubscriber{s: sub, p: p}); ok {
-		atomic.AddInt32(&root.subsCount, -1)
+	if s, ok := leaf.subs.LoadOrStore(sub.Hash(), &topicSubscriber{s: sub, p: p}); ok {
+		atomic.AddInt32(&leaf.subsCount, 1)
 		ts := s.(*topicSubscriber)
 		if ok {
 			ts.Lock()
@@ -142,8 +143,8 @@ func (mT *provider) subscriptionRemove(topic string, sub topicsTypes.Subscriber)
 
 	var err error
 
-	root := mT.leafSearchNode(levels)
-	if root == nil {
+	leaf := mT.leafSearchNode(levels)
+	if leaf == nil {
 		return topicsTypes.ErrNotFound
 	}
 
@@ -152,21 +153,21 @@ func (mT *provider) subscriptionRemove(topic string, sub topicsTypes.Subscriber)
 	// otherwise try remove subscriber or set error if not exists
 	if sub == nil {
 		// If subscriber == nil, then it's signal to remove ALL subscribers
-		root.subs.Range(func(key, value interface{}) bool {
-			atomic.AddInt32(&root.subsCount, -1)
-			root.subs.Delete(key)
+		leaf.subs.Range(func(key, value interface{}) bool {
+			atomic.AddInt32(&leaf.subsCount, -1)
+			leaf.subs.Delete(key)
 			return true
 		})
 	} else {
-		if _, ok := root.subs.Load(sub.Hash()); !ok {
+		if _, ok := leaf.subs.Load(sub.Hash()); !ok {
 			err = topicsTypes.ErrNotFound
 		} else {
-			atomic.AddInt32(&root.subsCount, -1)
-			root.subs.Delete(sub.Hash())
+			atomic.AddInt32(&leaf.subsCount, -1)
+			leaf.subs.Delete(sub.Hash())
 		}
 	}
 
-	mT.nodesCleanup(root, levels)
+	mT.nodesCleanup(leaf, levels)
 
 	return err
 }
@@ -328,6 +329,8 @@ func (sn *node) getRetained(retained *[]*mqttp.Publish) {
 			p = t
 		case systree.DynamicValue:
 			p = t.Retained()
+		default:
+			panic("unknown retain type")
 		}
 
 		// if publish has expiration set check if there time left to live
@@ -364,10 +367,12 @@ func overlappingSubscribers(sn *node, publishID uintptr, p *publishes) {
 				s[0].qos = sub.p.Granted
 			}
 		} else {
+			sub.RLock()
 			if !sub.p.Ops.NL() || id != publishID {
 				pe := sub.acquire()
 				(*p)[id] = append((*p)[id], pe)
 			}
+			sub.RUnlock()
 		}
 
 		return true

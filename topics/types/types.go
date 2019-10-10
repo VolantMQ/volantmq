@@ -5,7 +5,8 @@ import (
 	"regexp"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/subscriber"
+	"github.com/VolantMQ/vlapi/vlsubscriber"
+
 	"github.com/VolantMQ/volantmq/types"
 )
 
@@ -29,9 +30,9 @@ var (
 )
 
 var (
-	//ErrInvalidConnectionType = errors.New("invalid connection type")
-	////ErrInvalidSubscriber      error = errors.New("service: Invalid subscriber")
-	//ErrBufferNotReady = errors.New("buffer is not ready")
+	// ErrInvalidConnectionType = errors.New("invalid connection type")
+	// //ErrInvalidSubscriber      error = errors.New("service: Invalid subscriber")
+	// ErrBufferNotReady = errors.New("buffer is not ready")
 
 	// ErrInvalidArgs invalid arguments provided
 	ErrInvalidArgs = errors.New("topics: invalid arguments")
@@ -63,8 +64,8 @@ type Subscribers []Subscriber
 // SubscriberInterface used by subscriber to handle messages
 type SubscriberInterface interface {
 	Publish(interface{}) error
-	Subscribe(SubscribeReq) error
-	UnSubscribe(UnSubscribeReq) error
+	Subscribe(SubscribeReq) SubscribeResp
+	UnSubscribe(UnSubscribeReq) UnSubscribeResp
 	Retain(types.RetainObject) error
 	Retained(string) ([]*mqttp.Publish, error)
 }
@@ -79,7 +80,7 @@ type SubscribeReq struct {
 	Filter string
 	S      Subscriber
 	Params *vlsubscriber.SubscriptionParams
-	Chan   chan<- SubscribeResp
+	Chan   chan SubscribeResp
 }
 
 type SubscribeResp struct {
@@ -91,7 +92,7 @@ type SubscribeResp struct {
 type UnSubscribeReq struct {
 	Filter string
 	S      Subscriber
-	Chan   chan<- UnSubscribeResp
+	Chan   chan UnSubscribeResp
 }
 
 type UnSubscribeResp struct {

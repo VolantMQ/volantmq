@@ -1,24 +1,22 @@
 language: go
 go:
-  - "1.11.1"
+  - "1.13"
 sudo: false
 notifications:
   email: false
 os:
   - linux
+  - osx
 before_install:
   - npm install -g codeclimate-test-reporter
-  - go get -u gopkg.in/alecthomas/gometalinter.v2
-  - gometalinter.v2 --install
-  - curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
+  - curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh| sh -s -- -b $(go env GOPATH)/bin v1.18.0
+install:
+  - go mod tidy
 jobs:
   include:
     - stage: test
-      install:
-        - dep ensure
       script:
         - go build -race -v -gcflags "-N -l" .
-        #- gometalinter --fast --exclude=corefoundation.go --deadline=360s --enable-gc --sort=path --cyclo-over=40 --dupl-threshold=100 --disable=gotype --vendor --enable=goimports ./...
         - ./go.test.sh
       after_success:
         - bash <(curl -s https://codecov.io/bash)

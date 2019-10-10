@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/VolantMQ/vlapi/plugin/auth"
+	"github.com/VolantMQ/vlapi/vlplugin/vlauth"
 )
 
 // Manager auth

@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/plugin/persistence"
+	"github.com/VolantMQ/vlapi/vlplugin/vlpersistence"
+	"github.com/pkg/errors"
+	"go.uber.org/zap"
+
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/transport"
 	"github.com/VolantMQ/volantmq/types"
-	"github.com/pkg/errors"
-	"go.uber.org/zap"
 )
 
 const maxPacketCount = 0xFFFF
@@ -26,7 +27,7 @@ type writer struct {
 	onConnectionClose signalConnectionClose
 	conn              transport.Conn
 	metric            systree.PacketsMetric
-	persist           persistence.Packets
+	persist           vlpersistence.Packets
 	flow              flow
 	pubOut            ackQueue
 	gMessages         *types.Queue
@@ -99,27 +100,31 @@ func (s *writer) start(start bool) {
 				packets: s.qos12Messages,
 			}
 
-			s.persist.PacketsForEachUnAck([]byte(s.id), ctx, s.packetLoader)
+			if err := s.persist.PacketsForEachUnAck([]byte(s.id), ctx, s.packetLoader); err != nil {
+				s.log.Errorf("load unacknowleded packets")
+			}
 
 			ctx.unAck = false
 
 			ctx.count = s.qos12Messages.Length()
 
-			if ctx.count > 0 {
-				s.persist.PacketsForEachQoS12([]byte(s.id), ctx, s.packetLoader)
+			if err := s.persist.PacketsForEachQoS12([]byte(s.id), ctx, s.packetLoader); err != nil {
+				s.log.Errorf("load QoS12 packets")
 			}
 
 			ctx.packets = s.qos0Messages
 			ctx.count = s.qos0Messages.Length()
 
-			s.persist.PacketsForEachQoS0([]byte(s.id), ctx, s.packetLoader)
+			if err := s.persist.PacketsForEachQoS0([]byte(s.id), ctx, s.packetLoader); err != nil {
+				s.log.Errorf("load QoS0 packets")
+			}
 
 			s.signalAndRun()
 		}
 	})
 }
 
-func (s *writer) packetLoader(c interface{}, entry *persistence.PersistedPacket) (bool, error) {
+func (s *writer) packetLoader(c interface{}, entry *vlpersistence.PersistedPacket) (bool, error) {
 	ctx := c.(*packetLoaderCtx)
 
 	var e error
@@ -134,10 +139,14 @@ func (s *writer) packetLoader(c interface{}, entry *persistence.PersistedPacket)
 		switch p := pkt.(type) {
 		case *mqttp.Publish:
 			id, _ := p.ID()
-			s.flow.reAcquire(id)
+			if e = s.flow.reAcquire(id); e != nil {
+				s.log.Errorf("%s reacquire id for persisted packet", s.id)
+			}
 		case *mqttp.Ack:
 			id, _ := p.ID()
-			s.flow.reAcquire(id)
+			if e = s.flow.reAcquire(id); e != nil {
+				s.log.Errorf("%s reacquire id for persisted packet", s.id)
+			}
 		}
 	} else if p, ok := pkt.(*mqttp.Publish); ok {
 		if len(entry.ExpireAt) > 0 {
@@ -179,9 +188,8 @@ func (s *writer) send(pkt mqttp.IFace) {
 		return
 	}
 
-	switch pkt.Type() {
-	case mqttp.PUBLISH:
-		p := pkt.(*mqttp.Publish)
+	switch p := pkt.(type) {
+	case *mqttp.Publish:
 		if p.QoS() == mqttp.QoS0 {
 			s.sendQoS0(pkt)
 		} else {
@@ -278,10 +286,10 @@ func (s *writer) qos12PopPacket() mqttp.IFace {
 
 			m.SetPacketID(id)
 			pkt = m
-		case *unacknowledged:
+		case *mqttp.Ack:
 			pkt = m
 		default:
-			s.log.Panic("unexpected type")
+			s.log.Panic("unexpected type", zap.String("type", reflect.TypeOf(value).String()))
 		}
 
 		s.pubOut.store(pkt)
@@ -309,7 +317,7 @@ func (s *writer) routine() {
 		atomic.StoreUint32(&s.running, 0)
 
 		if err == nil && s.isAlive() {
-			wr.Flush()
+			_ = wr.Flush()
 		}
 
 		if err == nil {
@@ -344,6 +352,8 @@ func (s *writer) routine() {
 						s.setTopicAlias(pack)
 					}
 				}
+
+				p.SetVersion(s.version)
 
 				if buf, e := mqttp.Encode(p); e != nil {
 					s.log.Error("packet encode", zap.String("ClientID", s.id), zap.Error(err))
@@ -408,7 +418,7 @@ func (s *writer) setTopicAlias(pkt *mqttp.Publish) {
 		}
 
 		if err := pkt.PropertySet(mqttp.PropertyTopicAlias, alias); err == nil && exists {
-			pkt.SetTopic("") // nolint: errcheck
+			_ = pkt.SetTopic("")
 		}
 	}
 }
@@ -458,8 +468,8 @@ func (s *writer) onReleaseOut(o, n mqttp.IFace) {
 	}
 }
 
-func (s *writer) encodeForPersistence(pkt mqttp.IFace) *persistence.PersistedPacket {
-	pPkt := &persistence.PersistedPacket{}
+func (s *writer) encodeForPersistence(pkt mqttp.IFace) *vlpersistence.PersistedPacket {
+	pPkt := &vlpersistence.PersistedPacket{}
 
 	switch tp := pkt.(type) {
 	case *mqttp.Publish:
@@ -491,12 +501,12 @@ func (s *writer) encodeForPersistence(pkt mqttp.IFace) *persistence.PersistedPac
 	return nil
 }
 
-func (s *writer) getQueuedPackets() persistence.PersistedPackets {
-	var packets persistence.PersistedPackets
+func (s *writer) getQueuedPackets() vlpersistence.PersistedPackets {
+	var packets vlpersistence.PersistedPackets
 
-	packetEncode := func(p interface{}) *persistence.PersistedPacket {
+	packetEncode := func(p interface{}) *vlpersistence.PersistedPacket {
 		var pkt mqttp.IFace
-		pPkt := &persistence.PersistedPacket{}
+		pPkt := &vlpersistence.PersistedPacket{}
 
 		switch tp := p.(type) {
 		case *mqttp.Publish:

@@ -7,9 +7,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/subscriber"
+	"github.com/VolantMQ/vlapi/vlsubscriber"
+
 	"github.com/VolantMQ/volantmq/configuration"
-	"github.com/VolantMQ/volantmq/topics/types"
+	topicsTypes "github.com/VolantMQ/volantmq/topics/types"
 )
 
 // Config subscriber config options
@@ -87,15 +88,12 @@ func (s *Type) Subscriptions() vlsubscriber.Subscriptions {
 
 // Subscribe to given topic
 func (s *Type) Subscribe(topic string, params *vlsubscriber.SubscriptionParams) ([]*mqttp.Publish, error) {
-
-	s.Topics.Subscribe(topicsTypes.SubscribeReq{
+	resp := s.Topics.Subscribe(topicsTypes.SubscribeReq{
 		Filter: topic,
 		Params: params,
 		S:      s,
 		Chan:   s.subSignal,
 	})
-
-	resp := <-s.subSignal
 
 	if resp.Err != nil {
 		return []*mqttp.Publish{}, resp.Err
@@ -110,13 +108,11 @@ func (s *Type) Subscribe(topic string, params *vlsubscriber.SubscriptionParams) 
 
 // UnSubscribe from given topic
 func (s *Type) UnSubscribe(topic string) error {
-	s.Topics.UnSubscribe(topicsTypes.UnSubscribeReq{
+	resp := s.Topics.UnSubscribe(topicsTypes.UnSubscribeReq{
 		Filter: topic,
 		S:      s,
 		Chan:   s.unSubSignal,
 	})
-
-	resp := <-s.unSubSignal
 
 	delete(s.subscriptions, topic)
 
@@ -154,7 +150,7 @@ func (s *Type) Publish(p *mqttp.Publish, grantedQoS mqttp.QosType, ops mqttp.Sub
 	// Client, so that Client might receive duplicate copies of the Message.
 	case mqttp.QoS1:
 		if pkt.QoS() == mqttp.QoS2 {
-			pkt.SetQoS(mqttp.QoS1) // nolint: errcheck
+			_ = pkt.SetQoS(mqttp.QoS1) // nolint: errcheck
 		}
 
 		// If the subscribing Client has been granted maximum QoS 0, then an Application Message
@@ -185,7 +181,9 @@ func (s *Type) Offline(shutdown bool) {
 	// if session is clean then remove all remaining subscriptions
 	if shutdown {
 		for topic := range s.subscriptions {
-			s.UnSubscribe(topic)
+			if err := s.UnSubscribe(topic); err != nil {
+				s.log.Debugf("[clientId: %s] topic: %s: %s", s.ID, topic, err.Error())
+			}
 		}
 
 		s.access.Wait()

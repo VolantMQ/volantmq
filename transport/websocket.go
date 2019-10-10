@@ -135,7 +135,7 @@ func (l *httpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (l *ws) newConn(cn net.Conn, stat systree.BytesMetric) (Conn, error) {
-	wr, err := newConn(l.EPoll, cn, stat)
+	wr, err := newConn(cn, stat)
 	if err != nil {
 		return nil, err
 	}

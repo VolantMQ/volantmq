@@ -19,20 +19,21 @@ import (
 	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/plugin/persistence"
-	"github.com/VolantMQ/vlapi/subscriber"
+	"github.com/VolantMQ/vlapi/vlplugin/vlpersistence"
+	"github.com/VolantMQ/vlapi/vlsubscriber"
+	"go.uber.org/zap"
+
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/systree"
-	"github.com/VolantMQ/volantmq/topics/types"
+	topicsTypes "github.com/VolantMQ/volantmq/topics/types"
 	"github.com/VolantMQ/volantmq/types"
-	"go.uber.org/zap"
 )
 
 type provider struct {
 	smu                sync.RWMutex
 	root               *node
 	stat               systree.TopicsStat
-	persist            persistence.Retained
+	persist            vlpersistence.Retained
 	log                *zap.SugaredLogger
 	onCleanUnsubscribe func([]string)
 	wgPublisher        sync.WaitGroup
@@ -66,7 +67,7 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 
 	if p.persist != nil {
 		entries, err := p.persist.Load()
-		if err != nil && err != persistence.ErrNotFound {
+		if err != nil && err != vlpersistence.ErrNotFound {
 			return nil, err
 		}
 
@@ -86,7 +87,7 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 							p.log.Error("Decode publish expire at", zap.Error(err))
 						}
 					}
-					p.Retain(m) // nolint: errcheck
+					_ = p.Retain(m) // nolint: errcheck
 				} else {
 					p.log.Warn("Unsupported retained message type", zap.String("type", m.Type().Name()))
 				}
@@ -120,16 +121,42 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 	return p, nil
 }
 
-func (mT *provider) Subscribe(req topicsTypes.SubscribeReq) error {
+func (mT *provider) Subscribe(req topicsTypes.SubscribeReq) topicsTypes.SubscribeResp {
+	cAllocated := false
+
+	if req.Chan == nil {
+		cAllocated = true
+		req.Chan = make(chan topicsTypes.SubscribeResp)
+	}
+
 	mT.subIn <- req
 
-	return nil
+	resp := <-req.Chan
+
+	if cAllocated {
+		close(req.Chan)
+	}
+
+	return resp
 }
 
-func (mT *provider) UnSubscribe(req topicsTypes.UnSubscribeReq) error {
+func (mT *provider) UnSubscribe(req topicsTypes.UnSubscribeReq) topicsTypes.UnSubscribeResp {
+	cAllocated := false
+
+	if req.Chan == nil {
+		cAllocated = true
+		req.Chan = make(chan topicsTypes.UnSubscribeResp)
+	}
+
 	mT.unSubIn <- req
 
-	return nil
+	resp := <-req.Chan
+
+	if cAllocated {
+		close(req.Chan)
+	}
+
+	return resp
 }
 
 func (mT *provider) subscribe(filter string, s topicsTypes.Subscriber, p *vlsubscriber.SubscriptionParams) ([]*mqttp.Publish, error) {
@@ -207,7 +234,7 @@ func (mT *provider) Shutdown() error {
 		mT.retainSearch("#", &res)
 		mT.retainSearch("/#", &res)
 
-		var encoded []*persistence.PersistedPacket
+		var encoded []*vlpersistence.PersistedPacket
 
 		for _, pkt := range res {
 			// Discard retained expired and QoS0 messages
@@ -215,7 +242,7 @@ func (mT *provider) Shutdown() error {
 				if buf, err := mqttp.Encode(pkt); err != nil {
 					mT.log.Error("Couldn't encode retained message", zap.Error(err))
 				} else {
-					entry := &persistence.PersistedPacket{
+					entry := &vlpersistence.PersistedPacket{
 						Data: buf,
 					}
 					if !expireAt.IsZero() {
@@ -246,7 +273,7 @@ func (mT *provider) retain(obj types.RetainObject) {
 	case *mqttp.Publish:
 		// [MQTT-3.3.1-10]            [MQTT-3.3.1-7]
 		if len(t.Payload()) == 0 || t.QoS() == mqttp.QoS0 {
-			mT.retainRemove(obj.Topic()) // nolint: errcheck
+			_ = mT.retainRemove(obj.Topic()) // nolint: errcheck
 			if len(t.Payload()) == 0 {
 				insert = false
 			}
