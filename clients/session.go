@@ -5,13 +5,14 @@ import (
 	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/plugin/auth"
-	"github.com/VolantMQ/vlapi/plugin/persistence"
-	"github.com/VolantMQ/vlapi/subscriber"
+	"github.com/VolantMQ/vlapi/vlplugin/vlauth"
+	"github.com/VolantMQ/vlapi/vlplugin/vlpersistence"
+	"github.com/VolantMQ/vlapi/vlsubscriber"
+	"go.uber.org/zap"
+
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/connection"
 	"github.com/VolantMQ/volantmq/types"
-	"go.uber.org/zap"
 )
 
 type sessionEvents interface {
@@ -25,7 +26,7 @@ type sessionPreConfig struct {
 	createdAt   time.Time
 	messenger   types.TopicMessenger
 	conn        connection.Session
-	persistence persistence.Packets
+	persistence vlpersistence.Packets
 	permissions vlauth.Permissions
 	username    string
 }
@@ -58,10 +59,10 @@ func newSession(c sessionPreConfig) *session {
 	return s
 }
 
-func (s *session) configure(c sessionConfig) {
+func (s *session) configure(c sessionConfig) error {
 	s.sessionConfig = c
 
-	s.conn.SetOptions(connection.AttachSession(s))
+	return s.conn.SetOptions(connection.AttachSession(s))
 }
 
 func (s *session) start() {
@@ -149,7 +150,7 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 				Ops: t.Ops(),
 			}
 
-			if retained, e := s.subscriber.Subscribe(t.Filter(), &params); e != nil {
+			if retained, ee := s.subscriber.Subscribe(t.Filter(), &params); ee != nil {
 				reason = mqttp.QosFailure
 			} else {
 				reason = mqttp.ReasonCode(params.Granted)
@@ -182,6 +183,16 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 		}
 	}
 
+	if prop := pkt.PropertyGet(mqttp.PropertyUserProperty); prop != nil {
+		if vl, e := prop.AsStringPair(); e == nil {
+			_ = resp.PropertySet(mqttp.PropertyUserProperty, vl)
+		}
+
+		if vl, e := prop.AsStringPairs(); e == nil {
+			_ = resp.PropertySet(mqttp.PropertyUserProperty, vl)
+		}
+	}
+
 	return resp, nil
 }
 
@@ -189,7 +200,7 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 func (s *session) SignalUnSubscribe(pkt *mqttp.UnSubscribe) (mqttp.IFace, error) {
 	var retCodes []mqttp.ReasonCode
 
-	pkt.ForEachTopic(func(t *mqttp.Topic) error {
+	_ = pkt.ForEachTopic(func(t *mqttp.Topic) error {
 		reason := mqttp.CodeSuccess
 		if e := s.permissions.ACL(s.id, s.username, t.Full(), vlauth.AccessRead); e == vlauth.StatusAllow {
 			if e = s.subscriber.UnSubscribe(t.Full()); e != nil {
@@ -216,6 +227,16 @@ func (s *session) SignalUnSubscribe(pkt *mqttp.UnSubscribe) (mqttp.IFace, error)
 	resp.SetPacketID(id)
 	if err := resp.AddReturnCodes(retCodes); err != nil {
 		s.log.Error("unsubscribe set return codes", zap.String("clientId", s.id), zap.Error(err))
+	}
+
+	if prop := pkt.PropertyGet(mqttp.PropertyUserProperty); prop != nil {
+		if vl, err := prop.AsStringPair(); err == nil {
+			_ = resp.PropertySet(mqttp.PropertyUserProperty, vl)
+		}
+
+		if vl, err := prop.AsStringPairs(); err == nil {
+			_ = resp.PropertySet(mqttp.PropertyUserProperty, vl)
+		}
 	}
 
 	return resp, nil
@@ -267,7 +288,7 @@ func (s *session) SignalOffline() {
 func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 	// If session expiry is set to 0, the Session ends when the Network Connection is closed
 	if s.expireIn != nil && *s.expireIn == 0 {
-		s.durable = true
+		s.durable = false
 	}
 
 	// valid willMsg pointer tells we have will message
@@ -300,7 +321,7 @@ func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 			s.log.Error("persisting packets", zap.String("clientId", s.id), zap.Error(err))
 		}
 	} else {
-		s.persistence.PacketsDelete([]byte(s.id))
+		_ = s.persistence.PacketsDelete([]byte(s.id))
 	}
 
 	var exp *expiryConfig

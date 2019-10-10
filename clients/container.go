@@ -7,8 +7,6 @@ import (
 	"github.com/VolantMQ/volantmq/subscriber"
 )
 
-var subCount int32 = 0
-
 // container wrap session to reduce resource usage when non clean session is disconnected
 // but has active subscription and/or has expiry set
 type container struct {

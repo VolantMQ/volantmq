@@ -5,8 +5,9 @@ import (
 	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/plugin/auth"
-	"github.com/VolantMQ/vlapi/plugin/persistence"
+	"github.com/VolantMQ/vlapi/vlplugin/vlauth"
+	"github.com/VolantMQ/vlapi/vlplugin/vlpersistence"
+
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/transport"
 )
@@ -31,8 +32,7 @@ func (s *impl) SetOptions(opts ...Option) error {
 // OfflineQoS0 if true QoS0 messages will be persisted when session is offline and durable
 func OfflineQoS0(val bool) Option {
 	return func(t *impl) error {
-		wrOfflineQoS0(val)(t.tx)
-		return nil
+		return wrOfflineQoS0(val)(t.tx)
 	}
 }
 
@@ -40,38 +40,35 @@ func OfflineQoS0(val bool) Option {
 func KeepAlive(val int) Option {
 	return func(t *impl) error {
 		vl := time.Duration(val+(val/2)) * time.Second
-		rdKeepAlive(vl)(t.rx)
-		return nil
+		return rdKeepAlive(vl)(t.rx)
 	}
 }
 
 func Metric(val systree.PacketsMetric) Option {
 	return func(t *impl) error {
 		t.metric = val
-		wrMetric(val)(t.tx)
-		rdMetric(val)(t.rx)
-		return nil
+		if err := wrMetric(val)(t.tx); err != nil {
+			return err
+		}
+		return rdMetric(val)(t.rx)
 	}
 }
 
 func MaxRxPacketSize(val uint32) Option {
 	return func(t *impl) error {
-		rdMaxPacketSize(val)(t.rx)
-		return nil
+		return rdMaxPacketSize(val)(t.rx)
 	}
 }
 
 func MaxTxPacketSize(val uint32) Option {
 	return func(t *impl) error {
-		wrMaxPacketSize(val)(t.tx)
-		return nil
+		return wrMaxPacketSize(val)(t.tx)
 	}
 }
 
 func TxQuota(val int32) Option {
 	return func(t *impl) error {
-		wrQuota(val)(t.tx)
-		return nil
+		return wrQuota(val)(t.tx)
 	}
 }
 
@@ -84,8 +81,7 @@ func RxQuota(val int32) Option {
 
 func MaxTxTopicAlias(val uint16) Option {
 	return func(t *impl) error {
-		wrTopicAliasMax(val)(t.tx)
-		return nil
+		return wrTopicAliasMax(val)(t.tx)
 	}
 }
 
@@ -117,9 +113,10 @@ func NetConn(val transport.Conn) Option {
 		}
 
 		t.conn = val
-		wrConn(val)(t.tx)
-		rdConn(val)(t.rx)
-		return nil
+		if err := wrConn(val)(t.tx); err != nil {
+			return err
+		}
+		return rdConn(val)(t.rx)
 	}
 }
 
@@ -133,7 +130,7 @@ func AttachSession(val SessionCallbacks) Option {
 	}
 }
 
-func Persistence(val persistence.Packets) Option {
+func Persistence(val vlpersistence.Packets) Option {
 	return func(t *impl) error {
 		return wrPersistence(val)(t.tx)
 	}

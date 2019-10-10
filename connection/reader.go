@@ -3,13 +3,15 @@ package connection
 import (
 	"bufio"
 	"encoding/binary"
+	"io"
 	"sync"
 	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
+	"go.uber.org/zap"
+
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/transport"
-	"go.uber.org/zap"
 )
 
 type reader struct {
@@ -77,6 +79,9 @@ func (s *reader) routine() {
 		}
 
 		if pkt, err = s.readPacket(buf); err != nil {
+			if err != io.EOF {
+				s.log.Errorf("decode packet %s", err.Error())
+			}
 			return
 		}
 

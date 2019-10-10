@@ -4,11 +4,11 @@ import (
 	"errors"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/types"
-	"github.com/troian/easygo/netpoll"
-	"go.uber.org/zap"
 )
 
 // Config is base configuration object used by all transports
@@ -24,7 +24,7 @@ type Config struct {
 // InternalConfig used by server implementation to configure internal specific needs
 type InternalConfig struct {
 	Handler
-	EPoll      netpoll.EventPoll
+	// EPoll      netpoll.EventPoll
 	AcceptPool types.Pool
 	Metric     systree.Metric
 }
@@ -63,6 +63,7 @@ func (c *baseConfig) Port() string {
 func (c *baseConfig) Protocol() string {
 	return c.protocol
 }
+
 func (c *baseConfig) baseReady() error {
 	select {
 	case <-c.quit:
@@ -84,7 +85,7 @@ func (c *baseConfig) handleConnection(conn Conn) {
 
 	defer func() {
 		if err != nil {
-			conn.Close()
+			_ = conn.Close()
 		}
 	}()
 	// To establish a connection, we must
@@ -99,7 +100,7 @@ func (c *baseConfig) handleConnection(conn Conn) {
 	// Read the CONNECT message from the wire, if error, then check to see if it's
 	// a CONNACK error. If it's CONNACK error, send the proper CONNACK error back
 	// to client. Exit regardless of error type.
-	//conn.Conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(c.ConnectTimeout))) // nolint: errcheck, gas
+	// conn.Conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(c.ConnectTimeout))) // nolint: errcheck, gas
 
 	err = c.OnConnection(conn, c.config.AuthManager)
 }

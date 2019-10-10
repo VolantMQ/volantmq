@@ -4,12 +4,13 @@ import (
 	"testing"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/subscriber"
+	"github.com/VolantMQ/vlapi/vlsubscriber"
+	"github.com/stretchr/testify/require"
+
 	"github.com/VolantMQ/volantmq/subscriber"
 	"github.com/VolantMQ/volantmq/systree"
-	"github.com/VolantMQ/volantmq/topics/types"
+	topicsTypes "github.com/VolantMQ/volantmq/topics/types"
 	"github.com/VolantMQ/volantmq/types"
-	"github.com/stretchr/testify/require"
 )
 
 var sysTree systree.Provider

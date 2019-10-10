@@ -1,12 +1,16 @@
 package transport
 
 import (
+	"errors"
 	"net"
+	"os"
 
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/systree"
-	"github.com/troian/easygo/netpoll"
 )
+
+// fixme rid of all commented code when https://github.com/golang/go/issues/15735
+// is ready to go
 
 // Conn is wrapper to net.Conn
 // implemented to encapsulate bytes statistic
@@ -20,7 +24,7 @@ type Conn interface {
 type conn struct {
 	net.Conn
 	stat systree.BytesMetric
-	// desc  *netpoll.Desc
+	// desc *netpoll.Desc
 	// ePoll netpoll.EventPoll
 }
 
@@ -31,7 +35,7 @@ type Handler interface {
 	OnConnection(Conn, *auth.Manager) error
 }
 
-func newConn(poll netpoll.EventPoll, cn net.Conn, stat systree.BytesMetric) (*conn, error) {
+func newConn(cn net.Conn, stat systree.BytesMetric) (*conn, error) {
 	// desc, err := netpoll.HandleReadOnce(cn)
 	// if err != nil {
 	// 	return nil, err
@@ -80,11 +84,11 @@ func (c *conn) Write(b []byte) (int, error) {
 }
 
 // File ...
-// func (c *conn) File() (*os.File, error) {
-// 	switch t := c.Conn.(type) {
-// 	case *net.TCPConn:
-// 		return t.File()
-// 	}
-//
-// 	return nil, errors.New("not implemented")
-// }
+func (c *conn) File() (*os.File, error) {
+	switch t := c.Conn.(type) {
+	case *net.TCPConn:
+		return t.File()
+	}
+
+	return nil, errors.New("not implemented")
+}

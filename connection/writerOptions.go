@@ -2,10 +2,11 @@ package connection
 
 import (
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/plugin/persistence"
+	"github.com/VolantMQ/vlapi/vlplugin/vlpersistence"
+	"go.uber.org/zap"
+
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/transport"
-	"go.uber.org/zap"
 )
 
 func (s *writer) setOptions(opts ...writerOption) error {
@@ -46,7 +47,7 @@ func wrMetric(val systree.PacketsMetric) writerOption {
 	}
 }
 
-func wrPersistence(val persistence.Packets) writerOption {
+func wrPersistence(val vlpersistence.Packets) writerOption {
 	return func(t *writer) error {
 		t.persist = val
 		return nil

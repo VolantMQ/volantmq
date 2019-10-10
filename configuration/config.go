@@ -5,8 +5,8 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/VolantMQ/vlapi/plugin"
-	"gopkg.in/yaml.v2"
+	"github.com/VolantMQ/vlapi/vlplugin"
+	"gopkg.in/yaml.v3"
 )
 
 // PluginState status
@@ -38,7 +38,7 @@ func ReadConfig() *Config {
 		log.Info("default config: \n", string(defaultConfig))
 	} else {
 		if _, err := os.Stat(configFile); os.IsNotExist(err) {
-			log.Error("config not found", "file", configFile)
+			log.Errorf("config file \"%s\" does not exist", configFile)
 			return nil
 		}
 

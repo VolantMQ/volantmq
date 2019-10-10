@@ -3,9 +3,10 @@
 package configuration
 
 import (
+	"path/filepath"
 	"plugin"
 
-	"github.com/VolantMQ/vlapi/plugin"
+	"github.com/VolantMQ/vlapi/vlplugin"
 )
 
 // LoadPlugins load plugins from path
@@ -25,14 +26,10 @@ func LoadPlugins(path string, list []string) map[string]PluginState {
 
 	plugins := make(map[string]PluginState)
 
-	if path[len(path)-1] != '/' {
-		path += "/"
-	}
-
 	for _, p := range list {
 		pl := PluginState{}
 
-		where := path + p + ".so"
+		where := filepath.Join(path, p+".so")
 		plEntry, err := plugin.Open(where)
 		if err != nil {
 			pl.Errors = append(pl.Errors, err)

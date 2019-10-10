@@ -13,17 +13,19 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/VolantMQ/vlapi/plugin"
-	"github.com/VolantMQ/vlapi/plugin/auth"
-	"github.com/VolantMQ/vlapi/plugin/persistence"
-	"github.com/VolantMQ/vlapi/plugin/persistence/mem"
+	"github.com/VolantMQ/vlapi/vlplugin"
+	"github.com/VolantMQ/vlapi/vlplugin/vlauth"
+	"github.com/VolantMQ/vlapi/vlplugin/vlpersistence"
+	persistenceMem "github.com/VolantMQ/vlapi/vlplugin/vlpersistence/mem"
+	"github.com/VolantMQ/vlapi/vltypes"
+	"github.com/troian/healthcheck"
+	"go.uber.org/zap"
+	"gopkg.in/yaml.v3"
+
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/server"
 	"github.com/VolantMQ/volantmq/transport"
-	"github.com/troian/healthcheck"
-	"go.uber.org/zap"
-	"gopkg.in/yaml.v2"
 )
 
 type pluginType map[string]vlplugin.Plugin
@@ -199,21 +201,31 @@ func (ctx *appContext) loadPlugins(cfg *configuration.PluginsConfig) error {
 
 func configureSimpleAuth(cfg interface{}) (vlauth.IFace, error) {
 	sAuth := newSimpleAuth()
-	authConfig := cfg.(map[interface{}]interface{})
 
-	if list, kk := authConfig["users"].(map[interface{}]interface{}); kk {
+	authConfig, err := vltypes.NormalizeConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	if list, kk := authConfig["users"].(map[string]interface{}); kk {
 		for u, p := range list {
-			sAuth.addUser(u.(string), strings.ToLower(p.(string)))
+			sAuth.addUser(u, strings.ToLower(p.(string)))
+		}
+	}
+
+	if list, kk := authConfig["users"].(map[string]interface{}); kk {
+		for u, p := range list {
+			sAuth.addUser(u, strings.ToLower(p.(string)))
 		}
 	}
 
 	if uFile, kk := authConfig["usersFile"].(string); kk {
-		if fl, err := ioutil.ReadFile(uFile); err != nil {
-			logger.Error("\treading simpleAuth users file: ", err.Error())
+		if fl, e := ioutil.ReadFile(uFile); e != nil {
+			logger.Error("\treading simpleAuth users file: ", e.Error())
 		} else {
 			users := make(map[string]string)
-			if err = yaml.Unmarshal(fl, &users); err != nil {
-				logger.Error("\tdecoding simpleAuth users file: ", err.Error())
+			if e = yaml.Unmarshal(fl, &users); e != nil {
+				logger.Error("\tdecoding simpleAuth users file: ", e.Error())
 			} else {
 				for u, p := range users {
 					sAuth.addUser(u, p)
@@ -245,7 +257,10 @@ func (ctx *appContext) loadAuth(cfg *configuration.Config) (*auth.Manager, error
 	}
 
 	for idx, cfgEntry := range a.([]interface{}) {
-		entry := cfgEntry.(map[interface{}]interface{})
+		entry, err := vltypes.NormalizeConfig(cfgEntry)
+		if err != nil {
+			return nil, err
+		}
 
 		var name string
 		var backend string
@@ -272,8 +287,8 @@ func (ctx *appContext) loadAuth(cfg *configuration.Config) (*auth.Manager, error
 			var authPlugins pluginType
 			if authPlugins, ok = ctx.plugins.acquired["auth"]; ok {
 				if pl, kk := authPlugins[backend]; kk {
-					plObject, err := ctx.configurePlugin(pl, config)
-					if err != nil {
+					var plObject interface{}
+					if plObject, err = ctx.configurePlugin(pl, config); err != nil {
 						logger.Fatalf(err.Error())
 						return nil, errors.New("")
 					}
@@ -288,7 +303,7 @@ func (ctx *appContext) loadAuth(cfg *configuration.Config) (*auth.Manager, error
 		}
 
 		if iface != nil {
-			if err := auth.Register(name, iface); err != nil {
+			if err = auth.Register(name, iface); err != nil {
 				logger.Error("\tauth provider", zap.String("name", name), zap.String("backend", backend), zap.Error(err))
 				return nil, err
 			}
@@ -312,7 +327,10 @@ func (ctx *appContext) configureDebugPlugins(cfg interface{}) error {
 	logger.Info("configuring debug plugins")
 
 	for idx, cfgEntry := range cfg.([]interface{}) {
-		entry := cfgEntry.(map[interface{}]interface{})
+		entry, err := vltypes.NormalizeConfig(cfgEntry)
+		if err != nil {
+			return err
+		}
 
 		var backend string
 		var config interface{}
@@ -329,10 +347,9 @@ func (ctx *appContext) configureDebugPlugins(cfg interface{}) error {
 		var debugPlugins pluginType
 		if debugPlugins, ok = ctx.plugins.acquired["debug"]; ok {
 			if pl, kk := debugPlugins[backend]; kk {
-				_, err := ctx.configurePlugin(pl, config)
-				if err != nil {
+				if _, err = ctx.configurePlugin(pl, config); err != nil {
 					logger.Fatalf(err.Error())
-					return errors.New("")
+					return err
 				}
 			} else {
 				logger.Warnf("\tno enabled plugin of type [%d]", backend)
@@ -348,7 +365,10 @@ func (ctx *appContext) configureHealthPlugins(cfg interface{}) error {
 	logger.Info("configuring health plugins")
 
 	for idx, cfgEntry := range cfg.([]interface{}) {
-		entry := cfgEntry.(map[interface{}]interface{})
+		entry, err := vltypes.NormalizeConfig(cfgEntry)
+		if err != nil {
+			return err
+		}
 
 		var backend string
 		var config interface{}
@@ -365,10 +385,10 @@ func (ctx *appContext) configureHealthPlugins(cfg interface{}) error {
 		var debugPlugins pluginType
 		if debugPlugins, ok = ctx.plugins.acquired["health"]; ok {
 			if pl, kk := debugPlugins[backend]; kk {
-				plObject, err := ctx.configurePlugin(pl, config)
-				if err != nil {
+				var plObject interface{}
+				if plObject, err = ctx.configurePlugin(pl, config); err != nil {
 					logger.Fatalf(err.Error())
-					return errors.New("")
+					return err
 				}
 
 				ctx.healthLock.Lock()
@@ -376,11 +396,11 @@ func (ctx *appContext) configureHealthPlugins(cfg interface{}) error {
 
 				// if any checks already registered move them to the plugin
 				for n, c := range ctx.livenessChecks {
-					ctx.healthHandler.AddLivenessCheck(n, c)
+					_ = ctx.healthHandler.AddLivenessCheck(n, c)
 				}
 
 				for n, c := range ctx.readinessChecks {
-					ctx.healthHandler.AddReadinessCheck(n, c)
+					_ = ctx.healthHandler.AddReadinessCheck(n, c)
 				}
 
 				ctx.livenessChecks = nil
@@ -397,8 +417,8 @@ func (ctx *appContext) configureHealthPlugins(cfg interface{}) error {
 	return nil
 }
 
-func (ctx *appContext) loadPersistence(cfg interface{}) (persistence.IFace, error) {
-	var persist persistence.IFace
+func (ctx *appContext) loadPersistence(cfg interface{}) (vlpersistence.IFace, error) {
+	var persist vlpersistence.IFace
 
 	logger.Info("loading persistence")
 	if cfg == nil {
@@ -414,7 +434,11 @@ func (ctx *appContext) loadPersistence(cfg interface{}) (persistence.IFace, erro
 			return nil, errors.New("")
 		}
 
-		persistenceConfig := persistenceConfigs[0].(map[interface{}]interface{})
+		persistenceConfig, err := vltypes.NormalizeConfig(persistenceConfigs[0])
+		if err != nil {
+			return nil, err
+		}
+
 		var ok bool
 
 		if backend, ok = persistenceConfig["backend"].(string); !ok {
@@ -431,15 +455,15 @@ func (ctx *appContext) loadPersistence(cfg interface{}) (persistence.IFace, erro
 				logger.Fatalf("\tplugins.config.persistence.backend: plugin type [%s] not found", backend)
 				return nil, errors.New("")
 			} else {
-				plObject, err := ctx.configurePlugin(pl, config)
-				if err != nil {
+				var plObject interface{}
+				if plObject, err = ctx.configurePlugin(pl, config); err != nil {
 					logger.Fatalf(err.Error())
 					return nil, errors.New("")
 				}
 
 				logger.Infof("\tusing persistence provider [%s]", backend)
 
-				persist = plObject.(persistence.IFace)
+				persist = plObject.(vlpersistence.IFace)
 			}
 		} else {
 			logger.Fatal("no plugins loaded")
@@ -507,7 +531,7 @@ func (ctx *appContext) AddLivenessCheck(name string, check healthcheck.Check) er
 	if ctx.healthHandler == nil {
 		ctx.livenessChecks[name] = check
 	} else {
-		ctx.healthHandler.AddLivenessCheck(name, check)
+		_ = ctx.healthHandler.AddLivenessCheck(name, check)
 	}
 
 	return nil
@@ -521,7 +545,7 @@ func (ctx *appContext) AddReadinessCheck(name string, check healthcheck.Check) e
 	if ctx.healthHandler == nil {
 		ctx.readinessChecks[name] = check
 	} else {
-		ctx.healthHandler.AddReadinessCheck(name, check)
+		_ = ctx.healthHandler.AddReadinessCheck(name, check)
 	}
 
 	return nil
@@ -535,7 +559,7 @@ func (ctx *appContext) RemoveLivenessCheck(name string) error {
 	if ctx.healthHandler == nil {
 		delete(ctx.livenessChecks, name)
 	} else {
-		ctx.healthHandler.RemoveLivenessCheck(name)
+		_ = ctx.healthHandler.RemoveLivenessCheck(name)
 	}
 
 	return nil
@@ -549,13 +573,15 @@ func (ctx *appContext) RemoveReadinessCheck(name string) error {
 	if ctx.healthHandler == nil {
 		delete(ctx.readinessChecks, name)
 	} else {
-		ctx.healthHandler.RemoveReadinessCheck(name)
+		_ = ctx.healthHandler.RemoveReadinessCheck(name)
 	}
 
 	return nil
 }
 
 func main() {
+	logger = configuration.GetHumanLogger()
+
 	defer func() {
 		logger.Info("service stopped")
 
@@ -573,9 +599,6 @@ func main() {
 		return
 	}
 
-	logger = configuration.GetHumanLogger()
-
-	logger = configuration.GetHumanLogger()
 	logger.Info("starting service...")
 	logger.Infof("\n\tbuild info:\n"+
 		"\t\tcommit : %s\n"+
@@ -588,7 +611,7 @@ func main() {
 	logger.Info("working directory: ", configuration.WorkDir)
 	logger.Info("plugins directory: ", configuration.PluginsDir)
 
-	var persist persistence.IFace
+	var persist vlpersistence.IFace
 	var defaultAuth *auth.Manager
 	var err error
 
@@ -635,7 +658,7 @@ func main() {
 				}
 			}()
 			logger.Info("starting http server on " + s.server.Addr)
-			s.server.ListenAndServe()
+			_ = s.server.ListenAndServe()
 			logger.Info("stopped http server on " + s.server.Addr)
 		}()
 		return true
@@ -671,7 +694,7 @@ func main() {
 	}
 
 	if srv, err = server.NewServer(serverConfig); err != nil {
-		logger.Error("server create", zap.Error(err))
+		logger.Errorf("server create: %s", err.Error())
 		return
 	}
 
@@ -690,12 +713,10 @@ func main() {
 		return
 	}
 
-	if err == nil {
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
-		sig := <-ch
-		logger.Info("service received signal: ", sig.String())
-	}
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+	sig := <-ch
+	logger.Info("service received signal: ", sig.String())
 
 	if err = srv.Shutdown(); err != nil {
 		logger.Error("shutdown server", zap.Error(err))
@@ -703,7 +724,7 @@ func main() {
 
 	ctx.httpServers.Range(func(k, v interface{}) bool {
 		s := v.(*httpServer)
-		s.server.Shutdown(context.Background())
+		_ = s.server.Shutdown(context.Background())
 		return true
 	})
 }

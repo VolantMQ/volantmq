@@ -6,7 +6,8 @@ import (
 	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/plugin/persistence"
+	"github.com/VolantMQ/vlapi/vlplugin/vlpersistence"
+
 	"github.com/VolantMQ/volantmq/types"
 )
 
@@ -78,8 +79,8 @@ func (s *expiry) cancel() bool {
 	return res
 }
 
-func (s *expiry) persistedState() *persistence.SessionDelays {
-	exp := &persistence.SessionDelays{
+func (s *expiry) persistedState() *vlpersistence.SessionDelays {
+	exp := &vlpersistence.SessionDelays{
 		Since: s.expiringSince.Format(time.RFC3339),
 	}
 
@@ -101,7 +102,7 @@ func (s *expiry) timerCallback() {
 	// 1. check for will message available
 	if s.will != nil {
 		// publish if exists and wipe state
-		s.messenger.Publish(s.will) // nolint: errcheck
+		_ = s.messenger.Publish(s.will) // nolint: errcheck
 		s.will = nil
 		s.willIn = 0
 	}

@@ -11,21 +11,23 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/schollz/progressbar"
+	"github.com/VolantMQ/vlapi/vlplugin/vlpersistence"
+	"github.com/vbauerster/mpb/v4"
+	"github.com/vbauerster/mpb/v4/decor"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/plugin/auth"
-	"github.com/VolantMQ/vlapi/plugin/persistence"
-	"github.com/VolantMQ/vlapi/subscriber"
+	"github.com/VolantMQ/vlapi/vlplugin/vlauth"
+	"github.com/VolantMQ/vlapi/vlsubscriber"
+	"go.uber.org/zap"
+
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/connection"
 	"github.com/VolantMQ/volantmq/subscriber"
 	"github.com/VolantMQ/volantmq/systree"
-	"github.com/VolantMQ/volantmq/topics/types"
+	topicsTypes "github.com/VolantMQ/volantmq/topics/types"
 	"github.com/VolantMQ/volantmq/transport"
 	"github.com/VolantMQ/volantmq/types"
-	"go.uber.org/zap"
 )
 
 // load sessions owning subscriptions
@@ -38,7 +40,7 @@ type subscriberConfig struct {
 type Config struct {
 	configuration.MqttConfig
 	TopicsMgr        topicsTypes.Provider
-	Persist          persistence.IFace
+	Persist          vlpersistence.IFace
 	Systree          systree.Provider
 	OnReplaceAttempt func(string, bool)
 	NodeName         string
@@ -51,7 +53,7 @@ type preloadConfig struct {
 
 // Manager clients manager
 type Manager struct {
-	persistence     persistence.Sessions
+	persistence     vlpersistence.Sessions
 	log             *zap.SugaredLogger
 	quit            chan struct{}
 	sessionsCount   sync.WaitGroup
@@ -77,7 +79,8 @@ type containerInfo struct {
 }
 
 type loadContext struct {
-	bar            *progressbar.ProgressBar
+	bar            *mpb.Bar
+	startTs        time.Time
 	preloadConfigs map[string]*preloadConfig
 	delayedWills   []mqttp.IFace
 }
@@ -122,15 +125,25 @@ func NewManager(c *Config) (*Manager, error) {
 	}
 
 	pCount := m.persistence.Count()
+
 	if pCount > 0 {
+		pBars := mpb.New(mpb.WithWidth(64))
+		bar := pBars.AddBar(int64(pCount),
+			mpb.BarClearOnComplete(),
+			mpb.PrependDecorators(
+				decor.Name("persisted", decor.WC{W: len("persisted") + 1, C: decor.DSyncSpaceR}),
+				decor.CountersNoUnit("%d / %d", decor.WCSyncWidth),
+				decor.OnComplete(decor.Name("", decor.WCSyncSpaceR), " done!"),
+			),
+			mpb.AppendDecorators(
+				decor.Percentage(decor.WC{W: 5})),
+		)
+
 		m.log.Info("Loading sessions. Might take a while")
-		m.log.Sync()
+		_ = m.log.Sync()
 
 		context := &loadContext{
-			bar: progressbar.NewOptions(
-				int(pCount),
-				progressbar.OptionShowCount(),
-				progressbar.OptionShowIts()),
+			bar:            bar,
 			preloadConfigs: make(map[string]*preloadConfig),
 		}
 
@@ -138,7 +151,12 @@ func NewManager(c *Config) (*Manager, error) {
 		// those sessions having either will delay or expire are created with and timer started
 		err = m.persistence.LoadForEach(m, context)
 
-		context.bar.Finish()
+		if !bar.Completed() {
+			bar.Abort(false)
+		}
+
+		pBars.Wait()
+
 		fmt.Printf("\n")
 
 		if err != nil {
@@ -151,10 +169,10 @@ func NewManager(c *Config) (*Manager, error) {
 
 		for id, st := range context.preloadConfigs {
 			if st.sub != nil {
-				m.persistence.SubscriptionsDelete([]byte(id))
+				_ = m.persistence.SubscriptionsDelete([]byte(id))
 			}
 			if st.exp != nil {
-				m.persistence.ExpiryDelete([]byte(id))
+				_ = m.persistence.ExpiryDelete([]byte(id))
 			}
 		}
 
@@ -192,7 +210,7 @@ func (m *Manager) Stop() error {
 		if exp != nil {
 			e := exp.(*expiry)
 			if !e.cancel() {
-				m.persistence.ExpiryStore([]byte(k.(string)), e.persistedState())
+				_ = m.persistence.ExpiryStore([]byte(k.(string)), e.persistedState())
 			} else {
 				m.expiryCount.Done()
 			}
@@ -233,7 +251,7 @@ func (m *Manager) GetSubscriber(id string) (vlsubscriber.IFace, error) {
 	if !ok {
 		sub = subscriber.New(subscriber.Config{
 			ID: id,
-			//OfflinePublish: m.pluginPublish,
+			// OfflinePublish: m.pluginPublish,
 		})
 		m.plSubscribers[id] = sub
 	}
@@ -242,11 +260,13 @@ func (m *Manager) GetSubscriber(id string) (vlsubscriber.IFace, error) {
 }
 
 // LoadSession load persisted session. Invoked by persistence provider
-func (m *Manager) LoadSession(context interface{}, id []byte, state *persistence.SessionState) error {
+func (m *Manager) LoadSession(context interface{}, id []byte, state *vlpersistence.SessionState) error {
 	sID := string(id)
 	ctx := context.(*loadContext)
 
-	defer ctx.bar.Add(1)
+	defer func() {
+		ctx.bar.IncrBy(1, time.Since(ctx.startTs))
+	}()
 
 	if len(state.Errors) != 0 {
 		m.log.Error("Session load", zap.String("ClientID", sID), zap.Errors("errors", state.Errors))
@@ -270,7 +290,7 @@ func (m *Manager) LoadSession(context interface{}, id []byte, state *persistence
 
 	if err = m.decodeSubscriber(ctx, sID, state.Subscriptions); err != nil {
 		m.log.Error("Decode subscriber", zap.String("ClientID", sID), zap.Error(err))
-		if err = m.persistence.SubscriptionsDelete(id); err != nil && err != persistence.ErrNotFound {
+		if err = m.persistence.SubscriptionsDelete(id); err != nil && err != vlpersistence.ErrNotFound {
 			m.log.Error("Persisted subscriber delete", zap.Error(err))
 		}
 	}
@@ -294,7 +314,8 @@ func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) (err
 			err = errors.New("panic")
 		}
 	}()
-	cn := connection.New(
+	var cn connection.Initial
+	cn, err = connection.New(
 		connection.OnAuth(m.onAuth),
 		connection.NetConn(conn),
 		connection.TxQuota(types.DefaultReceiveMax),
@@ -309,6 +330,9 @@ func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) (err
 		connection.KeepAlive(m.Options.ConnectTimeout),
 		connection.Persistence(m.persistence),
 	)
+	if err != nil {
+		return
+	}
 
 	var connParams *connection.ConnectParams
 	var ack *mqttp.ConnAck
@@ -333,7 +357,7 @@ func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) (err
 				return nil
 			} else {
 				if resp.Type() == mqttp.AUTH {
-					cn.Send(resp)
+					_ = cn.Send(resp)
 				} else {
 					ack = resp.(*mqttp.ConnAck)
 					break
@@ -374,7 +398,7 @@ func (m *Manager) processConnect(cn connection.Initial, params *connection.Conne
 		}
 
 		pkt := mqttp.NewConnAck(params.Version)
-		pkt.SetReturnCode(reason)
+		_ = pkt.SetReturnCode(reason)
 		resp = pkt
 	}
 
@@ -402,7 +426,7 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 
 		if cn.Acknowledge(ack,
 			connection.KeepAlive(keepAlive),
-			connection.Permissions(authMngr)) {
+			connection.Permissions(authMngr)) == nil {
 
 			ses.start()
 
@@ -442,7 +466,7 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 			if params.Version <= mqttp.ProtocolV50 {
 				reason = mqttp.CodeRefusedServerUnavailable
 			}
-			ack.SetReturnCode(reason)
+			_ = ack.SetReturnCode(reason)
 			return
 		}
 	}
@@ -459,7 +483,7 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 			subscriber:    info.sub,
 		}
 
-		ses.configure(config)
+		_ = ses.configure(config)
 
 		ack.SetSessionPresent(info.present)
 	} else {
@@ -473,7 +497,7 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 			}
 		}
 
-		ack.SetReturnCode(reason)
+		_ = ack.SetReturnCode(reason)
 	}
 }
 
@@ -610,7 +634,7 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 		})
 
 	if params.CleanStart {
-		if err = m.persistence.Delete([]byte(params.ID)); err != nil && err != persistence.ErrNotFound {
+		if err = m.persistence.Delete([]byte(params.ID)); err != nil && err != vlpersistence.ErrNotFound {
 			m.log.Error("Couldn't wipe session", zap.String("clientId", params.ID), zap.Error(err))
 		} else {
 			err = nil
@@ -621,7 +645,7 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 
 	if !persisted {
 		err = m.persistence.Create([]byte(params.ID),
-			&persistence.SessionBase{
+			&vlpersistence.SessionBase{
 				Timestamp: time.Now().Format(time.RFC3339),
 				Version:   byte(params.Version),
 			})
@@ -708,7 +732,7 @@ func (m *Manager) writeSessionProperties(resp *mqttp.ConnAck, id string) error {
 	}
 
 	if m.KeepAlive.Force {
-		if err := resp.PropertySet(mqttp.PropertyServerKeepAlive, m.KeepAlive); err != nil {
+		if err := resp.PropertySet(mqttp.PropertyServerKeepAlive, uint16(m.KeepAlive.Period)); err != nil {
 			return err
 		}
 	}
@@ -749,12 +773,13 @@ func (m *Manager) sessionOffline(id string, keep bool, expCfg *expiryConfig) {
 				if cont.removable {
 					state := &systree.SessionDeletedStatus{
 						Timestamp: time.Now().Format(time.RFC3339),
-						Reason:    "",
+						Reason:    "shutdown",
 					}
 
 					m.Systree.Sessions().Removed(id, state)
 					m.sessions.Delete(id)
 					m.sessionsCount.Done()
+					_ = m.persistence.Delete([]byte(id))
 					cont.removed = true
 				}
 			}
@@ -772,7 +797,7 @@ func (m *Manager) sessionTimer(id string, expired bool) {
 	if expired {
 		rs = "expired"
 
-		m.persistence.Delete([]byte(id))
+		_ = m.persistence.Delete([]byte(id))
 
 		m.sessions.Delete(id)
 		m.sessionsCount.Done()
@@ -847,7 +872,7 @@ func (m *Manager) processDelayedWills(ctx *loadContext) {
 }
 
 // decodeSessionExpiry
-func (m *Manager) decodeSessionExpiry(ctx *loadContext, id string, state *persistence.SessionState) error {
+func (m *Manager) decodeSessionExpiry(ctx *loadContext, id string, state *vlpersistence.SessionState) error {
 	if state.Expire == nil {
 		return nil
 	}
@@ -859,7 +884,7 @@ func (m *Manager) decodeSessionExpiry(ctx *loadContext, id string, state *persis
 		since, err = time.Parse(time.RFC3339, state.Expire.Since)
 		if err != nil {
 			m.log.Error("parse expiration value", zap.String("clientId", id), zap.Error(err))
-			if e := m.persistence.SubscriptionsDelete([]byte(id)); e != nil && e != persistence.ErrNotFound {
+			if e := m.persistence.SubscriptionsDelete([]byte(id)); e != nil && e != vlpersistence.ErrNotFound {
 				m.log.Error("Persisted subscriber delete", zap.Error(e))
 			}
 
@@ -872,7 +897,7 @@ func (m *Manager) decodeSessionExpiry(ctx *loadContext, id string, state *persis
 
 	// if persisted state has delayed will lets check if it has not elapsed its time
 	if len(state.Expire.Will) > 0 {
-		pkt, _, _ := mqttp.Decode(mqttp.ProtocolVersion(mqttp.ProtocolV50), state.Expire.Will)
+		pkt, _, _ := mqttp.Decode(mqttp.ProtocolV50, state.Expire.Will)
 		will, _ = pkt.(*mqttp.Publish)
 
 		if prop := pkt.PropertyGet(mqttp.PropertyWillDelayInterval); prop != nil {
@@ -895,7 +920,7 @@ func (m *Manager) decodeSessionExpiry(ctx *loadContext, id string, state *persis
 
 			if time.Now().After(expireAt) {
 				// persisted session has expired, wipe it
-				if err = m.persistence.Delete([]byte(id)); err != nil && err != persistence.ErrNotFound {
+				if err = m.persistence.Delete([]byte(id)); err != nil && err != vlpersistence.ErrNotFound {
 					m.log.Error("Delete expired session", zap.Error(err))
 				}
 				return nil
@@ -1029,7 +1054,7 @@ func (m *Manager) persistSubscriber(s *subscriber.Type) error {
 }
 
 func (m *Manager) sessionPersistPublish(id string, p *mqttp.Publish) {
-	pkt := &persistence.PersistedPacket{}
+	pkt := &vlpersistence.PersistedPacket{}
 
 	var expired bool
 	var expireAt time.Time
@@ -1054,7 +1079,7 @@ func (m *Manager) sessionPersistPublish(id string, p *mqttp.Publish) {
 	if p.QoS() == mqttp.QoS0 {
 		err = m.persistence.PacketStoreQoS0([]byte(id), pkt)
 	} else {
-		m.persistence.PacketStoreQoS12([]byte(id), pkt)
+		err = m.persistence.PacketStoreQoS12([]byte(id), pkt)
 	}
 
 	if err != nil {

@@ -4,9 +4,11 @@ import (
 	"testing"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/subscriber"
-	"github.com/VolantMQ/volantmq/topics/types"
+	"github.com/VolantMQ/vlapi/vlsubscriber"
 	"github.com/stretchr/testify/require"
+
+	"github.com/VolantMQ/volantmq/subscriber"
+	topicsTypes "github.com/VolantMQ/volantmq/topics/types"
 )
 
 type providerTest struct {
@@ -27,14 +29,15 @@ func TestTopicsUnknownProvider(t *testing.T) {
 	var tConfig topicsTypes.ProviderConfig
 
 	_, err := New(tConfig)
-
+	require.Error(t, err)
 	require.EqualError(t, topicsTypes.ErrInvalidArgs, err.Error())
 
 	tConfig = topicsTypes.MemConfig{
 		Name: "mem",
 	}
-	_, err = New(tConfig)
 
+	_, err = New(tConfig)
+	require.Error(t, err)
 	require.EqualError(t, topicsTypes.ErrUnknownProvider, err.Error())
 
 }
@@ -42,9 +45,6 @@ func TestTopicsUnknownProvider(t *testing.T) {
 func TestTopicsOpenCloseProvider(t *testing.T) {
 	for _, p := range testProviders {
 		prov, err := New(p.config)
-		require.NoError(t, err)
-
-		err = prov.Stop()
 		require.NoError(t, err)
 
 		err = prov.Shutdown()
@@ -57,22 +57,26 @@ func TestTopicsSubscribeInvalidQoS(t *testing.T) {
 		prov, err := New(p.config)
 		require.NoError(t, err)
 
-		ops := &vlsubscriber.SubscriptionParams{
-			Ops: mqttp.SubscriptionOptions(mqttp.QosType(3)),
+		sub := &subscriber.Type{}
+
+		req := topicsTypes.SubscribeReq{
+			Filter: "test",
+			S:      sub,
+			Params: &vlsubscriber.SubscriptionParams{
+				Ops: mqttp.SubscriptionOptions(mqttp.QosType(3)),
+			},
 		}
 
-		_, _, err = prov.Subscribe("test", nil, ops)
-		require.Error(t, mqttp.ErrInvalidQoS, err.Error())
-
-		err = prov.Stop()
-		require.NoError(t, err)
+		resp := prov.Subscribe(req)
+		require.Error(t, resp.Err)
+		require.Error(t, mqttp.ErrInvalidQoS, resp.Err)
 
 		err = prov.Shutdown()
 		require.NoError(t, err)
 	}
 }
 
-//func TestTopicsSubscribeInvalidMessage(t *testing.T) {
+// func TestTopicsSubscribeInvalidMessage(t *testing.T) {
 //	for _, p := range testProviders {
 //		prov, err := New(p.config)
 //		require.NoError(t, err)
@@ -87,9 +91,9 @@ func TestTopicsSubscribeInvalidQoS(t *testing.T) {
 //		err = prov.Close()
 //		require.NoError(t, err)
 //	}
-//}
+// }
 
-//func TestTopicsSubscription(t *testing.T) {
+// func TestTopicsSubscription(t *testing.T) {
 //	for _, p := range testProviders {
 //		prov, err := New(p.config)
 //		require.NoError(t, err)
@@ -124,9 +128,9 @@ func TestTopicsSubscribeInvalidQoS(t *testing.T) {
 //
 //		require.NoError(t, err)
 //	}
-//}
+// }
 
-//func TestTopicsRetained(t *testing.T) {
+// func TestTopicsRetained(t *testing.T) {
 //	for _, p := range testProviders {
 //		prov, err := New(p.config)
 //		require.NoError(t, err)
@@ -194,9 +198,9 @@ func TestTopicsSubscribeInvalidQoS(t *testing.T) {
 //		require.NoError(t, err)
 //		require.Equal(t, 3, len(msglist))
 //	}
-//}
+// }
 
-//func TestMultilevelWildcards(t *testing.T) {
+// func TestMultilevelWildcards(t *testing.T) {
 //	for _, p := range testProviders {
 //
 //		prov, err := New(p.config)
@@ -244,9 +248,9 @@ func TestTopicsSubscribeInvalidQoS(t *testing.T) {
 //		messageNotifier.Add(1)
 //		require.True(t, waitTimeout(&messageNotifier, 5*time.Second))
 //	}
-//}
+// }
 
-//func newPublishMessageLarge(topic string, qos message.QosType) *message.Publish {
+// func newPublishMessageLarge(topic string, qos message.QosType) *message.Publish {
 //	m, _ := message.NewMessage(message.ProtocolV311, message.PUBLISH)
 //
 //	msg := m.(*message.Publish)
@@ -256,11 +260,11 @@ func TestTopicsSubscribeInvalidQoS(t *testing.T) {
 //	msg.SetQoS(qos)     // nolint: errcheck
 //
 //	return msg
-//}
+// }
 //
-//// waitTimeout waits for the waitgroup for the specified max timeout.
-//// Returns true if waiting timed out.
-//func waitTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
+// // waitTimeout waits for the waitgroup for the specified max timeout.
+// // Returns true if waiting timed out.
+// func waitTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
 //	c := make(chan struct{})
 //	go func() {
 //		defer close(c)
@@ -272,4 +276,4 @@ func TestTopicsSubscribeInvalidQoS(t *testing.T) {
 //	case <-time.After(timeout):
 //		return true // timed out
 //	}
-//}
+// }

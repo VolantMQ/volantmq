@@ -19,19 +19,20 @@ import (
 	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/plugin/persistence"
+	"github.com/VolantMQ/vlapi/vlplugin/vlpersistence"
+	"go.uber.org/zap"
+
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/systree"
-	"github.com/VolantMQ/volantmq/topics/types"
+	topicsTypes "github.com/VolantMQ/volantmq/topics/types"
 	"github.com/VolantMQ/volantmq/types"
-	"go.uber.org/zap"
 )
 
 type provider struct {
 	// smu                sync.RWMutex
 	root               *node
 	stat               systree.TopicsStat
-	persist            persistence.Retained
+	persist            vlpersistence.Retained
 	log                *zap.SugaredLogger
 	wgPublisher        sync.WaitGroup
 	wgPublisherStarted sync.WaitGroup
@@ -72,14 +73,13 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 
 	if p.persist != nil {
 		entries, err := p.persist.Load()
-		if err != nil && err != persistence.ErrNotFound {
+		if err != nil && err != vlpersistence.ErrNotFound {
 			return nil, err
 		}
 
 		for _, d := range entries {
-			v := mqttp.ProtocolVersion(d.Data[0])
 			var pkt mqttp.IFace
-			pkt, _, err = mqttp.Decode(v, d.Data[1:])
+			pkt, _, err = mqttp.Decode(mqttp.ProtocolV50, d.Data)
 			if err != nil {
 				p.log.Error("Couldn't decode retained message", zap.Error(err))
 			} else {
@@ -92,7 +92,7 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 							p.log.Error("Decode publish expire at", zap.Error(err))
 						}
 					}
-					p.Retain(m) // nolint: errcheck
+					_ = p.Retain(m) // nolint: errcheck
 				} else {
 					p.log.Warn("Unsupported retained message type", zap.String("type", m.Type().Name()))
 				}
@@ -126,16 +126,42 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 	return p, nil
 }
 
-func (mT *provider) Subscribe(req topicsTypes.SubscribeReq) error {
+func (mT *provider) Subscribe(req topicsTypes.SubscribeReq) topicsTypes.SubscribeResp {
+	cAllocated := false
+
+	if req.Chan == nil {
+		cAllocated = true
+		req.Chan = make(chan topicsTypes.SubscribeResp)
+	}
+
 	mT.subIn <- req
 
-	return nil
+	resp := <-req.Chan
+
+	if cAllocated {
+		close(req.Chan)
+	}
+
+	return resp
 }
 
-func (mT *provider) UnSubscribe(req topicsTypes.UnSubscribeReq) error {
+func (mT *provider) UnSubscribe(req topicsTypes.UnSubscribeReq) topicsTypes.UnSubscribeResp {
+	cAllocated := false
+
+	if req.Chan == nil {
+		cAllocated = true
+		req.Chan = make(chan topicsTypes.UnSubscribeResp)
+	}
+
 	mT.unSubIn <- req
 
-	return nil
+	resp := <-req.Chan
+
+	if cAllocated {
+		close(req.Chan)
+	}
+
+	return resp
 }
 
 func (mT *provider) Publish(m interface{}) error {
@@ -177,7 +203,7 @@ func (mT *provider) Shutdown() error {
 		mT.retainSearch("#", &res)
 		mT.retainSearch("/#", &res)
 
-		var encoded []*persistence.PersistedPacket
+		var encoded []*vlpersistence.PersistedPacket
 
 		for _, pkt := range res {
 			// Discard retained expired and QoS0 messages
@@ -185,7 +211,7 @@ func (mT *provider) Shutdown() error {
 				if buf, err := mqttp.Encode(pkt); err != nil {
 					mT.log.Error("Couldn't encode retained message", zap.Error(err))
 				} else {
-					entry := &persistence.PersistedPacket{
+					entry := &vlpersistence.PersistedPacket{
 						Data: buf,
 					}
 					if !expireAt.IsZero() {
@@ -214,7 +240,7 @@ func (mT *provider) retain(obj types.RetainObject) {
 	case *mqttp.Publish:
 		// [MQTT-3.3.1-10]            [MQTT-3.3.1-7]
 		if len(t.Payload()) == 0 || t.QoS() == mqttp.QoS0 {
-			mT.retainRemove(obj.Topic()) // nolint: errcheck
+			_ = mT.retainRemove(obj.Topic()) // nolint: errcheck
 			if len(t.Payload()) == 0 {
 				insert = false
 			}
@@ -236,18 +262,22 @@ func (mT *provider) subscriber() {
 		if req.S == nil || req.Params == nil {
 			resp.Err = topicsTypes.ErrInvalidArgs
 		} else {
-			resp.Granted = req.Params.Ops.QoS()
-			exists := mT.subscriptionInsert(req.Filter, req.S, req.Params)
+			if req.Params.Ops.QoS() > mqttp.QoS2 {
+				resp.Err = mqttp.ErrInvalidQoS
+			} else {
+				resp.Granted = req.Params.Ops.QoS()
+				exists := mT.subscriptionInsert(req.Filter, req.S, req.Params)
 
-			var r []*mqttp.Publish
+				var r []*mqttp.Publish
 
-			// [MQTT-3.3.1-5]
-			rh := req.Params.Ops.RetainHandling()
-			if (rh == mqttp.RetainHandlingRetain) || ((rh == mqttp.RetainHandlingIfNotExists) && !exists) {
-				mT.retainSearch(req.Filter, &r)
+				// [MQTT-3.3.1-5]
+				rh := req.Params.Ops.RetainHandling()
+				if (rh == mqttp.RetainHandlingRetain) || ((rh == mqttp.RetainHandlingIfNotExists) && !exists) {
+					mT.retainSearch(req.Filter, &r)
+				}
+
+				resp.Retained = r
 			}
-
-			resp.Retained = r
 		}
 
 		req.Chan <- resp

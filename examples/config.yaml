@@ -2,8 +2,6 @@ version: v0.0.1
 system:
   log:
     console:
-      timestamp:
-        format: RFC3339
       level: info # available levels: debug, info, warn, error, dpanic, panic, fatal
   http:
     defaultPort: 8080
@@ -65,11 +63,11 @@ mqtt:
     sessionDups: true        # AllowDuplicates Either allow or deny replacing of existing session if there new client with same clientID
                              # If not set than default is false
     retainAvailable: true    # don't set to use default
-    subsOverlap: false       # tells server how to handle overlapping subscriptions from within one client
+    subsOverlap: true        # tells server how to handle overlapping subscriptions from within one client
                              # if true server will send only one publish with max subscribed QoS even there are n subscriptions
                              # if false server will send as many publishes as amount of subscriptions matching publish topic exists
                              # Default is false
-    subsId: false            # don't set to use default
+    subsId: true             # don't set to use default
     subsShared: false        # don't set to use default
     subsWildcard: true       # don't set to use default
     receiveMax: 65530        # don't set to use default
