@@ -20,6 +20,7 @@ ENV PATH $VOLANTMQ_WORK_DIR/bin:$PATH
 # build server
 RUN \
        go get -v github.com/ahmetb/govvv \
+    && go get -v github.com/VolantMQ/volantmq/cmd/volantmq \
     && cd $GOPATH/src/github.com/VolantMQ/volantmq/cmd/volantmq \
     && go get -v github.com/VolantMQ/vlapi/... \
     && go get -v \
