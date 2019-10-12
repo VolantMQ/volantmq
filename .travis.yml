@@ -18,6 +18,7 @@ jobs:
       script:
         - cd cmd/volantmq
         - go build -race -v -gcflags "-N -l" .
+        - cd ../..
         - ./go.test.sh
       after_success:
         - bash <(curl -s https://codecov.io/bash)
