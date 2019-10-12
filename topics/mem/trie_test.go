@@ -31,6 +31,7 @@ func allocProvider(t *testing.T) *provider {
 	if p, ok := prov.(*provider); ok {
 		return p
 	}
+
 	t.Fail()
 	return nil
 }
@@ -39,15 +40,22 @@ func TestMatch1(t *testing.T) {
 	prov := allocProvider(t)
 	sub := &subscriber.Type{}
 
-	p := &vlsubscriber.SubscriptionParams{
-		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
+	req := topicsTypes.SubscribeReq{
+		Filter: "sport/tennis/player1/#",
+		S:      sub,
+		Params: &vlsubscriber.SubscriptionParams{
+			Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
+		},
 	}
-	prov.Subscribe("sport/tennis/player1/#", sub, p) // nolint: errcheck
 
-	subscribers := publishes{}
+	resp := prov.Subscribe(req)
+	require.NotNil(t, resp)
+	require.NoError(t, resp.Err)
 
-	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subscribers)
-	require.Equal(t, 1, len(subscribers))
+	subs := publishes{}
+
+	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subs)
+	require.Equal(t, 1, len(subs))
 }
 
 func TestMatch2(t *testing.T) {
@@ -55,15 +63,22 @@ func TestMatch2(t *testing.T) {
 
 	sub := &subscriber.Type{}
 
-	p := &vlsubscriber.SubscriptionParams{
-		Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
+	req := topicsTypes.SubscribeReq{
+		Filter: "sport/tennis/player1/#",
+		S:      sub,
+		Params: &vlsubscriber.SubscriptionParams{
+			Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
+		},
 	}
-	prov.Subscribe("sport/tennis/player1/#", sub, p) // nolint: errcheck
 
-	subscribers := publishes{}
+	resp := prov.Subscribe(req)
+	require.NotNil(t, resp)
+	require.NoError(t, resp.Err)
 
-	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subscribers)
-	require.Equal(t, 1, len(subscribers))
+	subs := publishes{}
+
+	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subs)
+	require.Equal(t, 1, len(subs))
 }
 
 func TestSNodeMatch3(t *testing.T) {
@@ -71,72 +86,85 @@ func TestSNodeMatch3(t *testing.T) {
 
 	sub := &subscriber.Type{}
 
-	p := &vlsubscriber.SubscriptionParams{
-		Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
+	req := topicsTypes.SubscribeReq{
+		Filter: "sport/tennis/#",
+		S:      sub,
+		Params: &vlsubscriber.SubscriptionParams{
+			Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
+		},
 	}
 
-	prov.Subscribe("sport/tennis/#", sub, p) // nolint: errcheck
+	resp := prov.Subscribe(req)
+	require.NotNil(t, resp)
+	require.NoError(t, resp.Err)
 
-	subscribers := publishes{}
-	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subscribers)
-	require.Equal(t, 1, len(subscribers))
+	subs := publishes{}
+	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subs)
+	require.Equal(t, 1, len(subs))
 }
 
 func TestMatch4(t *testing.T) {
 	prov := allocProvider(t)
 	sub := &subscriber.Type{}
 
-	p := &vlsubscriber.SubscriptionParams{
-		Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
+	req := topicsTypes.SubscribeReq{
+		Filter: "#",
+		S:      sub,
+		Params: &vlsubscriber.SubscriptionParams{
+			Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
+		},
 	}
-	prov.Subscribe("#", sub, p) // nolint: errcheck
 
-	subscribers := publishes{}
+	resp := prov.Subscribe(req)
+	require.NotNil(t, resp)
+	require.NoError(t, resp.Err)
 
-	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subscribers)
-	require.Equal(t, 1, len(subscribers), "should return subscribers")
+	subs := publishes{}
 
-	subscribers = publishes{}
-	prov.subscriptionSearch("/sport/tennis/player1/anzel", 0, &subscribers)
-	require.Equal(t, 0, len(subscribers), "should not return subscribers")
+	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subs)
+	require.Equal(t, 1, len(subs), "should return subscribers")
+
+	subs = publishes{}
+	prov.subscriptionSearch("/sport/tennis/player1/anzel", 0, &subs)
+	require.Equal(t, 0, len(subs), "should not return subscribers")
 
 	err := prov.subscriptionRemove("#", sub)
 	require.NoError(t, err)
 
-	subscribers = publishes{}
-	prov.subscriptionSearch("#", 0, &subscribers)
-	require.Equal(t, 0, len(subscribers), "should not return subscribers")
+	subs = publishes{}
+	prov.subscriptionSearch("#", 0, &subs)
+	require.Equal(t, 0, len(subs), "should not return subscribers")
 
-	prov.subscriptionInsert("/#", sub, p)
+	prov.subscriptionInsert("/#", sub, req.Params)
 
-	subscribers = publishes{}
-	prov.subscriptionSearch("bla", 0, &subscribers)
-	require.Equal(t, 0, len(subscribers), "should not return subscribers")
+	subs = publishes{}
+	prov.subscriptionSearch("bla", 0, &subs)
+	require.Equal(t, 0, len(subs), "should not return subscribers")
 
-	subscribers = publishes{}
-	prov.subscriptionSearch("/bla", 0, &subscribers)
-	require.Equal(t, 1, len(subscribers), "should return subscribers")
+	subs = publishes{}
+	prov.subscriptionSearch("/bla", 0, &subs)
+	require.Equal(t, 1, len(subs), "should return subscribers")
 
 	err = prov.subscriptionRemove("/#", sub)
 	require.NoError(t, err)
 
-	prov.subscriptionInsert("bla/bla/#", sub, p)
+	prov.subscriptionInsert("bla/bla/#", sub, req.Params)
 
-	subscribers = publishes{}
-	prov.subscriptionSearch("bla", 0, &subscribers)
-	require.Equal(t, 0, len(subscribers), "should not return subscribers")
+	subs = publishes{}
+	prov.subscriptionSearch("bla", 0, &subs)
+	require.Equal(t, 0, len(subs), "should not return subscribers")
 
-	subscribers = publishes{}
-	prov.subscriptionSearch("bla/bla", 0, &subscribers)
-	require.Equal(t, 1, len(subscribers), "should return subscribers")
+	subs = publishes{}
+	prov.subscriptionSearch("bla/bla", 0, &subs)
+	require.Equal(t, 1, len(subs), "should return subscribers")
 
-	subscribers = publishes{}
-	prov.subscriptionSearch("bla/bla/bla", 0, &subscribers)
-	require.Equal(t, 1, len(subscribers), "should return subscribers")
+	subs = publishes{}
+	prov.subscriptionSearch("bla/bla/bla", 0, &subs)
+	require.Equal(t, 1, len(subs), "should return subscribers")
 
-	subscribers = publishes{}
-	prov.subscriptionSearch("bla/bla/bla/bla", 0, &subscribers)
-	require.Equal(t, 1, len(subscribers), "should return subscribers")
+	subs = publishes{}
+	prov.subscriptionSearch("bla/bla/bla/bla", 0, &subs)
+	require.Equal(t, 1, len(subs), "should return subscribers")
 }
 
 func TestMatch5(t *testing.T) {
@@ -151,10 +179,10 @@ func TestMatch5(t *testing.T) {
 	prov.subscriptionInsert("sport/tennis/+/+/#", sub1, p)
 	prov.subscriptionInsert("sport/tennis/player1/anzel", sub2, p)
 
-	subscribers := publishes{}
-	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subscribers)
+	subs := publishes{}
+	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subs)
 
-	require.Equal(t, 2, len(subscribers))
+	require.Equal(t, 2, len(subs))
 }
 
 func TestMatch6(t *testing.T) {
@@ -168,9 +196,9 @@ func TestMatch6(t *testing.T) {
 	prov.subscriptionInsert("sport/tennis/+/+/+/+/#", sub1, p)
 	prov.subscriptionInsert("sport/tennis/player1/anzel", sub2, p)
 
-	subscribers := publishes{}
-	prov.subscriptionSearch("sport/tennis/player1/anzel/bla/bla", 0, &subscribers)
-	require.Equal(t, 1, len(subscribers))
+	subs := publishes{}
+	prov.subscriptionSearch("sport/tennis/player1/anzel/bla/bla", 0, &subs)
+	require.Equal(t, 1, len(subs))
 }
 
 func TestMatch7(t *testing.T) {
@@ -188,10 +216,10 @@ func TestMatch7(t *testing.T) {
 
 	prov.subscriptionInsert("sport/tennis", sub2, p)
 
-	subscribers := publishes{}
-	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subscribers)
-	require.Equal(t, 1, len(subscribers))
-	require.Equal(t, sub1, subscribers[sub1.Hash()][0].s)
+	subs := publishes{}
+	prov.subscriptionSearch("sport/tennis/player1/anzel", 0, &subs)
+	require.Equal(t, 1, len(subs))
+	require.Equal(t, sub1, subs[sub1.Hash()][0].s)
 }
 
 func TestMatch8(t *testing.T) {
@@ -204,10 +232,10 @@ func TestMatch8(t *testing.T) {
 
 	prov.subscriptionInsert("+/+", sub, p)
 
-	subscribers := publishes{}
+	subs := publishes{}
 
-	prov.subscriptionSearch("/finance", 0, &subscribers)
-	require.Equal(t, 1, len(subscribers))
+	prov.subscriptionSearch("/finance", 0, &subs)
+	require.Equal(t, 1, len(subs))
 }
 
 func TestMatch9(t *testing.T) {
@@ -220,10 +248,10 @@ func TestMatch9(t *testing.T) {
 
 	prov.subscriptionInsert("/+", sub1, p)
 
-	subscribers := publishes{}
+	subs := publishes{}
 
-	prov.subscriptionSearch("/finance", 0, &subscribers)
-	require.Equal(t, 1, len(subscribers))
+	prov.subscriptionSearch("/finance", 0, &subs)
+	require.Equal(t, 1, len(subs))
 }
 
 func TestMatch10(t *testing.T) {
@@ -236,10 +264,10 @@ func TestMatch10(t *testing.T) {
 
 	prov.subscriptionInsert("+", sub1, p)
 
-	subscribers := publishes{}
+	subs := publishes{}
 
-	prov.subscriptionSearch("/finance", 0, &subscribers)
-	require.Equal(t, 0, len(subscribers))
+	prov.subscriptionSearch("/finance", 0, &subs)
+	require.Equal(t, 0, len(subs))
 }
 
 func TestInsertRemove(t *testing.T) {
@@ -251,30 +279,30 @@ func TestInsertRemove(t *testing.T) {
 
 	prov.subscriptionInsert("#", sub, p)
 
-	subscribers := publishes{}
-	prov.subscriptionSearch("bla", 0, &subscribers)
-	require.Equal(t, 1, len(subscribers))
+	subs := publishes{}
+	prov.subscriptionSearch("bla", 0, &subs)
+	require.Equal(t, 1, len(subs))
 
-	subscribers = publishes{}
-	prov.subscriptionSearch("/bla", 0, &subscribers)
-	require.Equal(t, 0, len(subscribers))
+	subs = publishes{}
+	prov.subscriptionSearch("/bla", 0, &subs)
+	require.Equal(t, 0, len(subs))
 
 	err := prov.subscriptionRemove("#", sub)
 	require.NoError(t, err)
 
-	subscribers = publishes{}
-	prov.subscriptionSearch("#", 0, &subscribers)
-	require.Equal(t, 0, len(subscribers))
+	subs = publishes{}
+	prov.subscriptionSearch("#", 0, &subs)
+	require.Equal(t, 0, len(subs))
 
 	prov.subscriptionInsert("/#", sub, p)
 
-	subscribers = publishes{}
-	prov.subscriptionSearch("bla", 0, &subscribers)
-	require.Equal(t, 0, len(subscribers))
+	subs = publishes{}
+	prov.subscriptionSearch("bla", 0, &subs)
+	require.Equal(t, 0, len(subs))
 
-	subscribers = publishes{}
-	prov.subscriptionSearch("/bla", 0, &subscribers)
-	require.Equal(t, 1, len(subscribers))
+	subs = publishes{}
+	prov.subscriptionSearch("/bla", 0, &subs)
+	require.Equal(t, 1, len(subs))
 
 	err = prov.subscriptionRemove("#", sub)
 	require.EqualError(t, err, topicsTypes.ErrNotFound.Error())
@@ -486,7 +514,7 @@ func TestSNodeRemove2(t *testing.T) {
 	prov.subscriptionInsert(topic, sub1, p)
 
 	err := prov.subscriptionRemove("sport/tennis/player1", sub1)
-	require.EqualError(t, topicsTypes.ErrNotFound, err.Error())
+	require.EqualError(t, err, topicsTypes.ErrNotFound.Error())
 }
 
 func TestSNodeRemove3(t *testing.T) {
@@ -517,18 +545,24 @@ func TestRetain1(t *testing.T) {
 		prov.retain(m)
 	}
 
-	p := &vlsubscriber.SubscriptionParams{
-		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
+	req := topicsTypes.SubscribeReq{
+		Filter: "#",
+		S:      sub,
+		Params: &vlsubscriber.SubscriptionParams{
+			Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
+		},
 	}
 
-	_, rMsg, _ := prov.Subscribe("#", sub, p)
-	require.Equal(t, 0, len(rMsg))
+	resp := prov.Subscribe(req)
+	require.NotNil(t, resp)
+	require.NoError(t, resp.Err)
+	require.Equal(t, 0, len(resp.Retained))
 
-	_, rMsg, _ = prov.Subscribe("$SYS", sub, p)
-	require.Equal(t, 0, len(rMsg))
-
-	_, rMsg, _ = prov.Subscribe("$SYS/#", sub, p)
-	require.Equal(t, len(retainedSystree), len(rMsg))
+	req.Filter = "$SYS/#"
+	resp = prov.Subscribe(req)
+	require.NotNil(t, resp)
+	require.NoError(t, resp.Err)
+	require.Equal(t, len(retainedSystree), len(resp.Retained))
 }
 
 func TestRetain2(t *testing.T) {
@@ -542,18 +576,27 @@ func TestRetain2(t *testing.T) {
 	msg := newPublishMessageLarge("sport/tennis/player1/ricardo", mqttp.QoS1)
 	prov.retain(msg)
 
-	p := &vlsubscriber.SubscriptionParams{
-		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
+	req := topicsTypes.SubscribeReq{
+		Filter: "#",
+		S:      sub,
+		Params: &vlsubscriber.SubscriptionParams{
+			Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
+		},
 	}
 
-	prov.Subscribe("#", sub, p) // nolint: errcheck
+	resp := prov.Subscribe(req)
+	require.NotNil(t, resp)
+	require.NoError(t, resp.Err)
 
 	var rMsg []*mqttp.Publish
 	prov.retainSearch("#", &rMsg)
 	require.Equal(t, 1, len(rMsg))
 
-	_, rMsg, _ = prov.Subscribe("$SYS/#", sub, p)
-	require.Equal(t, len(retainedSystree), len(rMsg))
+	req.Filter = "$SYS/#"
+	resp = prov.Subscribe(req)
+	require.NotNil(t, resp)
+	require.NoError(t, resp.Err)
+	require.Equal(t, len(retainedSystree), len(resp.Retained))
 }
 
 func TestRNodeInsertRemove(t *testing.T) {
@@ -674,8 +717,8 @@ func newPublishMessageLarge(topic string, qos mqttp.QosType) *mqttp.Publish {
 	msg := m.(*mqttp.Publish)
 
 	msg.SetPayload(make([]byte, 1024))
-	msg.SetTopic(topic) // nolint: errcheck
-	msg.SetQoS(qos)     // nolint: errcheck
+	_ = msg.SetTopic(topic)
+	_ = msg.SetQoS(qos)
 
 	return msg
 }
