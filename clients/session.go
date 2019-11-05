@@ -84,17 +84,6 @@ func (s *session) SignalPublish(pkt *mqttp.Publish) error {
 		if err := s.messenger.Retain(pkt); err != nil {
 			s.log.Error("Error retaining message", zap.String("clientId", s.id), zap.Error(err))
 		}
-
-		// [MQTT-3.3.1-7]
-		if pkt.QoS() == mqttp.QoS0 {
-			retained := mqttp.NewPublish(s.version)
-			if err := retained.SetQoS(pkt.QoS()); err != nil {
-				s.log.Error("set retained QoS", zap.String("clientId", s.id), zap.Error(err))
-			}
-			if err := retained.SetTopic(pkt.Topic()); err != nil {
-				s.log.Error("set retained topic", zap.String("clientId", s.id), zap.Error(err))
-			}
-		}
 	}
 
 	if err := s.messenger.Publish(pkt); err != nil {
