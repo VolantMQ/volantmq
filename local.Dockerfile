@@ -2,6 +2,7 @@ FROM golang:1.13.4 as builder
 LABEL stage=intermediate
 
 #compile linux only
+
 ENV \
     GOOS=linux \
     VOLANTMQ_WORK_DIR=/usr/lib/volantmq \
@@ -16,11 +17,11 @@ RUN mkdir -p $VOLANTMQ_PLUGINS_DIR
 # Create environment directory
 ENV PATH $VOLANTMQ_WORK_DIR/bin:$PATH
 
+COPY . $GOPATH/src/github.com/VolantMQ/volantmq
+
 # build server
 RUN \
-       GO111MODULE=off go get -v github.com/VolantMQ/volantmq/cmd/volantmq \
-    && cd $GOPATH/src/github.com/VolantMQ/volantmq/cmd/volantmq \
-    && GO111MODULE=on go mod tidy \
+       cd $GOPATH/src/github.com/VolantMQ/volantmq/cmd/volantmq \
     && go build $VOLANTMQ_BUILD_FLAGS -o $VOLANTMQ_WORK_DIR/bin/volantmq
 
 # build debug plugins
