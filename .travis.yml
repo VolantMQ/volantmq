@@ -26,4 +26,4 @@ jobs:
         - codeclimate-test-reporter < coverage.txt
     - stage: docker
       script:
-        - docker build .
+        - ./dockerBuildLocal.sh
