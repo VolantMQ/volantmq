@@ -1,14 +1,13 @@
-FROM golang:1.13 as builder
+FROM golang:1.13.4 as builder
 LABEL stage=intermediate
 
 #compile linux only
-
 ENV \
     GOOS=linux \
     VOLANTMQ_WORK_DIR=/usr/lib/volantmq \
     VOLANTMQ_BUILD_FLAGS="-i" \
     VOLANTMQ_PLUGINS_DIR=/usr/lib/volantmq/plugins \
-    GO111MODULE=off
+    GO111MODULE=on
 
 RUN mkdir -p $VOLANTMQ_WORK_DIR/bin
 RUN mkdir -p $VOLANTMQ_WORK_DIR/conf
@@ -19,27 +18,33 @@ ENV PATH $VOLANTMQ_WORK_DIR/bin:$PATH
 
 # build server
 RUN \
-       go get -v github.com/ahmetb/govvv \
-    && go get -v github.com/VolantMQ/volantmq/cmd/volantmq \
-    && cd $GOPATH/src/github.com/VolantMQ/volantmq/cmd/volantmq \
-    && go get -v github.com/VolantMQ/vlapi/... \
-    && go get -v \
-    && govvv build $VOLANTMQ_BUILD_FLAGS -o $VOLANTMQ_WORK_DIR/bin/volantmq
+       GO111MODULE=off go get -v github.com/VolantMQ/volantmq \
+    && cd $GOPATH/src/github.com/VolantMQ/volantmq \
+    && GO11MODULE=on go mod tidy \
+    && cd cmd/volantmq \
+    && go build $VOLANTMQ_BUILD_FLAGS -o $VOLANTMQ_WORK_DIR/bin/volantmq
 
 # build debug plugins
 RUN \
-       cd $GOPATH/src/github.com/VolantMQ/vlapi/vlplugin/debug \
+       GO111MODULE=off go get gitlab.com/VolantMQ/vlplugin/debug \
+    && cd $GOPATH/src/gitlab.com/VolantMQ/vlplugin/debug \
+    && GO111MODULE=on go mod tidy \
     && go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -o $VOLANTMQ_WORK_DIR/plugins/debug.so
 
 # build health plugins
 RUN \
-    cd $GOPATH/src/github.com/VolantMQ/vlapi/vlplugin/health && \
-    go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -o $VOLANTMQ_WORK_DIR/plugins/health.so
+       GO111MODULE=off go get gitlab.com/VolantMQ/vlplugin/health \
+    && cd $GOPATH/src/gitlab.com/VolantMQ/vlplugin/health \
+    && GO111MODULE=on go mod tidy \
+    && go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -o $VOLANTMQ_WORK_DIR/plugins/health.so
 
 #build persistence plugins
 RUN \
-    cd $GOPATH/src/github.com/VolantMQ/vlapi/vlplugin/vlpersistence/bbolt/plugin && \
-    go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -o $VOLANTMQ_WORK_DIR/plugins/persistence_bbolt.so
+       GO111MODULE=off go get gitlab.com/VolantMQ/vlplugin/persistence/bbolt \
+    && cd $GOPATH/src/gitlab.com/VolantMQ/vlplugin/persistence/bbolt \
+    && GO111MODULE=on go mod tidy \
+    && cd plugin \
+    && go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -o $VOLANTMQ_WORK_DIR/plugins/persistence_bbolt.so
 
 FROM ubuntu
 ENV \

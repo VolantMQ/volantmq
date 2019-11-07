@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/vlplugin/vlauth"
-	"github.com/VolantMQ/vlapi/vlplugin/vlpersistence"
+	"github.com/VolantMQ/vlapi/vlauth"
+	"github.com/VolantMQ/vlapi/vlpersistence"
 
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/transport"

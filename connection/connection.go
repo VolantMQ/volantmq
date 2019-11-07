@@ -26,8 +26,8 @@ import (
 	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/vlplugin/vlauth"
-	"github.com/VolantMQ/vlapi/vlplugin/vlpersistence"
+	"github.com/VolantMQ/vlapi/vlauth"
+	"github.com/VolantMQ/vlapi/vlpersistence"
 	"go.uber.org/zap"
 
 	"github.com/VolantMQ/volantmq/configuration"

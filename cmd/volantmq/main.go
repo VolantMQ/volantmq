@@ -13,12 +13,12 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/VolantMQ/vlapi/vlauth"
+	"github.com/VolantMQ/vlapi/vlpersistence"
 	"github.com/VolantMQ/vlapi/vlplugin"
-	"github.com/VolantMQ/vlapi/vlplugin/vlauth"
-	"github.com/VolantMQ/vlapi/vlplugin/vlpersistence"
-	persistenceMem "github.com/VolantMQ/vlapi/vlplugin/vlpersistence/mem"
 	"github.com/VolantMQ/vlapi/vltypes"
 	"github.com/troian/healthcheck"
+	persistenceMem "gitlab.com/VolantMQ/vlplugin/persistence/mem"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 

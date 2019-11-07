@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/vlplugin/vlpersistence"
+	"github.com/VolantMQ/vlapi/vlpersistence"
 	"go.uber.org/zap"
 
 	"github.com/VolantMQ/volantmq/configuration"
@@ -238,7 +238,8 @@ func (mT *provider) retain(obj types.RetainObject) {
 
 	switch t := obj.(type) {
 	case *mqttp.Publish:
-		// [MQTT-3.3.1-10]            [MQTT-3.3.1-7]
+		// [MQTT-3.3.1-10]
+		// [MQTT-3.3.1-7]
 		if len(t.Payload()) == 0 || t.QoS() == mqttp.QoS0 {
 			_ = mT.retainRemove(obj.Topic()) // nolint: errcheck
 			if len(t.Payload()) == 0 {

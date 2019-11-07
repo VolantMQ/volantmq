@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
+	"github.com/VolantMQ/vlapi/vlpersistence"
 	"github.com/VolantMQ/vlapi/vlplugin"
-	"github.com/VolantMQ/vlapi/vlplugin/vlpersistence"
 	"github.com/VolantMQ/vlapi/vlsubscriber"
 	"github.com/troian/healthcheck"
 	"go.uber.org/zap"

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/vlplugin/vlpersistence"
+	"github.com/VolantMQ/vlapi/vlpersistence"
 
 	"github.com/VolantMQ/volantmq/types"
 )

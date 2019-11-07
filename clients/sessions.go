@@ -11,12 +11,12 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/VolantMQ/vlapi/vlplugin/vlpersistence"
+	"github.com/VolantMQ/vlapi/vlpersistence"
 	"github.com/vbauerster/mpb/v4"
 	"github.com/vbauerster/mpb/v4/decor"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/vlplugin/vlauth"
+	"github.com/VolantMQ/vlapi/vlauth"
 	"github.com/VolantMQ/vlapi/vlsubscriber"
 	"go.uber.org/zap"
 
@@ -131,7 +131,7 @@ func NewManager(c *Config) (*Manager, error) {
 		bar := pBars.AddBar(int64(pCount),
 			mpb.BarClearOnComplete(),
 			mpb.PrependDecorators(
-				decor.Name("persisted", decor.WC{W: len("persisted") + 1, C: decor.DSyncSpaceR}),
+				decor.Name("messages", decor.WC{W: len("messages") + 1, C: decor.DSyncSpaceR}),
 				decor.CountersNoUnit("%d / %d", decor.WCSyncWidth),
 				decor.OnComplete(decor.Name("", decor.WCSyncSpaceR), " done!"),
 			),

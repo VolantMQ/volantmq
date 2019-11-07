@@ -2,7 +2,7 @@ package connection
 
 import (
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/vlplugin/vlpersistence"
+	"github.com/VolantMQ/vlapi/vlpersistence"
 	"go.uber.org/zap"
 
 	"github.com/VolantMQ/volantmq/systree"
