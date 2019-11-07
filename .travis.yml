@@ -1,12 +1,13 @@
 language: go
 go:
-  - "1.13"
+  - "1.13.4"
+services:
+  - docker
 sudo: false
 notifications:
   email: false
 os:
   - linux
-  - osx
 before_install:
   - npm install -g codeclimate-test-reporter
   - curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh| sh -s -- -b $(go env GOPATH)/bin v1.18.0
@@ -23,3 +24,6 @@ jobs:
       after_success:
         - bash <(curl -s https://codecov.io/bash)
         - codeclimate-test-reporter < coverage.txt
+#    - stage: docker
+#      script:
+#        - docker build .

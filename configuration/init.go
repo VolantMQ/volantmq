@@ -12,7 +12,6 @@ import (
 )
 
 type config struct {
-	//log      *zap.SugaredLogger
 	humanLog *zap.SugaredLogger
 	once     sync.Once
 }
@@ -42,9 +41,7 @@ func init() {
 	logCfg.EncoderConfig.LevelKey = ""
 	logCfg.EncoderConfig.CallerKey = ""
 	logCfg.Encoding = "console"
-	logCfg.EncoderConfig.EncodeTime = func(t time.Time, encoder zapcore.PrimitiveArrayEncoder) {
-		encoder.AppendString(t.Format(time.RFC3339))
-	}
+	logCfg.EncoderConfig.EncodeTime = nil
 
 	log, _ := logCfg.Build()
 
@@ -83,7 +80,6 @@ func init() {
 
 // GetLogger return production logger
 func GetLogger() *zap.SugaredLogger {
-	//return cfg.log
 	return cfg.humanLog
 }
 
@@ -151,7 +147,7 @@ func ConfigureLoggers(c *LogConfig) error {
 
 	cfg.humanLog = zap.New(core).Sugar()
 
-	cfg.humanLog.Sync()
+	_ = cfg.humanLog.Sync()
 
 	return nil
 }

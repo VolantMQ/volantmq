@@ -40,6 +40,7 @@ auth:
   anonymous: true
   order:
     - internal
+
 mqtt:
   version:
   - v3.1.1
@@ -80,3 +81,4 @@ listeners:
     tcp:
       1883:
         auth:
+        tls:

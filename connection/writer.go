@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
-	"github.com/VolantMQ/vlapi/vlplugin/vlpersistence"
+	"github.com/VolantMQ/vlapi/vlpersistence"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
