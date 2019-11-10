@@ -58,8 +58,8 @@ func (t *clients) Connected(id string, status *ClientConnectStatus) {
 	nm, _ := mqttp.New(mqttp.ProtocolV311, mqttp.PUBLISH)
 	notifyMsg, _ := nm.(*mqttp.Publish)
 	notifyMsg.SetRetain(false)
-	notifyMsg.SetQoS(mqttp.QoS0)                    // nolint: errcheck
-	notifyMsg.SetTopic(t.topic + id + "/connected") // nolint: errcheck
+	_ = notifyMsg.SetQoS(mqttp.QoS0)
+	_ = notifyMsg.SetTopic(t.topic + id + "/connected")
 
 	if out, err := json.Marshal(&status); err != nil {
 		// todo: put reliable message
@@ -68,16 +68,16 @@ func (t *clients) Connected(id string, status *ClientConnectStatus) {
 		notifyMsg.SetPayload(out)
 	}
 
-	t.topicsManager.Publish(notifyMsg) // nolint: errcheck
-	t.topicsManager.Retain(notifyMsg)  // nolint: errcheck
+	_ = t.topicsManager.Publish(notifyMsg)
+	_ = t.topicsManager.Retain(notifyMsg)
 
 	// notify remove previous disconnect if any
 	nm, _ = mqttp.New(mqttp.ProtocolV311, mqttp.PUBLISH)
 	notifyMsg, _ = nm.(*mqttp.Publish)
 	notifyMsg.SetRetain(false)
-	notifyMsg.SetQoS(mqttp.QoS0)                       // nolint: errcheck
-	notifyMsg.SetTopic(t.topic + id + "/disconnected") // nolint: errcheck
-	t.topicsManager.Retain(notifyMsg)                  // nolint: errcheck
+	_ = notifyMsg.SetQoS(mqttp.QoS0)
+	_ = notifyMsg.SetTopic(t.topic + id + "/disconnected")
+	_ = t.topicsManager.Retain(notifyMsg)
 }
 
 // Disconnected remove client from statistic
@@ -87,8 +87,8 @@ func (t *clients) Disconnected(id string, reason mqttp.ReasonCode) {
 	nm, _ := mqttp.New(mqttp.ProtocolV311, mqttp.PUBLISH)
 	notifyMsg, _ := nm.(*mqttp.Publish)
 	notifyMsg.SetRetain(false)
-	notifyMsg.SetQoS(mqttp.QoS0)                       // nolint: errcheck
-	notifyMsg.SetTopic(t.topic + id + "/disconnected") // nolint: errcheck
+	_ = notifyMsg.SetQoS(mqttp.QoS0)
+	_ = notifyMsg.SetTopic(t.topic + id + "/disconnected")
 	notifyPayload := clientDisconnectStatus{
 		Reason:    "normal",
 		Timestamp: time.Now().Format(time.RFC3339),
@@ -100,13 +100,13 @@ func (t *clients) Disconnected(id string, reason mqttp.ReasonCode) {
 		notifyMsg.SetPayload(out)
 	}
 
-	t.topicsManager.Publish(notifyMsg) // nolint: errcheck
+	_ = t.topicsManager.Publish(notifyMsg)
 
 	// remove connected retained message
 	nm, _ = mqttp.New(mqttp.ProtocolV311, mqttp.PUBLISH)
 	notifyMsg, _ = nm.(*mqttp.Publish)
 	notifyMsg.SetRetain(false)
-	notifyMsg.SetQoS(mqttp.QoS0)                    // nolint: errcheck
-	notifyMsg.SetTopic(t.topic + id + "/connected") // nolint: errcheck
-	t.topicsManager.Retain(notifyMsg)               // nolint: errcheck
+	_ = notifyMsg.SetQoS(mqttp.QoS0)
+	_ = notifyMsg.SetTopic(t.topic + id + "/connected")
+	_ = t.topicsManager.Retain(notifyMsg)
 }

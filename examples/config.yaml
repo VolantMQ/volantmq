@@ -44,7 +44,6 @@ auth:
 mqtt:
   version:
   - v3.1.1
-  - v3.1
   - v5.0
   keepAlive:
     period: 60               # KeepAlive The number of seconds to keep the connection live if there's no data.

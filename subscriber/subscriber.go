@@ -103,6 +103,11 @@ func (s *Type) Subscribe(topic string, params *vlsubscriber.SubscriptionParams) 
 
 	s.subscriptions[topic] = params
 
+	if !params.Ops.RAP() {
+		for i := range resp.Retained {
+			resp.Retained[i].SetRetain(false)
+		}
+	}
 	return resp.Retained, nil
 }
 
@@ -132,10 +137,6 @@ func (s *Type) Publish(p *mqttp.Publish, grantedQoS mqttp.QosType, ops mqttp.Sub
 		if err = pkt.PropertySet(mqttp.PropertySubscriptionIdentifier, ids); err != nil {
 			return err
 		}
-	}
-
-	if !ops.RAP() {
-		pkt.SetRetain(false)
 	}
 
 	if pkt.QoS() != mqttp.QoS0 {
