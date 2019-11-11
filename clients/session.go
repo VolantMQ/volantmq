@@ -292,13 +292,13 @@ func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 		if val := s.will.PropertyGet(mqttp.PropertyWillDelayInterval); val != nil {
 			willIn, _ = val.AsInt()
 		}
-	}
 
-	if s.will != nil && willIn == 0 {
-		if err := s.messenger.Publish(s.will); err != nil {
-			s.log.Error("Publish will message", zap.String("ClientID", s.id), zap.Error(err))
+		if willIn == 0 {
+			if err := s.messenger.Publish(s.will); err != nil {
+				s.log.Error("Publish will message", zap.String("ClientID", s.id), zap.Error(err))
+			}
+			s.will = nil
 		}
-		s.will = nil
 	}
 
 	s.connectionClosed(s.id, params.Reason)

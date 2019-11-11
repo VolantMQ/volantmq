@@ -60,7 +60,7 @@ mqtt:
                              # If not set then default to 2 seconds.
     offlineQoS0: true        # OfflineQoS0 tell server to either persist (true) or ignore (false) QoS 0 messages for non-clean sessions
                              # If not set than default is false
-    sessionDups: true        # AllowDuplicates Either allow or deny replacing of existing session if there new client with same clientID
+    sessionPreempt: true     # Either allow or deny replacing of existing session if there new client with same clientID
                              # If not set than default is false
     retainAvailable: true    # don't set to use default
     subsOverlap: true        # tells server how to handle overlapping subscriptions from within one client

@@ -568,9 +568,9 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 		if current := currContainer.session(); current != nil {
 			// container has session with active connection
 
-			m.OnReplaceAttempt(params.ID, m.Options.SessionDups)
-			if !m.Options.SessionDups {
-				// we do not make any changes to current network connection
+			m.OnReplaceAttempt(params.ID, m.Options.SessionPreempt)
+			if !m.Options.SessionPreempt {
+				// session exemption is prohibited. not making any changes to current network connection
 				// response to new one with error and release both new & old sessions
 				err = mqttp.CodeRefusedIdentifierRejected
 				if params.Version >= mqttp.ProtocolV50 {

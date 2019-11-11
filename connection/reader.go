@@ -3,7 +3,6 @@ package connection
 import (
 	"bufio"
 	"encoding/binary"
-	"io"
 	"sync"
 	"time"
 
@@ -79,9 +78,6 @@ func (s *reader) routine() {
 		}
 
 		if pkt, err = s.readPacket(buf); err != nil {
-			if err != io.EOF {
-				s.log.Errorf("decode packet %s", err.Error())
-			}
 			return
 		}
 

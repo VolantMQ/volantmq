@@ -332,6 +332,7 @@ func (s *impl) Send(pkt mqttp.IFace) (err error) {
 // Acknowledge incoming connection
 func (s *impl) Acknowledge(p *mqttp.ConnAck, opts ...Option) error {
 	var ack error
+
 	err := s.conn.SetReadDeadline(time.Time{})
 	if err != nil {
 		return err
