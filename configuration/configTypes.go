@@ -49,6 +49,7 @@ func (s *LogConfigBase) UnmarshalYAML(unmarshal func(interface{}) error) error {
 // ConsoleLogConfig entry in system.log.console
 type ConsoleLogConfig struct {
 	LogConfigBase `yaml:",inline"`
+	Colored       bool `yaml:"colored"`
 }
 
 // SysLogConfig entry in system.log.syslog

@@ -556,7 +556,7 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 	if curr, present := m.sessions.LoadOrStore(params.ID, newContainer); present {
 		// container with given id already exists with either active connection or expiry/willDelay set
 
-		// release lock of newly allocated container as lock from old one will be used
+		// release the lock of newly allocated container as we gonna proceed with existing one
 		newContainer.release()
 
 		currContainer := curr.(*container)
@@ -578,7 +578,6 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 				}
 
 				currContainer.setRemovable(true)
-
 				currContainer.release()
 				newContainer = nil
 				return

@@ -234,6 +234,7 @@ func (s *session) SignalUnSubscribe(pkt *mqttp.UnSubscribe) (mqttp.IFace, error)
 // SignalDisconnect process DISCONNECT packet from client
 func (s *session) SignalDisconnect(pkt *mqttp.Disconnect) (mqttp.IFace, error) {
 	var err error
+	var resp mqttp.IFace
 
 	err = mqttp.CodeSuccess
 
@@ -251,6 +252,9 @@ func (s *session) SignalDisconnect(pkt *mqttp.Disconnect) (mqttp.IFace, error) {
 				// uses DISCONNECT with Reason Code 0x82 (Protocol Error) as described in section 4.13.
 				if (s.expireIn != nil && *s.expireIn == 0) && val != 0 {
 					err = mqttp.CodeProtocolError
+					p := mqttp.NewDisconnect(s.version)
+					p.SetReasonCode(mqttp.CodeProtocolError)
+					resp = p
 				} else {
 					s.expireIn = &val
 				}
@@ -260,7 +264,7 @@ func (s *session) SignalDisconnect(pkt *mqttp.Disconnect) (mqttp.IFace, error) {
 		s.will = nil
 	}
 
-	return nil, err
+	return resp, err
 }
 
 // SignalOnline signal state is get online
@@ -270,16 +274,16 @@ func (s *session) SignalOnline() {
 
 // SignalOffline put subscriber in offline mode
 func (s *session) SignalOffline() {
-	s.subscriber.Offline(!s.durable)
-}
-
-// SignalConnectionClose net connection has been closed
-func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 	// If session expiry is set to 0, the Session ends when the Network Connection is closed
 	if s.expireIn != nil && *s.expireIn == 0 {
 		s.durable = false
 	}
 
+	s.subscriber.Offline(!s.durable)
+}
+
+// SignalConnectionClose net connection has been closed
+func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 	// valid willMsg pointer tells we have will message
 	// if session is clean send will regardless to will delay
 	willIn := uint32(0)
@@ -289,6 +293,7 @@ func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 			willIn, _ = val.AsInt()
 		}
 	}
+
 	if s.will != nil && willIn == 0 {
 		if err := s.messenger.Publish(s.will); err != nil {
 			s.log.Error("Publish will message", zap.String("ClientID", s.id), zap.Error(err))

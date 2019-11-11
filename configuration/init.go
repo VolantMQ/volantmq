@@ -124,7 +124,10 @@ func ConfigureLoggers(c *LogConfig) error {
 		logCfg.EncodeTime = nil
 	}
 
-	logCfg.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	if c.Console.Colored {
+		logCfg.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	}
+
 	logCfg.StacktraceKey = ""
 	consoleEncoder := zapcore.NewConsoleEncoder(logCfg)
 
