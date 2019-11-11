@@ -49,6 +49,7 @@ func (s *LogConfigBase) UnmarshalYAML(unmarshal func(interface{}) error) error {
 // ConsoleLogConfig entry in system.log.console
 type ConsoleLogConfig struct {
 	LogConfigBase `yaml:",inline"`
+	Colored       bool `yaml:"colored"`
 }
 
 // SysLogConfig entry in system.log.syslog
@@ -124,7 +125,7 @@ type MqttConfig struct {
 	} `yaml:"keepAlive,omitempty"`
 	Options struct {
 		ConnectTimeout  int           `yaml:"connectTimeout,omitempty"`
-		SessionDups     bool          `yaml:"sessionDups,omitempty"`
+		SessionPreempt  bool          `yaml:"sessionPreempt,omitempty" yaml:"sessionDups,omitempty"`
 		RetainAvailable bool          `yaml:"retainAvailable,omitempty"`
 		SubsOverlap     bool          `yaml:"subsOverlap,omitempty"`
 		SubsID          bool          `yaml:"subsId,omitempty"`

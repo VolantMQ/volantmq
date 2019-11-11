@@ -556,7 +556,7 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 	if curr, present := m.sessions.LoadOrStore(params.ID, newContainer); present {
 		// container with given id already exists with either active connection or expiry/willDelay set
 
-		// release lock of newly allocated container as lock from old one will be used
+		// release the lock of newly allocated container as we gonna proceed with existing one
 		newContainer.release()
 
 		currContainer := curr.(*container)
@@ -568,9 +568,9 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 		if current := currContainer.session(); current != nil {
 			// container has session with active connection
 
-			m.OnReplaceAttempt(params.ID, m.Options.SessionDups)
-			if !m.Options.SessionDups {
-				// we do not make any changes to current network connection
+			m.OnReplaceAttempt(params.ID, m.Options.SessionPreempt)
+			if !m.Options.SessionPreempt {
+				// session exemption is prohibited. not making any changes to current network connection
 				// response to new one with error and release both new & old sessions
 				err = mqttp.CodeRefusedIdentifierRejected
 				if params.Version >= mqttp.ProtocolV50 {
@@ -578,7 +578,6 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 				}
 
 				currContainer.setRemovable(true)
-
 				currContainer.release()
 				newContainer = nil
 				return

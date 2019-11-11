@@ -332,6 +332,7 @@ func (s *impl) Send(pkt mqttp.IFace) (err error) {
 // Acknowledge incoming connection
 func (s *impl) Acknowledge(p *mqttp.ConnAck, opts ...Option) error {
 	var ack error
+
 	err := s.conn.SetReadDeadline(time.Time{})
 	if err != nil {
 		return err
@@ -627,11 +628,22 @@ func (s *impl) processIncoming(p mqttp.IFace) error {
 		resp = mqttp.NewPingResp(s.version)
 	case *mqttp.Disconnect:
 		s.onStop.Do(func() {
-			s.SignalOffline()
 			s.tx.stop()
 		})
 
 		resp, err = s.SignalDisconnect(pkt)
+		if resp != nil {
+			if b, e := mqttp.Encode(p); e == nil {
+				_, e = s.tx.conn.Write(b)
+				if e != nil {
+					s.log.Infof("[clientId: %s] cannot write DISCONNECT packet: %s", s.id, e.Error())
+				}
+			} else {
+				s.log.Errorf("[clientId: %s] cannot encode DISCONNECT packet: %s", s.id, e.Error())
+			}
+		}
+
+		resp = nil
 	}
 
 	if resp != nil {
