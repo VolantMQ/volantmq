@@ -628,6 +628,8 @@ func (s *impl) processIncoming(p mqttp.IFace) error {
 		resp = mqttp.NewPingResp(s.version)
 	case *mqttp.Disconnect:
 		s.onStop.Do(func() {
+			s.SignalOffline()
+
 			s.tx.stop()
 		})
 
@@ -644,6 +646,10 @@ func (s *impl) processIncoming(p mqttp.IFace) error {
 		}
 
 		resp = nil
+
+		if err == nil {
+			err = errors.New("disconnect")
+		}
 	}
 
 	if resp != nil {
@@ -750,6 +756,7 @@ func (s *impl) onConnectionCloseStage2(status error) {
 
 		s.rx.shutdown()
 
+		s.log.Infof("signal connection offline. id = %s", s.id)
 		s.SignalOffline()
 
 		s.tx.stop()
@@ -784,6 +791,8 @@ func (s *impl) onConnectionCloseStage2(status error) {
 	}
 
 	s.tx.shutdown()
+	s.rx.shutdown()
+
 	s.conn = nil
 
 	params := DisconnectParams{
