@@ -26,21 +26,21 @@ RUN \
 
 # build debug plugins
 RUN \
-       GO111MODULE=off go get gitlab.com/VolantMQ/vlplugin/debug@master \
+       GO111MODULE=off go get gitlab.com/VolantMQ/vlplugin/debug \
     && cd $GOPATH/src/gitlab.com/VolantMQ/vlplugin/debug \
     && GO111MODULE=on go mod tidy \
     && go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -o $VOLANTMQ_WORK_DIR/plugins/debug.so
 
 # build health plugins
 RUN \
-       GO111MODULE=off go get gitlab.com/VolantMQ/vlplugin/health@master \
+       GO111MODULE=off go get gitlab.com/VolantMQ/vlplugin/health \
     && cd $GOPATH/src/gitlab.com/VolantMQ/vlplugin/health \
     && GO111MODULE=on go mod tidy \
     && go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -o $VOLANTMQ_WORK_DIR/plugins/health.so
 
 #build persistence plugins
 RUN \
-       GO111MODULE=off go get gitlab.com/VolantMQ/vlplugin/persistence/bbolt@master \
+       GO111MODULE=off go get gitlab.com/VolantMQ/vlplugin/persistence/bbolt \
     && cd $GOPATH/src/gitlab.com/VolantMQ/vlplugin/persistence/bbolt \
     && GO111MODULE=on go mod tidy \
     && cd plugin \
