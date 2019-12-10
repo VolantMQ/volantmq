@@ -756,7 +756,6 @@ func (s *impl) onConnectionCloseStage2(status error) {
 
 		s.rx.shutdown()
 
-		s.log.Infof("signal connection offline. id = %s", s.id)
 		s.SignalOffline()
 
 		s.tx.stop()
