@@ -711,6 +711,7 @@ func TestRNodeMatch(t *testing.T) {
 	require.Equal(t, 3, len(msglist))
 }
 
+// nolint:unparam
 func newPublishMessageLarge(topic string, qos mqttp.QosType) *mqttp.Publish {
 	m, _ := mqttp.New(mqttp.ProtocolV311, mqttp.PUBLISH)
 

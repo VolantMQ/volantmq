@@ -5,8 +5,6 @@ import (
 	"net"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/VolantMQ/volantmq/types"
 
 	"github.com/VolantMQ/volantmq/configuration"
@@ -96,17 +94,14 @@ func (l *tcp) Close() error {
 	return err
 }
 
-func (l *tcp) newConn(cn net.Conn, stat systree.BytesMetric) (Conn, error) {
-	c, err := newConn(cn, stat)
-	if err != nil {
-		return nil, err
-	}
+func (l *tcp) newConn(cn net.Conn, stat systree.BytesMetric) Conn {
+	c := newConn(cn, stat)
 
 	if l.tls != nil {
 		c.Conn = tls.Server(cn, l.tls)
 	}
 
-	return c, nil
+	return c
 }
 
 // Serve start serving connections
@@ -138,11 +133,7 @@ func (l *tcp) Serve() error {
 				default:
 				}
 
-				if inConn, e := l.newConn(cn, l.Metric.Bytes()); e != nil {
-					l.log.Error("create connection interface", zap.Error(e))
-				} else {
-					l.handleConnection(inConn)
-				}
+				l.handleConnection(l.newConn(cn, l.Metric.Bytes()))
 			}
 		})
 

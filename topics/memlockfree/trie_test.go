@@ -1,4 +1,4 @@
-package memLockFree
+package memlockfree
 
 import (
 	"testing"

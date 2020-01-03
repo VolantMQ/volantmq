@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/VolantMQ/vlapi/mqttp"
+
 	"github.com/VolantMQ/volantmq/types"
 )
 

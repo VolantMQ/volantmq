@@ -4,9 +4,10 @@ import (
 	"time"
 
 	"github.com/VolantMQ/vlapi/mqttp"
+	"go.uber.org/zap"
+
 	"github.com/VolantMQ/volantmq/systree"
 	"github.com/VolantMQ/volantmq/transport"
-	"go.uber.org/zap"
 )
 
 func (s *reader) setOptions(opts ...readerOption) error {

@@ -10,11 +10,14 @@ os:
   - linux
 before_install:
   - npm install -g codeclimate-test-reporter
-  - curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh| sh -s -- -b $(go env GOPATH)/bin v1.18.0
+  - curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh| sh -s -- -b $(go env GOPATH)/bin v1.22.2
 install:
   - go mod tidy
 jobs:
   include:
+    - stage: lint
+      script:
+        - golangci-lint run
     - stage: test
       script:
         - cd cmd/volantmq

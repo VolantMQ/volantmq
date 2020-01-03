@@ -76,8 +76,6 @@ func (mT *provider) leafInsertNode(levels []string) *node {
 			n = newNode(mT.allowOverlapping, root)
 
 			root.children[level] = n
-		} else {
-
 		}
 
 		root = n

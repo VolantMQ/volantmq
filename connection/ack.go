@@ -13,11 +13,9 @@ type ackQueue struct {
 	onRelease onRelease
 }
 
-func (a *ackQueue) store(pkt mqttp.IFace) bool {
+func (a *ackQueue) store(pkt mqttp.IFace) {
 	id, _ := pkt.ID()
 	a.messages.Store(id, pkt)
-
-	return true
 }
 
 func (a *ackQueue) release(pkt mqttp.IFace) {

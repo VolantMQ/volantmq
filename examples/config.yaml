@@ -81,3 +81,6 @@ listeners:
       1883:
         auth:
         tls:
+    ws:
+      8883:
+

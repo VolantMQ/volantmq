@@ -66,11 +66,11 @@ func (m *Manager) AllowAnonymous() error {
 func (m *Manager) Password(clientID, user, password string) error {
 	if user == "" && m.anonymous {
 		return vlauth.StatusAllow
-	} else {
-		for _, p := range m.p {
-			if status := p.Password(clientID, user, password); status == vlauth.StatusAllow {
-				return status
-			}
+	}
+
+	for _, p := range m.p {
+		if status := p.Password(clientID, user, password); status == vlauth.StatusAllow {
+			return status
 		}
 	}
 

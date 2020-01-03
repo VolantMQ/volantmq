@@ -91,19 +91,22 @@ func (s *reader) routine() {
 func (s *reader) connectionRoutine() {
 	defer s.connWg.Done()
 
-	if s.keepAlive.Nanoseconds() > 0 {
-		if err := s.conn.SetReadDeadline(time.Now().Add(s.keepAlive)); err != nil {
-			s.connect <- err
-			return
-		}
-	}
+	// if s.keepAlive.Nanoseconds() > 0 {
+	// 	if err := s.conn.SetReadDeadline(time.Now().Add(s.keepAlive)); err != nil {
+	// 		s.connect <- err
+	// 		return
+	// 	}
+	// }
 
 	buf := bufio.NewReader(s.conn)
 
-	if pkt, err := s.readPacket(buf); err == nil {
+	pkt, err := s.readPacket(buf)
+	if err == nil {
 		s.metric.Received(pkt.Type())
 		err = s.processIncoming(pkt)
-	} else {
+	}
+
+	if err != nil {
 		s.connect <- err
 	}
 }

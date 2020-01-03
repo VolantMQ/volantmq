@@ -26,9 +26,10 @@ func (a *simpleAuth) addUser(u, p string) {
 func (a *simpleAuth) Password(clientID, user, password string) error {
 	if hash, ok := a.creds[user]; ok {
 		algo := sha256.New()
-		algo.Write([]byte(password))
-		if hex.EncodeToString(algo.Sum(nil)) == hash {
-			return vlauth.StatusAllow
+		if _, err := algo.Write([]byte(password)); err == nil {
+			if hex.EncodeToString(algo.Sum(nil)) == hash {
+				return vlauth.StatusAllow
+			}
 		}
 	}
 	return vlauth.StatusDeny

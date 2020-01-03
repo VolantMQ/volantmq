@@ -1,4 +1,4 @@
-package topicsTypes
+package topicstypes
 
 import (
 	"errors"
