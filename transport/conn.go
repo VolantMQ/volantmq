@@ -9,23 +9,15 @@ import (
 	"github.com/VolantMQ/volantmq/systree"
 )
 
-// fixme rid of all commented code when https://github.com/golang/go/issues/15735
-// is ready to go
-
 // Conn is wrapper to net.Conn
 // implemented to encapsulate bytes statistic
 type Conn interface {
 	net.Conn
-	// Start(cb netpoll.CallbackFn) error
-	// Stop() error
-	// Resume() error
 }
 
 type conn struct {
 	net.Conn
 	stat systree.BytesMetric
-	// desc *netpoll.Desc
-	// ePoll netpoll.EventPoll
 }
 
 var _ Conn = (*conn)(nil)
@@ -36,35 +28,13 @@ type Handler interface {
 }
 
 func newConn(cn net.Conn, stat systree.BytesMetric) (*conn, error) {
-	// desc, err := netpoll.HandleReadOnce(cn)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
 	c := &conn{
 		Conn: cn,
 		stat: stat,
-		// desc:  desc,
-		// ePoll: poll,
 	}
 
 	return c, nil
 }
-
-// // Start ...
-// func (c *conn) Start(cb netpoll.CallbackFn) error {
-// 	return c.ePoll.Start(c.desc, cb)
-// }
-//
-// // Stop ...
-// func (c *conn) Stop() error {
-// 	return c.ePoll.Stop(c.desc)
-// }
-//
-// // Resume ...
-// func (c *conn) Resume() error {
-// 	return c.ePoll.Resume(c.desc)
-// }
 
 // Read ...
 func (c *conn) Read(b []byte) (int, error) {

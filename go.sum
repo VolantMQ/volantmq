@@ -6,8 +6,6 @@ github.com/VividCortex/ewma v1.1.1 h1:MnEK4VOv6n0RSY4vtRe3h11qjxL3+t0B8yOL8iMXdc
 github.com/VividCortex/ewma v1.1.1/go.mod h1:2Tkkvm3sRDVXaiyucHiACn4cqf7DpdyLvmxzcbUokwA=
 github.com/VolantMQ/vlapi v0.4.1 h1:r9zTb+NF8rxuIZPjEYQii1tb4Wgc+z6zlgOqSGecAMQ=
 github.com/VolantMQ/vlapi v0.4.1/go.mod h1:BMxQqSj/pPUAM1t454rkZnNRx2F7nhATKN1X/TX/AVM=
-github.com/VolantMQ/vlapi v0.4.3 h1:ZKkeHDO/z0D9E8OH0ukVGOg+y7Osdh6K9rBKJCKQKfg=
-github.com/VolantMQ/vlapi v0.4.3/go.mod h1:zdKe6wsscI+wbH3KcaGaO9Hbkqh8UTzir2Tegho7n/o=
 github.com/VolantMQ/vlapi v0.4.4 h1:Sn6o0eWF13dsxlVKXcH1AHztjTcjzpFZ1LGk31vmlKU=
 github.com/VolantMQ/vlapi v0.4.4/go.mod h1:zdKe6wsscI+wbH3KcaGaO9Hbkqh8UTzir2Tegho7n/o=
 github.com/alecthomas/template v0.0.0-20160405071501-a0175ee3bccc/go.mod h1:LOuyumcjzFXgccqObfd/Ljyb9UuFJ6TxHnclSeseNhc=
@@ -49,8 +47,6 @@ github.com/google/go-cmp v0.3.0 h1:crn/baboCvb5fXaQ0IJ1SGTsTVrWpDsCWC8EGETZijY=
 github.com/google/go-cmp v0.3.0/go.mod h1:8QqcDgzrUqlUb/G2PQTWiueGozuR1884gddMywk6iLU=
 github.com/google/gofuzz v1.0.0/go.mod h1:dBl0BpW6vV/+mYPU4Po3pmUjxk6FQPldtuIdl/M65Eg=
 github.com/google/renameio v0.1.0/go.mod h1:KWCgfxg9yswjAJkECMjeO8J8rahYeXnNhOm40UhjYkI=
-github.com/gorilla/websocket v1.4.1 h1:q7AeDBpnBk8AogcD4DSag/Ukw/KV+YhzLj2bP5HvKCM=
-github.com/gorilla/websocket v1.4.1/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/json-iterator/go v1.1.6/go.mod h1:+SdeFBvtyEkXs7REEP0seUULqWtbJapLOCVDaaPEHmU=
 github.com/json-iterator/go v1.1.7/go.mod h1:KdQUCv79m/52Kvf8AW2vK1V8akMuk1QjK/uOdHXbAo4=
 github.com/julienschmidt/httprouter v1.2.0/go.mod h1:SYymIcj16QtmaHHD7aYtjjsJG7VTCxuUUipMqKk8s4w=

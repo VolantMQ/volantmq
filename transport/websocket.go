@@ -4,18 +4,22 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"regexp"
 	"time"
 
+	gws "github.com/gobwas/ws"
 	"github.com/gobwas/ws/wsutil"
-	"github.com/gorilla/websocket"
+	"go.uber.org/zap"
 
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/systree"
 )
 
+var subProtocolRegexp = regexp.MustCompile(`^mqtt(([vV])(3.1|3.1.1|5.0))?$`)
+
 type httpServer struct {
-	mux  *http.ServeMux
 	http *http.Server
+	up   gws.HTTPUpgrader
 }
 
 type wsConn struct {
@@ -64,25 +68,15 @@ func (c *wsConn) Write(b []byte) (int, error) {
 
 // ConfigWS listener object for websocket server
 type ConfigWS struct {
-	// CertFile
-	CertFile string
-
-	// KeyFile
-	KeyFile string
-
-	// Path
-	Path string
-
-	// SubProtocols
-	SubProtocols []string
-
+	CertFile  string
+	KeyFile   string
+	Path      string
 	transport *Config
 }
 
 type ws struct {
 	baseConfig
 	httpServer
-	up       websocket.Upgrader
 	certFile string
 	keyFile  string
 }
@@ -117,21 +111,53 @@ func NewWS(config *ConfigWS, internal *InternalConfig) (Provider, error) {
 
 	if len(config.Path) == 0 {
 		config.Path = "/"
+	} else if config.Path[0] != '/' {
+		config.Path = "/" + config.Path
 	}
-
-	l.mux = http.NewServeMux()
-	l.mux.HandleFunc(config.Path, l.serve)
 
 	l.http = &http.Server{
 		Addr:    ":" + config.transport.Port,
 		Handler: l,
 	}
 
+	// initialize upgrader with custom callback for protocol validation
+	// this callback simply returns "true" as protocol is prevalidated by ServeHTTP below
+	l.up.Protocol = func(string) bool {
+		return true
+	}
+
 	return l, nil
 }
 
-func (l *httpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	l.mux.ServeHTTP(w, r)
+func (l *ws) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	proto := r.Header.Get("Sec-WebSocket-Protocol")
+	if proto == "" {
+		_, _ = w.Write([]byte("bad \"Sec-WebSocket-Protocol\""))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if !subProtocolRegexp.Match([]byte(proto)) {
+		_, _ = w.Write([]byte("unsupported \"Sec-WebSocket-Protocol\""))
+		w.WriteHeader(http.StatusUnsupportedMediaType)
+		return
+	}
+
+	cn, _, _, err := l.up.Upgrade(r, w)
+	if err != nil {
+		l.log.Errorf("upgrade error: %s", err)
+		return
+	}
+
+	l.onConnection.Add(1)
+	go func() {
+		defer l.onConnection.Done()
+		if inConn, e := l.newConn(cn, l.Metric.Bytes()); e != nil {
+			l.log.Error("Couldn't create connection interface", zap.Error(e))
+		} else {
+			l.handleConnection(inConn)
+		}
+	}()
 }
 
 func (l *ws) newConn(cn net.Conn, stat systree.BytesMetric) (Conn, error) {
@@ -148,21 +174,21 @@ func (l *ws) newConn(cn net.Conn, stat systree.BytesMetric) (Conn, error) {
 }
 
 func (l *ws) serve(w http.ResponseWriter, r *http.Request) {
-	// cn, err := l.up.Upgrade(w, r, nil)
-	// if err != nil {
-	// 	l.log.Errorf("upgrade error: %s", err)
-	// 	return
-	// }
-	//
-	// l.onConnection.Add(1)
-	// go func() {
-	// 	defer l.onConnection.Done()
-	// 	if inConn, e := l.newConn(cn, l.Metric.Bytes()); e != nil {
-	// 		l.log.Error("Couldn't create connection interface", zap.Error(e))
-	// 	} else {
-	// 		l.handleConnection(inConn)
-	// 	}
-	// }()
+	cn, _, _, err := gws.UpgradeHTTP(r, w)
+	if err != nil {
+		l.log.Errorf("upgrade error: %s", err)
+		return
+	}
+
+	l.onConnection.Add(1)
+	go func() {
+		defer l.onConnection.Done()
+		if inConn, e := l.newConn(cn, l.Metric.Bytes()); e != nil {
+			l.log.Error("Couldn't create connection interface", zap.Error(e))
+		} else {
+			l.handleConnection(inConn)
+		}
+	}()
 }
 
 // Ready ...
