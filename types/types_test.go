@@ -10,7 +10,7 @@ func (o *one) Increment() {
 	*o++
 }
 
-func run(t *testing.T, once *Once, o *one, c chan bool) {
+func run(once *Once, o *one, c chan bool) {
 	once.Do(func() { o.Increment() })
 	c <- true
 }
@@ -29,7 +29,7 @@ func TestOnce(t *testing.T) {
 	c := make(chan bool)
 	const N = 10
 	for i := 0; i < N; i++ {
-		go run(t, once, o, c)
+		go run(once, o, c)
 	}
 	for i := 0; i < N; i++ {
 		<-c

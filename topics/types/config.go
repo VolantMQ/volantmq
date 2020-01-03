@@ -1,4 +1,4 @@
-package topicsTypes
+package topicstypes
 
 import (
 	"github.com/VolantMQ/vlapi/mqttp"

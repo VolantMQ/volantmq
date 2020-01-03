@@ -82,7 +82,7 @@ type AcceptorConfig struct {
 // SystemConfig entry in system
 type SystemConfig struct {
 	Log  LogConfig `yaml:"log"`
-	Http struct {
+	HTTP struct {
 		DefaultPort string `yaml:"defaultPort"`
 	} `yaml:"http"`
 	Acceptor AcceptorConfig `yaml:"acceptor"`
@@ -125,7 +125,7 @@ type MqttConfig struct {
 	} `yaml:"keepAlive,omitempty"`
 	Options struct {
 		ConnectTimeout  int           `yaml:"connectTimeout,omitempty"`
-		SessionPreempt  bool          `yaml:"sessionPreempt,omitempty" yaml:"sessionDups,omitempty"`
+		SessionPreempt  bool          `yaml:"sessionPreempt,omitempty" yaml:"sessionDups,omitempty"` // nolint:staticcheck
 		RetainAvailable bool          `yaml:"retainAvailable,omitempty"`
 		SubsOverlap     bool          `yaml:"subsOverlap,omitempty"`
 		SubsID          bool          `yaml:"subsId,omitempty"`

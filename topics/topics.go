@@ -23,20 +23,20 @@
 package topics
 
 import (
-	"github.com/VolantMQ/volantmq/topics/memLockFree"
-	topicsTypes "github.com/VolantMQ/volantmq/topics/types"
+	"github.com/VolantMQ/volantmq/topics/memlockfree"
+	topicstypes "github.com/VolantMQ/volantmq/topics/types"
 )
 
 // New topic provider
-func New(config topicsTypes.ProviderConfig) (topicsTypes.Provider, error) {
+func New(config topicstypes.ProviderConfig) (topicstypes.Provider, error) {
 	if config == nil {
-		return nil, topicsTypes.ErrInvalidArgs
+		return nil, topicstypes.ErrInvalidArgs
 	}
 
 	switch cfg := config.(type) {
-	case *topicsTypes.MemConfig:
-		return memLockFree.NewMemProvider(cfg)
+	case *topicstypes.MemConfig:
+		return memlockfree.NewMemProvider(cfg)
 	default:
-		return nil, topicsTypes.ErrUnknownProvider
+		return nil, topicstypes.ErrUnknownProvider
 	}
 }

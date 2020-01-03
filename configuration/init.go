@@ -4,7 +4,6 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -13,7 +12,6 @@ import (
 
 type config struct {
 	humanLog *zap.SugaredLogger
-	once     sync.Once
 }
 
 // Options global MQTT config

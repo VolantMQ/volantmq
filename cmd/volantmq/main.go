@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io/ioutil"
 	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"strings"
@@ -167,7 +166,7 @@ func loadListeners(defaultAuth *auth.Manager, lst *configuration.ListenersConfig
 	return listeners, nil
 }
 
-func (ctx *appContext) loadPlugins(cfg *configuration.PluginsConfig) error {
+func (ctx *appContext) loadPlugins(cfg *configuration.PluginsConfig) {
 	plugins := configuration.LoadPlugins(configuration.PluginsDir, cfg.Enabled)
 
 	plTypes := make(pluginTypes)
@@ -196,7 +195,6 @@ func (ctx *appContext) loadPlugins(cfg *configuration.PluginsConfig) error {
 	}
 
 	ctx.plugins.acquired = plTypes
-	return nil
 }
 
 func configureSimpleAuth(cfg interface{}) (vlauth.IFace, error) {
@@ -451,20 +449,22 @@ func (ctx *appContext) loadPersistence(cfg interface{}) (vlpersistence.IFace, er
 		}
 
 		if ctx.plugins.acquired != nil {
-			if pl, kk := ctx.plugins.acquired["persistence"][backend]; !kk {
+			pl, kk := ctx.plugins.acquired["persistence"][backend]
+
+			if !kk {
 				logger.Fatalf("\tplugins.config.persistence.backend: plugin type [%s] not found", backend)
 				return nil, errors.New("")
-			} else {
-				var plObject interface{}
-				if plObject, err = ctx.configurePlugin(pl, config); err != nil {
-					logger.Fatalf(err.Error())
-					return nil, errors.New("")
-				}
-
-				logger.Infof("\tusing persistence provider [%s]", backend)
-
-				persist = plObject.(vlpersistence.IFace)
 			}
+
+			var plObject interface{}
+			if plObject, err = ctx.configurePlugin(pl, config); err != nil {
+				logger.Fatalf(err.Error())
+				return nil, errors.New("")
+			}
+
+			logger.Infof("\tusing persistence provider [%s]", backend)
+
+			persist = plObject.(vlpersistence.IFace)
 		} else {
 			logger.Fatal("no plugins loaded")
 			return nil, errors.New("")
@@ -616,14 +616,12 @@ func main() {
 	var err error
 
 	ctx := &appContext{
-		httpDefaultMux:  config.System.Http.DefaultPort,
+		httpDefaultMux:  config.System.HTTP.DefaultPort,
 		livenessChecks:  make(map[string]healthcheck.Check),
 		readinessChecks: make(map[string]healthcheck.Check),
 	}
 
-	if err = ctx.loadPlugins(&config.Plugins); err != nil {
-		return
-	}
+	ctx.loadPlugins(&config.Plugins)
 
 	if c, ok := config.Plugins.Config["debug"]; ok {
 		if err = ctx.configureDebugPlugins(c); err != nil {

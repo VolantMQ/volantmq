@@ -9,7 +9,6 @@ import (
 
 	gws "github.com/gobwas/ws"
 	"github.com/gobwas/ws/wsutil"
-	"go.uber.org/zap"
 
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/systree"
@@ -18,8 +17,8 @@ import (
 var subProtocolRegexp = regexp.MustCompile(`^mqtt(([vV])(3.1|3.1.1|5.0))?$`)
 
 type httpServer struct {
-	http *http.Server
-	up   gws.HTTPUpgrader
+	http *http.Server     // nolint:structcheck
+	up   gws.HTTPUpgrader // nolint:structcheck
 }
 
 type wsConn struct {
@@ -152,27 +151,21 @@ func (l *ws) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	l.onConnection.Add(1)
 	go func() {
 		defer l.onConnection.Done()
-		if inConn, e := l.newConn(cn, l.Metric.Bytes()); e != nil {
-			l.log.Error("Couldn't create connection interface", zap.Error(e))
-		} else {
-			l.handleConnection(inConn)
-		}
+		l.handleConnection(l.newConn(cn, l.Metric.Bytes()))
 	}()
 }
 
-func (l *ws) newConn(cn net.Conn, stat systree.BytesMetric) (Conn, error) {
-	wr, err := newConn(cn, stat)
-	if err != nil {
-		return nil, err
-	}
+func (l *ws) newConn(cn net.Conn, stat systree.BytesMetric) Conn {
+	wr := newConn(cn, stat)
 
 	c := &wsConn{
 		conn: wr,
 	}
 
-	return c, nil
+	return c
 }
 
+// nolint:unused
 func (l *ws) serve(w http.ResponseWriter, r *http.Request) {
 	cn, _, _, err := gws.UpgradeHTTP(r, w)
 	if err != nil {
@@ -183,11 +176,7 @@ func (l *ws) serve(w http.ResponseWriter, r *http.Request) {
 	l.onConnection.Add(1)
 	go func() {
 		defer l.onConnection.Done()
-		if inConn, e := l.newConn(cn, l.Metric.Bytes()); e != nil {
-			l.log.Error("Couldn't create connection interface", zap.Error(e))
-		} else {
-			l.handleConnection(inConn)
-		}
+		l.handleConnection(l.newConn(cn, l.Metric.Bytes()))
 	}()
 }
 

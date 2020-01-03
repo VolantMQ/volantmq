@@ -202,8 +202,8 @@ func (s *server) ListenAndServe(config interface{}) error {
 	case *transport.ConfigTCP:
 		l, err = transport.NewTCP(c, &internalConfig)
 	// todo (troian) proper websocket implementation
-	// case *transport.ConfigWS:
-	// 	l, err = transport.NewWS(c, &internalConfig)
+	case *transport.ConfigWS:
+		l, err = transport.NewWS(c, &internalConfig)
 	default:
 		return errors.New("invalid listener type")
 	}

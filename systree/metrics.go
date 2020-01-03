@@ -4,6 +4,7 @@ import (
 	"sync/atomic"
 
 	"github.com/VolantMQ/vlapi/mqttp"
+
 	"github.com/VolantMQ/volantmq/types"
 )
 
@@ -77,6 +78,7 @@ func newPacketsMetric(topicPrefix string, retained *[]types.RetainObject) *packe
 }
 
 // Sent add sent packet to metrics
+// nolint:dupl
 func (t *packetsMetric) Sent(mt mqttp.Type) {
 	atomic.AddUint64(&t.total.sent.val, 1)
 	switch mt {
@@ -106,6 +108,7 @@ func (t *packetsMetric) Sent(mt mqttp.Type) {
 }
 
 // Received add received packet to metrics
+// nolint:dupl
 func (t *packetsMetric) Received(mt mqttp.Type) {
 	atomic.AddUint64(&t.total.recv.val, 1)
 	switch mt {

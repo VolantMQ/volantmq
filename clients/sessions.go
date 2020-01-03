@@ -89,15 +89,7 @@ type loadContext struct {
 func NewManager(c *Config) (*Manager, error) {
 	var err error
 
-	var m *Manager
-
-	defer func() {
-		if err != nil {
-
-		}
-	}()
-
-	m = &Manager{
+	m := &Manager{
 		Config: *c,
 		quit:   make(chan struct{}),
 		log:    configuration.GetLogger().Named("sessions"),
@@ -231,9 +223,7 @@ func (m *Manager) Shutdown() error {
 	m.sessions.Range(func(k, v interface{}) bool {
 		wrap := v.(*container)
 		if wrap.sub != nil {
-			if err := m.persistSubscriber(wrap.sub); err != nil {
-				m.log.Error("persist subscriber", zap.Error(err))
-			}
+			m.persistSubscriber(wrap.sub)
 		}
 
 		m.sessions.Delete(k)
@@ -342,7 +332,7 @@ func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) (err
 			switch obj := dl.(type) {
 			case *connection.ConnectParams:
 				connParams = obj
-				resp, e = m.processConnect(cn, connParams, authMngr)
+				resp, e = m.processConnect(connParams, authMngr)
 			case connection.AuthParams:
 				resp, e = m.processAuth(connParams, obj)
 			case error:
@@ -355,13 +345,13 @@ func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) (err
 				cn.Stop(e)
 				cn = nil
 				return nil
+			}
+
+			if resp.Type() == mqttp.AUTH {
+				_ = cn.Send(resp)
 			} else {
-				if resp.Type() == mqttp.AUTH {
-					_ = cn.Send(resp)
-				} else {
-					ack = resp.(*mqttp.ConnAck)
-					break
-				}
+				ack = resp.(*mqttp.ConnAck)
+				break
 			}
 		}
 	}
@@ -371,7 +361,7 @@ func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) (err
 	return nil
 }
 
-func (m *Manager) processConnect(cn connection.Initial, params *connection.ConnectParams, authMngr *auth.Manager) (mqttp.IFace, error) {
+func (m *Manager) processConnect(params *connection.ConnectParams, authMngr *auth.Manager) (mqttp.IFace, error) {
 	var resp mqttp.IFace
 
 	if allowed, ok := m.allowedVersions[params.Version]; !ok || !allowed {
@@ -505,6 +495,7 @@ func (m *Manager) onAuth(id string, params *connection.AuthParams) (mqttp.IFace,
 	return nil, nil
 }
 
+// nolint:unused
 func (m *Manager) checkServerStatus(v mqttp.ProtocolVersion, resp *mqttp.ConnAck) {
 	// check first if server is not about to shutdown
 	// if so just give reject and exit
@@ -611,9 +602,9 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 					err = mqttp.CodeInvalidClientID
 				}
 				return
-			} else {
-				m.sessionsCount.Add(1)
 			}
+
+			m.sessionsCount.Add(1)
 		} else {
 			newContainer = currContainer.swap(newContainer)
 			newContainer.removed = false
@@ -1010,7 +1001,7 @@ func (m *Manager) decodeSubscriber(ctx *loadContext, id string, from []byte) err
 	return nil
 }
 
-func (m *Manager) persistSubscriber(s *subscriber.Type) error {
+func (m *Manager) persistSubscriber(s *subscriber.Type) {
 	topics := s.Subscriptions()
 
 	// calculate size of the encoded entry
@@ -1049,7 +1040,6 @@ func (m *Manager) persistSubscriber(s *subscriber.Type) error {
 	}
 
 	s.Offline(true)
-	return nil
 }
 
 func (m *Manager) sessionPersistPublish(id string, p *mqttp.Publish) {

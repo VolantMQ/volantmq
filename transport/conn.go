@@ -27,13 +27,13 @@ type Handler interface {
 	OnConnection(Conn, *auth.Manager) error
 }
 
-func newConn(cn net.Conn, stat systree.BytesMetric) (*conn, error) {
+func newConn(cn net.Conn, stat systree.BytesMetric) *conn {
 	c := &conn{
 		Conn: cn,
 		stat: stat,
 	}
 
-	return c, nil
+	return c
 }
 
 // Read ...

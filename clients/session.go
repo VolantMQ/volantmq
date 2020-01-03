@@ -37,7 +37,7 @@ type sessionConfig struct {
 	will                *mqttp.Publish
 	expireIn            *uint32
 	durable             bool
-	sharedSubscriptions bool
+	sharedSubscriptions bool // nolint:structcheck
 	version             mqttp.ProtocolVersion
 }
 
@@ -45,7 +45,7 @@ type session struct {
 	sessionPreConfig
 	log     *zap.SugaredLogger
 	idLock  *sync.Mutex
-	lock    sync.Mutex
+	lock    sync.Mutex // nolint:structcheck,unused
 	stopReq types.Once
 	sessionConfig
 }
@@ -131,7 +131,7 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 		return nil, err
 	}
 
-	err = pkt.ForEachTopic(func(t *mqttp.Topic) error {
+	_ = pkt.ForEachTopic(func(t *mqttp.Topic) error {
 		var reason mqttp.ReasonCode
 		if e := s.permissions.ACL(s.id, s.username, t.Filter(), vlauth.AccessRead); e == vlauth.StatusAllow {
 			params := vlsubscriber.SubscriptionParams{

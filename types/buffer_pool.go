@@ -80,10 +80,12 @@ func (b *writePool) Read(p []byte) (n int, err error) {
 	return 0, nil
 }
 
+// nolint:unused
 func (b *writePool) grow() {
 
 }
 
+// nolint:unused
 func (b *writePool) shrink() {
 
 }

@@ -18,7 +18,7 @@ import (
 	"github.com/VolantMQ/volantmq/types"
 )
 
-const maxPacketCount = 0xFFFF
+// const maxPacketCount = 0xFFFF
 
 type writerOption func(*writer) error
 
@@ -360,9 +360,9 @@ func (s *writer) routine() {
 				} else {
 					if _, err = wr.Write(buf); err != nil {
 						return
-					} else {
-						s.metric.Sent(p.Type())
 					}
+
+					s.metric.Sent(p.Type())
 				}
 			}
 		} else {
@@ -456,7 +456,7 @@ func (s *writer) releaseID(id mqttp.IDType) {
 }
 
 // onReleaseOut process messages that required ack cycle
-// onAckTimeout if publish message has not been acknowledged withing specified ackTimeout
+// onAckTimeout if publish message has not been acknowledged within specified ackTimeout
 // server should mark it as a dup and send again
 func (s *writer) onReleaseOut(o, n mqttp.IFace) {
 	switch n.Type() {
@@ -468,6 +468,7 @@ func (s *writer) onReleaseOut(o, n mqttp.IFace) {
 	}
 }
 
+// nolint:unused
 func (s *writer) encodeForPersistence(pkt mqttp.IFace) *vlpersistence.PersistedPacket {
 	pPkt := &vlpersistence.PersistedPacket{}
 

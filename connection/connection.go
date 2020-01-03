@@ -178,7 +178,6 @@ type impl struct {
 	rx               *reader
 	quit             chan struct{}
 	connect          chan interface{}
-	onStart          types.Once
 	onConnDisconnect types.OnceWait
 	onStop           types.Once
 	started          sync.WaitGroup
@@ -403,7 +402,7 @@ func genClientID() string {
 	return base64.URLEncoding.EncodeToString(b)
 }
 
-func (s *impl) onConnect(pkt *mqttp.Connect) (mqttp.IFace, error) {
+func (s *impl) onConnect(pkt *mqttp.Connect) error {
 	if atomic.CompareAndSwapUint32(&s.connectProcessed, 0, 1) {
 		id := string(pkt.ClientID())
 		idGen := false
@@ -434,14 +433,14 @@ func (s *impl) onConnect(pkt *mqttp.Connect) (mqttp.IFace, error) {
 			wrID(id),
 		)
 		if err != nil {
-			return nil, mqttp.CodeRefusedIdentifierRejected
+			return mqttp.CodeRefusedIdentifierRejected
 		}
 
 		err = s.rx.setOptions(
 			rdVersion(pkt.Version()),
 		)
 		if err != nil {
-			return nil, mqttp.CodeRefusedUnacceptableProtocolVersion
+			return mqttp.CodeRefusedUnacceptableProtocolVersion
 		}
 
 		// MQTT v5 has different meaning of clean comparing to MQTT v3
@@ -454,11 +453,11 @@ func (s *impl) onConnect(pkt *mqttp.Connect) (mqttp.IFace, error) {
 		}
 
 		s.connect <- params
-		return nil, nil
+		return nil
 	}
 
 	// It's protocol error to send CONNECT packet more than once
-	return nil, mqttp.CodeProtocolError
+	return mqttp.CodeProtocolError
 }
 
 func (s *impl) onAuth(pkt *mqttp.Auth) (mqttp.IFace, error) {
@@ -592,8 +591,6 @@ func (s *impl) readConnProperties(req *mqttp.Connect, params *ConnectParams) {
 			params.AuthData = val
 		}
 	}
-
-	return
 }
 
 func (s *impl) processIncoming(p mqttp.IFace) error {
@@ -613,13 +610,13 @@ func (s *impl) processIncoming(p mqttp.IFace) error {
 
 	switch pkt := p.(type) {
 	case *mqttp.Connect:
-		resp, err = s.onConnect(pkt)
+		err = s.onConnect(pkt)
 	case *mqttp.Auth:
 		resp, err = s.onAuth(pkt)
 	case *mqttp.Publish:
 		resp, err = s.onPublish(pkt)
 	case *mqttp.Ack:
-		resp, err = s.onAck(pkt)
+		resp = s.onAck(pkt)
 	case *mqttp.Subscribe:
 		resp, err = s.SignalSubscribe(pkt)
 	case *mqttp.UnSubscribe:
@@ -911,7 +908,7 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 }
 
 // onAck handle ack acknowledgment received from remote
-func (s *impl) onAck(pkt *mqttp.Ack) (mqttp.IFace, error) {
+func (s *impl) onAck(pkt *mqttp.Ack) mqttp.IFace {
 	var resp mqttp.IFace
 
 	switch pkt.Type() {
@@ -962,5 +959,5 @@ func (s *impl) onAck(pkt *mqttp.Ack) (mqttp.IFace, error) {
 			zap.String("type", pkt.Type().Name()))
 	}
 
-	return resp, nil
+	return resp
 }
