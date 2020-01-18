@@ -9,8 +9,18 @@ plugins:
   enabled:
   - debug
   - health
+  - systree
+  - prometheus
   - persistence_bbolt
   config:
+    monitoring:
+      - backend: systree
+        config:
+          interval: 1
+      - backend: prometheus
+        config:
+          path: "/metrics"
+          port: 8080
     debug:
       - backend: prof.profiler
         config:
@@ -28,8 +38,7 @@ plugins:
     persistence:            # plugin type
       - backend: bbolt      # plugin internal name
         config:
-          file: "./persistence/data/bbolt.db"
-#          file: "/usr/lib/volantmq/persistence/data/bbolt.db"
+          file: "/usr/lib/volantmq/persistence/data/bbolt.db"
     auth:                   # plugin type
       - name: internal      # authenticator name, used by listeners
         backend: simpleAuth # authenticator type
@@ -40,7 +49,6 @@ auth:
   anonymous: true
   order:
     - internal
-
 mqtt:
   version:
   - v3.1.1

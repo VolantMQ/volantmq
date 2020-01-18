@@ -1,4 +1,4 @@
-FROM golang:1.13.4 as builder
+FROM golang:1.13.6-alpine3.11 as builder
 LABEL stage=intermediate
 
 #compile linux only
@@ -13,6 +13,11 @@ RUN mkdir -p $VOLANTMQ_WORK_DIR/bin
 RUN mkdir -p $VOLANTMQ_WORK_DIR/conf
 RUN mkdir -p $VOLANTMQ_PLUGINS_DIR
 
+# git required by govvv
+# gcc&g++ for building plugins
+RUN apk update && apk upgrade && \
+    apk add --no-cache bash git openssh gcc g++
+
 # Create environment directory
 ENV PATH $VOLANTMQ_WORK_DIR/bin:$PATH
 
@@ -21,22 +26,37 @@ RUN \
        GO111MODULE=off go get -v github.com/VolantMQ/volantmq/cmd/volantmq \
     && cd $GOPATH/src/github.com/VolantMQ/volantmq/cmd/volantmq \
     && GO111MODULE=on go mod tidy \
-    && go get github.com/ahmetb/govvv \
+    && go get github.com/troian/govvv \
     && govvv build $VOLANTMQ_BUILD_FLAGS -o $VOLANTMQ_WORK_DIR/bin/volantmq
+
+RUN cp $GOPATH/src/github.com/VolantMQ/volantmq/tools/print_version.sh /bin
 
 # build debug plugins
 RUN \
        GO111MODULE=off go get gitlab.com/VolantMQ/vlplugin/debug \
     && cd $GOPATH/src/gitlab.com/VolantMQ/vlplugin/debug \
     && GO111MODULE=on go mod tidy \
-    && go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -o $VOLANTMQ_WORK_DIR/plugins/debug.so
+    && go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -ldflags "-X main.version=$(print_version.sh)" -o $VOLANTMQ_WORK_DIR/plugins/debug.so
 
 # build health plugins
 RUN \
        GO111MODULE=off go get gitlab.com/VolantMQ/vlplugin/health \
     && cd $GOPATH/src/gitlab.com/VolantMQ/vlplugin/health \
     && GO111MODULE=on go mod tidy \
-    && go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -o $VOLANTMQ_WORK_DIR/plugins/health.so
+    && go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -ldflags "-X main.version=$(print_version.sh)" -o $VOLANTMQ_WORK_DIR/plugins/health.so
+
+# build metrics plugins
+RUN \
+       GO111MODULE=off go get gitlab.com/VolantMQ/vlplugin/monitoring/prometheus \
+    && cd $GOPATH/src/gitlab.com/VolantMQ/monitoring/prometheus \
+    && GO111MODULE=on go mod tidy \
+    && go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -ldflags "-X main.version=$(print_version.sh)" -o $VOLANTMQ_WORK_DIR/plugins/prometheus.so
+
+RUN \
+       GO111MODULE=off go get gitlab.com/VolantMQ/vlplugin/monitoring/systree \
+    && cd $GOPATH/src/gitlab.com/VolantMQ/monitoring/systree \
+    && GO111MODULE=on go mod tidy \
+    && go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -ldflags "-X main.version=$(print_version.sh)" -o $VOLANTMQ_WORK_DIR/plugins/systree.so
 
 #build persistence plugins
 RUN \
@@ -44,9 +64,9 @@ RUN \
     && cd $GOPATH/src/gitlab.com/VolantMQ/vlplugin/persistence/bbolt \
     && GO111MODULE=on go mod tidy \
     && cd plugin \
-    && go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -o $VOLANTMQ_WORK_DIR/plugins/persistence_bbolt.so
+    && go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -ldflags "-X main.version=$(print_version.sh)" -o $VOLANTMQ_WORK_DIR/plugins/persistence_bbolt.so
 
-FROM ubuntu
+FROM alpine
 ENV \
     VOLANTMQ_WORK_DIR=/usr/lib/volantmq
 

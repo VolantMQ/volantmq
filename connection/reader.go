@@ -9,7 +9,7 @@ import (
 	"github.com/VolantMQ/vlapi/mqttp"
 	"go.uber.org/zap"
 
-	"github.com/VolantMQ/volantmq/systree"
+	"github.com/VolantMQ/volantmq/metrics"
 	"github.com/VolantMQ/volantmq/transport"
 )
 
@@ -19,7 +19,7 @@ type reader struct {
 	onConnectionClose signalConnectionClose
 	processIncoming   signalIncoming
 	log               *zap.SugaredLogger
-	metric            systree.PacketsMetric
+	metric            metrics.Packets
 	wg                sync.WaitGroup
 	connWg            sync.WaitGroup
 	topicAlias        map[uint16]string
@@ -81,7 +81,7 @@ func (s *reader) routine() {
 			return
 		}
 
-		s.metric.Received(pkt.Type())
+		s.metric.OnRecv(pkt.Type())
 		if err = s.processIncoming(pkt); err != nil {
 			return
 		}
@@ -91,18 +91,18 @@ func (s *reader) routine() {
 func (s *reader) connectionRoutine() {
 	defer s.connWg.Done()
 
-	// if s.keepAlive.Nanoseconds() > 0 {
-	// 	if err := s.conn.SetReadDeadline(time.Now().Add(s.keepAlive)); err != nil {
-	// 		s.connect <- err
-	// 		return
-	// 	}
-	// }
+	if s.keepAlive.Nanoseconds() > 0 {
+		if err := s.conn.SetReadDeadline(time.Now().Add(s.keepAlive)); err != nil {
+			s.connect <- err
+			return
+		}
+	}
 
 	buf := bufio.NewReader(s.conn)
 
 	pkt, err := s.readPacket(buf)
 	if err == nil {
-		s.metric.Received(pkt.Type())
+		s.metric.OnRecv(pkt.Type())
 		err = s.processIncoming(pkt)
 	}
 
@@ -147,6 +147,7 @@ func (s *reader) readPacket(buf *bufio.Reader) (mqttp.IFace, error) {
 	}
 
 	if s.remaining > int(s.packetMaxSize) {
+		s.log.Error("packet is too large")
 		return nil, mqttp.CodePacketTooLarge
 	}
 

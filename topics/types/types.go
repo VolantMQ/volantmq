@@ -6,8 +6,7 @@ import (
 
 	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/VolantMQ/vlapi/vlsubscriber"
-
-	"github.com/VolantMQ/volantmq/types"
+	"github.com/VolantMQ/vlapi/vltypes"
 )
 
 const (
@@ -52,8 +51,6 @@ var (
 
 // Subscriber used inside each session as an object to provide to topic manager upon subscribe
 type Subscriber interface {
-	Acquire()
-	Release()
 	Publish(*mqttp.Publish, mqttp.QosType, mqttp.SubscriptionOptions, []uint32) error
 	Hash() uintptr
 }
@@ -66,7 +63,7 @@ type SubscriberInterface interface {
 	Publish(interface{}) error
 	Subscribe(SubscribeReq) SubscribeResp
 	UnSubscribe(UnSubscribeReq) UnSubscribeResp
-	Retain(types.RetainObject) error
+	Retain(vltypes.RetainObject) error
 	Retained(string) ([]*mqttp.Publish, error)
 }
 
@@ -79,12 +76,13 @@ type Provider interface {
 type SubscribeReq struct {
 	Filter string
 	S      Subscriber
-	Params *vlsubscriber.SubscriptionParams
+	Params vlsubscriber.SubscriptionParams
 	Chan   chan SubscribeResp
 }
 
 type SubscribeResp struct {
-	Granted  mqttp.QosType
+	// Granted  mqttp.QosType
+	Params   vlsubscriber.SubscriptionParams
 	Retained []*mqttp.Publish
 	Err      error
 }

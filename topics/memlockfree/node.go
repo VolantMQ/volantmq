@@ -6,21 +6,20 @@ import (
 	"sync/atomic"
 
 	"github.com/VolantMQ/vlapi/mqttp"
+	"github.com/VolantMQ/vlapi/vlmonitoring"
 	"github.com/VolantMQ/vlapi/vlsubscriber"
+	"github.com/VolantMQ/vlapi/vltypes"
 
-	"github.com/VolantMQ/volantmq/systree"
 	topicsTypes "github.com/VolantMQ/volantmq/topics/types"
-	"github.com/VolantMQ/volantmq/types"
 )
 
 type topicSubscriber struct {
 	s topicsTypes.Subscriber
-	p *vlsubscriber.SubscriptionParams
+	p vlsubscriber.SubscriptionParams
 	sync.RWMutex
 }
 
 func (s *topicSubscriber) acquire() *publish {
-	s.s.Acquire()
 	pe := &publish{
 		s:   s.s,
 		qos: s.p.Granted,
@@ -71,27 +70,28 @@ func newNode(parent *node) *node {
 func (mT *provider) leafInsertNode(levels []string) *node {
 	root := mT.root
 
-	for i, level := range levels {
+	for _, level := range levels {
 		for {
 			atomic.AddInt32(&root.kidsCount, 1)
 
 			value, ok := root.children.LoadOrStore(level, newNode(root))
 			n := value.(*node)
 
-			atomic.AddInt32(&n.subsCount, 1)
+			// atomic.AddInt32(&n.subsCount, 1)
 
 			if ok {
 				atomic.AddInt32(&root.kidsCount, -1)
 				if atomic.LoadInt32(&n.remove) == 1 {
-					atomic.AddInt32(&n.subsCount, -1)
+					// atomic.AddInt32(&n.subsCount, -1)
 					n.wgDeleted.Wait()
 					continue
 				}
 			}
 
-			if i != len(levels)-1 {
-				atomic.AddInt32(&n.subsCount, -1)
-			}
+			// if i != len(levels)-1 {
+			// atomic.AddInt32(&n.subsCount, -1)
+			// }
+
 			root = n
 			break
 		}
@@ -116,26 +116,25 @@ func (mT *provider) leafSearchNode(levels []string) *node {
 	return root
 }
 
-func (mT *provider) subscriptionInsert(filter string, sub topicsTypes.Subscriber, p *vlsubscriber.SubscriptionParams) bool {
+func (mT *provider) subscriptionInsert(filter string, sub topicsTypes.Subscriber, p vlsubscriber.SubscriptionParams) bool {
 	levels := strings.Split(filter, "/")
 
 	leaf := mT.leafInsertNode(levels)
 
 	// Let's see if the subscriber is already on the list and just update QoS if so
 	// Otherwise create new entry
-	if s, ok := leaf.subs.LoadOrStore(sub.Hash(), &topicSubscriber{s: sub, p: p}); ok {
-		atomic.AddInt32(&leaf.subsCount, 1)
-		ts := s.(*topicSubscriber)
-		if ok {
-			ts.Lock()
-			ts.p = p
-			ts.Unlock()
-		}
+	s, ok := leaf.subs.LoadOrStore(sub.Hash(), &topicSubscriber{s: sub, p: p})
 
-		return true
+	ts := s.(*topicSubscriber)
+	if ok {
+		ts.Lock()
+		ts.p = p
+		ts.Unlock()
+	} else {
+		atomic.AddInt32(&leaf.subsCount, 1)
 	}
 
-	return false
+	return ok
 }
 
 func (mT *provider) subscriptionRemove(topic string, sub topicsTypes.Subscriber) error {
@@ -237,7 +236,7 @@ func (mT *provider) subscriptionSearch(topic string, publishID uintptr, p *publi
 	}
 }
 
-func (mT *provider) retainInsert(topic string, obj types.RetainObject) {
+func (mT *provider) retainInsert(topic string, obj vltypes.RetainObject) {
 	levels := strings.Split(topic, "/")
 
 	root := mT.leafInsertNode(levels)
@@ -321,13 +320,13 @@ func (sn *node) getRetained(retained *[]*mqttp.Publish) {
 	rt := sn.retained.Load().(retainer)
 
 	switch val := rt.val.(type) {
-	case types.RetainObject:
+	case vltypes.RetainObject:
 		var p *mqttp.Publish
 
 		switch t := val.(type) {
 		case *mqttp.Publish:
 			p = t
-		case systree.DynamicValue:
+		case vlmonitoring.DynamicIFace:
 			p = t.Retained()
 		default:
 			panic("unknown retain type")
@@ -369,8 +368,9 @@ func overlappingSubscribers(sn *node, publishID uintptr, p *publishes) {
 		} else {
 			sub.RLock()
 			if !sub.p.Ops.NL() || id != publishID {
-				pe := sub.acquire()
-				(*p)[id] = append((*p)[id], pe)
+				if pe := sub.acquire(); pe != nil {
+					(*p)[id] = append((*p)[id], pe)
+				}
 			}
 			sub.RUnlock()
 		}
@@ -385,11 +385,12 @@ func nonOverlappingSubscribers(sn *node, publishID uintptr, p *publishes) {
 		sub := value.(*topicSubscriber)
 
 		if !sub.p.Ops.NL() || id != publishID {
-			pe := sub.acquire()
-			if _, ok := (*p)[id]; ok {
-				(*p)[id] = append((*p)[id], pe)
-			} else {
-				(*p)[id] = []*publish{pe}
+			if pe := sub.acquire(); pe != nil {
+				if _, ok := (*p)[id]; ok {
+					(*p)[id] = append((*p)[id], pe)
+				} else {
+					(*p)[id] = []*publish{pe}
+				}
 			}
 		}
 

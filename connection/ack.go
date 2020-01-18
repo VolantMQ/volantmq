@@ -18,7 +18,7 @@ func (a *ackQueue) store(pkt mqttp.IFace) {
 	a.messages.Store(id, pkt)
 }
 
-func (a *ackQueue) release(pkt mqttp.IFace) {
+func (a *ackQueue) release(pkt mqttp.IFace) bool {
 	id, _ := pkt.ID()
 
 	if value, ok := a.messages.Load(id); ok {
@@ -26,5 +26,9 @@ func (a *ackQueue) release(pkt mqttp.IFace) {
 			a.onRelease(orig, pkt)
 		}
 		a.messages.Delete(id)
+
+		return true
 	}
+
+	return false
 }

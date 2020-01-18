@@ -8,7 +8,7 @@ import (
 	"github.com/VolantMQ/vlapi/vlauth"
 	"github.com/VolantMQ/vlapi/vlpersistence"
 
-	"github.com/VolantMQ/volantmq/systree"
+	"github.com/VolantMQ/volantmq/metrics"
 	"github.com/VolantMQ/volantmq/transport"
 )
 
@@ -44,7 +44,7 @@ func KeepAlive(val int) Option {
 	}
 }
 
-func Metric(val systree.PacketsMetric) Option {
+func Metric(val metrics.Packets) Option {
 	return func(t *impl) error {
 		t.metric = val
 		if err := wrMetric(val)(t.tx); err != nil {

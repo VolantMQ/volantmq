@@ -11,7 +11,7 @@ import (
 	"github.com/gobwas/ws/wsutil"
 
 	"github.com/VolantMQ/volantmq/configuration"
-	"github.com/VolantMQ/volantmq/systree"
+	"github.com/VolantMQ/volantmq/metrics"
 )
 
 var subProtocolRegexp = regexp.MustCompile(`^mqtt(([vV])(3.1|3.1.1|5.0))?$`)
@@ -48,7 +48,7 @@ func (c *wsConn) Read(b []byte) (int, error) {
 		}
 	}
 
-	c.stat.Received(uint64(n))
+	c.stat.OnRecv(n)
 
 	return n, err
 }
@@ -59,7 +59,7 @@ func (c *wsConn) Write(b []byte) (int, error) {
 	n := 0
 	if err == nil {
 		n = len(b)
-		c.stat.Sent(uint64(n))
+		c.stat.OnSent(n)
 	}
 
 	return n, err
@@ -151,11 +151,11 @@ func (l *ws) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	l.onConnection.Add(1)
 	go func() {
 		defer l.onConnection.Done()
-		l.handleConnection(l.newConn(cn, l.Metric.Bytes()))
+		l.handleConnection(l.newConn(cn, l.Metrics))
 	}()
 }
 
-func (l *ws) newConn(cn net.Conn, stat systree.BytesMetric) Conn {
+func (l *ws) newConn(cn net.Conn, stat metrics.Bytes) Conn {
 	wr := newConn(cn, stat)
 
 	c := &wsConn{
@@ -176,7 +176,7 @@ func (l *ws) serve(w http.ResponseWriter, r *http.Request) {
 	l.onConnection.Add(1)
 	go func() {
 		defer l.onConnection.Done()
-		l.handleConnection(l.newConn(cn, l.Metric.Bytes()))
+		l.handleConnection(l.newConn(cn, l.Metrics))
 	}()
 }
 

@@ -5,23 +5,24 @@ import (
 
 	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/VolantMQ/vlapi/vlsubscriber"
+	"github.com/VolantMQ/vlapi/vltypes"
 	"github.com/stretchr/testify/require"
 
+	"github.com/VolantMQ/volantmq/metrics"
 	"github.com/VolantMQ/volantmq/subscriber"
-	"github.com/VolantMQ/volantmq/systree"
-	topicsTypes "github.com/VolantMQ/volantmq/topics/types"
-	"github.com/VolantMQ/volantmq/types"
+
+	topicstypes "github.com/VolantMQ/volantmq/topics/types"
 )
 
-var sysTree systree.Provider
-var config *topicsTypes.MemConfig
-var retainedSystree []types.RetainObject
+var config *topicstypes.MemConfig
+var retainedSystree []vltypes.RetainObject
 
 func init() {
-	config = topicsTypes.NewMemConfig()
-	sysTree, retainedSystree, _, _ = systree.NewTree("$SYS/broker")
+	metric := metrics.New()
 
-	config.Stat = sysTree.Topics()
+	config = topicstypes.NewMemConfig()
+	config.MetricsSubs = metric.Subs()
+	config.MetricsPackets = metric.Packets()
 }
 
 func allocProvider(t *testing.T) *provider {
@@ -40,10 +41,10 @@ func TestMatch1(t *testing.T) {
 	prov := allocProvider(t)
 	sub := &subscriber.Type{}
 
-	req := topicsTypes.SubscribeReq{
+	req := topicstypes.SubscribeReq{
 		Filter: "sport/tennis/player1/#",
 		S:      sub,
-		Params: &vlsubscriber.SubscriptionParams{
+		Params: vlsubscriber.SubscriptionParams{
 			Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 		},
 	}
@@ -63,10 +64,10 @@ func TestMatch2(t *testing.T) {
 
 	sub := &subscriber.Type{}
 
-	req := topicsTypes.SubscribeReq{
+	req := topicstypes.SubscribeReq{
 		Filter: "sport/tennis/player1/#",
 		S:      sub,
-		Params: &vlsubscriber.SubscriptionParams{
+		Params: vlsubscriber.SubscriptionParams{
 			Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
 		},
 	}
@@ -86,10 +87,10 @@ func TestSNodeMatch3(t *testing.T) {
 
 	sub := &subscriber.Type{}
 
-	req := topicsTypes.SubscribeReq{
+	req := topicstypes.SubscribeReq{
 		Filter: "sport/tennis/#",
 		S:      sub,
-		Params: &vlsubscriber.SubscriptionParams{
+		Params: vlsubscriber.SubscriptionParams{
 			Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
 		},
 	}
@@ -107,10 +108,10 @@ func TestMatch4(t *testing.T) {
 	prov := allocProvider(t)
 	sub := &subscriber.Type{}
 
-	req := topicsTypes.SubscribeReq{
+	req := topicstypes.SubscribeReq{
 		Filter: "#",
 		S:      sub,
-		Params: &vlsubscriber.SubscriptionParams{
+		Params: vlsubscriber.SubscriptionParams{
 			Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
 		},
 	}
@@ -172,7 +173,7 @@ func TestMatch5(t *testing.T) {
 	sub1 := &subscriber.Type{}
 	sub2 := &subscriber.Type{}
 
-	p := &vlsubscriber.SubscriptionParams{
+	p := vlsubscriber.SubscriptionParams{
 		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
@@ -189,7 +190,7 @@ func TestMatch6(t *testing.T) {
 	prov := allocProvider(t)
 	sub1 := &subscriber.Type{}
 	sub2 := &subscriber.Type{}
-	p := &vlsubscriber.SubscriptionParams{
+	p := vlsubscriber.SubscriptionParams{
 		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
@@ -206,7 +207,7 @@ func TestMatch7(t *testing.T) {
 
 	sub1 := &subscriber.Type{}
 	sub2 := &subscriber.Type{}
-	p := &vlsubscriber.SubscriptionParams{
+	p := vlsubscriber.SubscriptionParams{
 		Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
 	}
 
@@ -226,7 +227,7 @@ func TestMatch8(t *testing.T) {
 	prov := allocProvider(t)
 
 	sub := &subscriber.Type{}
-	p := &vlsubscriber.SubscriptionParams{
+	p := vlsubscriber.SubscriptionParams{
 		Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
 	}
 
@@ -242,7 +243,7 @@ func TestMatch9(t *testing.T) {
 	prov := allocProvider(t)
 
 	sub1 := &subscriber.Type{}
-	p := &vlsubscriber.SubscriptionParams{
+	p := vlsubscriber.SubscriptionParams{
 		Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
 	}
 
@@ -258,7 +259,7 @@ func TestMatch10(t *testing.T) {
 	prov := allocProvider(t)
 
 	sub1 := &subscriber.Type{}
-	p := &vlsubscriber.SubscriptionParams{
+	p := vlsubscriber.SubscriptionParams{
 		Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
 	}
 
@@ -273,7 +274,7 @@ func TestMatch10(t *testing.T) {
 func TestInsertRemove(t *testing.T) {
 	prov := allocProvider(t)
 	sub := &subscriber.Type{}
-	p := &vlsubscriber.SubscriptionParams{
+	p := vlsubscriber.SubscriptionParams{
 		Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
 	}
 
@@ -305,7 +306,7 @@ func TestInsertRemove(t *testing.T) {
 	require.Equal(t, 1, len(subs))
 
 	err = prov.subscriptionRemove("#", sub)
-	require.EqualError(t, err, topicsTypes.ErrNotFound.Error())
+	require.EqualError(t, err, topicstypes.ErrNotFound.Error())
 
 	err = prov.subscriptionRemove("/#", sub)
 	require.NoError(t, err)
@@ -316,7 +317,7 @@ func TestInsert1(t *testing.T) {
 	topic := "sport/tennis/player1/#"
 
 	sub1 := &subscriber.Type{}
-	p := &vlsubscriber.SubscriptionParams{
+	p := vlsubscriber.SubscriptionParams{
 		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
@@ -359,7 +360,7 @@ func TestSNodeInsert2(t *testing.T) {
 	topic := "#"
 
 	sub1 := &subscriber.Type{}
-	p := &vlsubscriber.SubscriptionParams{
+	p := vlsubscriber.SubscriptionParams{
 		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
@@ -385,7 +386,7 @@ func TestSNodeInsert3(t *testing.T) {
 	topic := "+/tennis/#"
 
 	sub1 := &subscriber.Type{}
-	p := &vlsubscriber.SubscriptionParams{
+	p := vlsubscriber.SubscriptionParams{
 		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
@@ -423,7 +424,7 @@ func TestSNodeInsert4(t *testing.T) {
 	topic := "/finance"
 
 	sub1 := &subscriber.Type{}
-	p := &vlsubscriber.SubscriptionParams{
+	p := vlsubscriber.SubscriptionParams{
 		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
@@ -455,7 +456,7 @@ func TestSNodeInsertDup(t *testing.T) {
 	topic := "/finance"
 
 	sub1 := &subscriber.Type{}
-	p := &vlsubscriber.SubscriptionParams{
+	p := vlsubscriber.SubscriptionParams{
 		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
@@ -489,7 +490,7 @@ func TestSNodeRemove1(t *testing.T) {
 	topic := "sport/tennis/player1/#"
 
 	sub1 := &subscriber.Type{}
-	p := &vlsubscriber.SubscriptionParams{
+	p := vlsubscriber.SubscriptionParams{
 		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
@@ -507,14 +508,14 @@ func TestSNodeRemove2(t *testing.T) {
 	topic := "sport/tennis/player1/#"
 
 	sub1 := &subscriber.Type{}
-	p := &vlsubscriber.SubscriptionParams{
+	p := vlsubscriber.SubscriptionParams{
 		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
 	prov.subscriptionInsert(topic, sub1, p)
 
 	err := prov.subscriptionRemove("sport/tennis/player1", sub1)
-	require.EqualError(t, err, topicsTypes.ErrNotFound.Error())
+	require.EqualError(t, err, topicstypes.ErrNotFound.Error())
 }
 
 func TestSNodeRemove3(t *testing.T) {
@@ -524,7 +525,7 @@ func TestSNodeRemove3(t *testing.T) {
 	sub1 := &subscriber.Type{}
 	sub2 := &subscriber.Type{}
 
-	p := &vlsubscriber.SubscriptionParams{
+	p := vlsubscriber.SubscriptionParams{
 		Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 	}
 
@@ -545,10 +546,10 @@ func TestRetain1(t *testing.T) {
 		prov.retain(m)
 	}
 
-	req := topicsTypes.SubscribeReq{
+	req := topicstypes.SubscribeReq{
 		Filter: "#",
 		S:      sub,
-		Params: &vlsubscriber.SubscriptionParams{
+		Params: vlsubscriber.SubscriptionParams{
 			Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 		},
 	}
@@ -576,10 +577,10 @@ func TestRetain2(t *testing.T) {
 	msg := newPublishMessageLarge("sport/tennis/player1/ricardo", mqttp.QoS1)
 	prov.retain(msg)
 
-	req := topicsTypes.SubscribeReq{
+	req := topicstypes.SubscribeReq{
 		Filter: "#",
 		S:      sub,
-		Params: &vlsubscriber.SubscriptionParams{
+		Params: vlsubscriber.SubscriptionParams{
 			Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
 		},
 	}

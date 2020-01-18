@@ -13,8 +13,10 @@ import (
 	"syscall"
 
 	"github.com/VolantMQ/vlapi/vlauth"
+	"github.com/VolantMQ/vlapi/vlmonitoring"
 	"github.com/VolantMQ/vlapi/vlpersistence"
 	"github.com/VolantMQ/vlapi/vlplugin"
+	"github.com/VolantMQ/vlapi/vlsubscriber"
 	"github.com/VolantMQ/vlapi/vltypes"
 	"github.com/troian/healthcheck"
 	persistenceMem "gitlab.com/VolantMQ/vlplugin/persistence/mem"
@@ -23,6 +25,7 @@ import (
 
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
+	"github.com/VolantMQ/volantmq/metrics"
 	"github.com/VolantMQ/volantmq/server"
 	"github.com/VolantMQ/volantmq/transport"
 )
@@ -52,38 +55,50 @@ type appContext struct {
 		configured []interface{}
 	}
 
-	httpDefaultMux string
-	httpServers    sync.Map
-
+	httpDefaultMux  string
+	httpServers     sync.Map
 	healthLock      sync.Mutex
 	healthHandler   healthcheck.Handler
+	metrics         metrics.IFace
 	livenessChecks  map[string]healthcheck.Check
 	readinessChecks map[string]healthcheck.Check
+	srv             server.Server
 }
 
 var _ healthcheck.Checks = (*appContext)(nil)
 
 var logger *zap.SugaredLogger
 
-// those are provided at compile time
+// these are provided at compile time
+var (
+	// GitCommit SHA hash
+	GitCommit string
 
-// GitCommit SHA hash
-var GitCommit string
+	// GitBranch if any
+	GitBranch string
 
-// GitBranch if any
-var GitBranch string
+	// GitState repository state
+	GitState string
 
-// GitState repository state
-var GitState string
+	// GitSummary repository info
+	GitSummary string
 
-// GitSummary repository info
-var GitSummary string
+	// BuildDate build date
+	BuildDate string
 
-// BuildDate build date
-var BuildDate string
+	// Version application version
+	Version string
+)
 
-// Version application version
-var Version string
+func init() {
+	if Version == "" {
+		Version = "UNKNOWN"
+	}
+
+	if BuildDate == "" {
+		BuildDate = "UNKNOWN"
+	}
+}
 
 func loadMqttListeners(defaultAuth *auth.Manager, lCfg *configuration.ListenersConfig) ([]interface{}, error) {
 	var listeners []interface{}
@@ -415,6 +430,47 @@ func (ctx *appContext) configureHealthPlugins(cfg interface{}) error {
 	return nil
 }
 
+func (ctx *appContext) configureMonitoringPlugins(cfg interface{}) error {
+	logger.Info("configuring monitoring plugins")
+
+	for idx, cfgEntry := range cfg.([]interface{}) {
+		entry, err := vltypes.NormalizeConfig(cfgEntry)
+		if err != nil {
+			return err
+		}
+
+		var backend string
+		var config interface{}
+		var ok bool
+
+		if backend, ok = entry["backend"].(string); !ok {
+			logger.Fatalf("\tplugins.config.monitoring[%d] must contain key \"backend\"", idx)
+		}
+
+		if config, ok = entry["config"]; !ok {
+			logger.Fatalf("\tplugins.config.monitoring[%d] must contain map \"config\"", idx)
+		}
+
+		var debugPlugins pluginType
+		if debugPlugins, ok = ctx.plugins.acquired["monitoring"]; ok {
+			if pl, kk := debugPlugins[backend]; kk {
+				var plObject interface{}
+				if plObject, err = ctx.configurePlugin(pl, config); err != nil {
+					logger.Fatalf(err.Error())
+					return err
+				}
+
+				_ = ctx.metrics.Register(backend, plObject.(vlmonitoring.IFace))
+			} else {
+				logger.Warnf("\tno enabled plugin of type [%d]", backend)
+			}
+		} else {
+			logger.Warn("\tno monitoring plugins loaded")
+		}
+	}
+	return nil
+}
+
 func (ctx *appContext) loadPersistence(cfg interface{}) (vlpersistence.IFace, error) {
 	var persist vlpersistence.IFace
 
@@ -478,10 +534,13 @@ func (ctx *appContext) configurePlugin(pl vlplugin.Plugin, c interface{}) (inter
 	name := "plugin." + pl.Info().Type() + "." + pl.Info().Name()
 
 	sysParams := &vlplugin.SysParams{
-		HTTP:          ctx,
-		Health:        ctx,
-		SignalFailure: pluginFailureSignal,
-		Log:           configuration.GetLogger().Named(name),
+		Messaging:      ctx,
+		HTTP:           ctx,
+		Health:         ctx,
+		SignalFailure:  pluginFailureSignal,
+		Log:            configuration.GetLogger().Named(name),
+		Version:        Version,
+		BuildTimestamp: BuildDate,
 	}
 
 	var err error
@@ -579,6 +638,18 @@ func (ctx *appContext) RemoveReadinessCheck(name string) error {
 	return nil
 }
 
+func (ctx *appContext) Publish(vl interface{}) error {
+	return ctx.srv.Publish(vl)
+}
+
+func (ctx *appContext) Retain(rt vltypes.RetainObject) error {
+	return ctx.srv.Retain(rt)
+}
+
+func (ctx *appContext) GetSubscriber(id string) (vlsubscriber.IFace, error) {
+	return ctx.srv.GetSubscriber(id)
+}
+
 func main() {
 	logger = configuration.GetHumanLogger()
 
@@ -619,6 +690,7 @@ func main() {
 		httpDefaultMux:  config.System.HTTP.DefaultPort,
 		livenessChecks:  make(map[string]healthcheck.Check),
 		readinessChecks: make(map[string]healthcheck.Check),
+		metrics:         metrics.New(),
 	}
 
 	ctx.loadPlugins(&config.Plugins)
@@ -629,6 +701,7 @@ func main() {
 			return
 		}
 	}
+
 	if c, ok := config.Plugins.Config["health"]; ok {
 		if err = ctx.configureHealthPlugins(c); err != nil {
 			logger.Error("loading health plugins", zap.Error(err))
@@ -644,6 +717,48 @@ func main() {
 	if defaultAuth, err = ctx.loadAuth(config); err != nil {
 		logger.Error("loading auth plugins", zap.Error(err))
 		return
+	}
+
+	var listeners map[string][]interface{}
+
+	if listeners, err = loadListeners(defaultAuth, &config.Listeners); err != nil {
+		logger.Error("loading listeners", zap.Error(err))
+		return
+	}
+
+	if len(listeners["mqtt"]) == 0 {
+		logger.Error("no mqtt listeners")
+		return
+	}
+
+	listenerStatus := func(id string, status string) {
+		logger.Info("listener state: ", "id: ", id, " status: ", status)
+	}
+
+	serverConfig := server.Config{
+		Health:          ctx,
+		Metrics:         ctx.metrics,
+		MQTT:            config.Mqtt,
+		Acceptor:        config.System.Acceptor,
+		Persistence:     persist,
+		TransportStatus: listenerStatus,
+		OnDuplicate: func(s string, b bool) {
+			logger.Info("Session duplicate: clientId: ", s, " allowed: ", b)
+		},
+		Version:        Version,
+		BuildTimestamp: BuildDate,
+	}
+
+	if ctx.srv, err = server.NewServer(serverConfig); err != nil {
+		logger.Errorf("server create: %s", err.Error())
+		return
+	}
+
+	if c, ok := config.Plugins.Config["monitoring"]; ok {
+		if err = ctx.configureMonitoringPlugins(c); err != nil {
+			logger.Error("loading monitoring plugins", zap.Error(err))
+			return
+		}
 	}
 
 	ctx.httpServers.Range(func(k, v interface{}) bool {
@@ -662,45 +777,11 @@ func main() {
 		return true
 	})
 
-	var listeners map[string][]interface{}
-
-	if listeners, err = loadListeners(defaultAuth, &config.Listeners); err != nil {
-		logger.Error("loading listeners", zap.Error(err))
-		return
-	}
-
-	if len(listeners["mqtt"]) == 0 {
-		logger.Error("no mqtt listeners")
-		return
-	}
-
-	var srv server.Server
-
-	listenerStatus := func(id string, status string) {
-		logger.Info("listener state: ", "id: ", id, " status: ", status)
-	}
-
-	serverConfig := server.Config{
-		Health:          ctx,
-		MQTT:            config.Mqtt,
-		Acceptor:        config.System.Acceptor,
-		Persistence:     persist,
-		TransportStatus: listenerStatus,
-		OnDuplicate: func(s string, b bool) {
-			logger.Info("Session duplicate: clientId: ", s, " allowed: ", b)
-		},
-	}
-
-	if srv, err = server.NewServer(serverConfig); err != nil {
-		logger.Errorf("server create: %s", err.Error())
-		return
-	}
-
 	logger.Info("MQTT server created")
 
 	logger.Info("MQTT starting listeners")
 	for _, l := range listeners["mqtt"] {
-		if err = srv.ListenAndServe(l); err != nil {
+		if err = ctx.srv.ListenAndServe(l); err != nil {
 			logger.Fatal("listen and serve", zap.Error(err))
 			break
 		}
@@ -716,7 +797,7 @@ func main() {
 	sig := <-ch
 	logger.Info("service received signal: ", sig.String())
 
-	if err = srv.Shutdown(); err != nil {
+	if err = ctx.srv.Shutdown(); err != nil {
 		logger.Error("shutdown server", zap.Error(err))
 	}
 

@@ -13,7 +13,7 @@ VolantMQ
 
 VolantMQ is a high performance MQTT broker that aims to be fully compliant with MQTT specs
 
-### Features, Limitations, and Future
+###Features, Limitations, and Future
 
 **Features**
 * [MQTT v3.1 - V3.1.1](http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html)
@@ -27,19 +27,19 @@ VolantMQ is a high performance MQTT broker that aims to be fully compliant with 
 * [BBolt](https://github.com/coreos/bbolt)
 * In memory
 
-### Compatibility
-
+###Compatibility
 Project has been tested with the following client libraries
 * Paho MQTT Conformance/Interoperability Testing Suite (in Python)
   * Pass with all of the test cases
 * Paho C Client library (in C)
   * Pass with all of the test cases
 
-### How to use
+###How to use
 Best option is to run prebuilt docker image
 ```bash
 docker run --rm -p 1883:1883 -p 8080:8080 -v $(pwd)/examples/config.yaml:/etc/volantmq/config.yaml --env VOLANTMQ_CONFIG=/etc/volantmq/config.yaml volantmq/volantmq
 ```
+####Whats inside
 
 - In example above port 1883 is mqtt listener with default user/password testuser/testpassword
 - Port 8080 exposes healthcheck endpoints as well as pprof at http://localhost:8080/debug/pprof

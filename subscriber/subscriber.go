@@ -27,9 +27,11 @@ type Type struct {
 	lock          sync.RWMutex
 	publisher     vlsubscriber.Publisher
 	log           *zap.SugaredLogger
-	access        sync.WaitGroup
-	subSignal     chan topicsTypes.SubscribeResp
-	unSubSignal   chan topicsTypes.UnSubscribeResp
+	// access        sync.WaitGroup
+	subSignal   chan topicsTypes.SubscribeResp
+	unSubSignal chan topicsTypes.UnSubscribeResp
+	quit        chan struct{}
+	// stop sync.Once
 	Config
 }
 
@@ -43,6 +45,7 @@ func New(c Config) *Type {
 		log:           configuration.GetLogger().Named("subscriber"),
 		subSignal:     make(chan topicsTypes.SubscribeResp),
 		unSubSignal:   make(chan topicsTypes.UnSubscribeResp),
+		quit:          make(chan struct{}),
 	}
 
 	p.publisher = c.OfflinePublish
@@ -66,16 +69,6 @@ func (s *Type) HasSubscriptions() bool {
 	return len(s.subscriptions) > 0
 }
 
-// Acquire prevent subscriber being deleted before active writes finished
-func (s *Type) Acquire() {
-	s.access.Add(1)
-}
-
-// Release subscriber once topics provider finished write
-func (s *Type) Release() {
-	s.access.Done()
-}
-
 // GetVersion return MQTT protocol version
 func (s *Type) GetVersion() mqttp.ProtocolVersion {
 	return s.Version
@@ -87,7 +80,7 @@ func (s *Type) Subscriptions() vlsubscriber.Subscriptions {
 }
 
 // Subscribe to given topic
-func (s *Type) Subscribe(topic string, params *vlsubscriber.SubscriptionParams) ([]*mqttp.Publish, error) {
+func (s *Type) Subscribe(topic string, params vlsubscriber.SubscriptionParams) ([]*mqttp.Publish, error) {
 	resp := s.Topics.Subscribe(topicsTypes.SubscribeReq{
 		Filter: topic,
 		Params: params,
@@ -99,15 +92,14 @@ func (s *Type) Subscribe(topic string, params *vlsubscriber.SubscriptionParams) 
 		return []*mqttp.Publish{}, resp.Err
 	}
 
-	params.Granted = resp.Granted
-
-	s.subscriptions[topic] = params
+	s.subscriptions[topic] = resp.Params
 
 	if !params.Ops.RAP() {
 		for i := range resp.Retained {
 			resp.Retained[i].SetRetain(false)
 		}
 	}
+
 	return resp.Retained, nil
 }
 
@@ -119,7 +111,9 @@ func (s *Type) UnSubscribe(topic string) error {
 		Chan:   s.unSubSignal,
 	})
 
-	delete(s.subscriptions, topic)
+	if resp.Err == nil {
+		delete(s.subscriptions, topic)
+	}
 
 	return resp.Err
 }
@@ -128,6 +122,12 @@ func (s *Type) UnSubscribe(topic string) error {
 // online: forward message to session
 // offline: persist message
 func (s *Type) Publish(p *mqttp.Publish, grantedQoS mqttp.QosType, ops mqttp.SubscriptionOptions, ids []uint32) error {
+	select {
+	case <-s.quit:
+		return nil
+	default:
+	}
+
 	pkt, err := p.Clone(s.Version)
 	if err != nil {
 		return err
@@ -181,13 +181,18 @@ func (s *Type) Online(c vlsubscriber.Publisher) {
 func (s *Type) Offline(shutdown bool) {
 	// if session is clean then remove all remaining subscriptions
 	if shutdown {
+		select {
+		case <-s.quit:
+		default:
+			close(s.quit)
+		}
+
 		for topic := range s.subscriptions {
 			if err := s.UnSubscribe(topic); err != nil {
-				s.log.Debugf("[clientId: %s] topic: %s: %s", s.ID, topic, err.Error())
+				s.log.Debugf("[clientId: %s] cannot unsubscribe from topic: %s: %s", s.ID, topic, err.Error())
 			}
 		}
 
-		s.access.Wait()
 		select {
 		case <-s.subSignal:
 		default:
@@ -199,6 +204,11 @@ func (s *Type) Offline(shutdown bool) {
 		default:
 			close(s.unSubSignal)
 		}
+
+		// s.access.Wait()
+		s.lock.Lock()
+		s.publisher = func(s string, publish *mqttp.Publish) {}
+		s.lock.Unlock()
 	} else {
 		s.lock.Lock()
 		s.publisher = s.OfflinePublish

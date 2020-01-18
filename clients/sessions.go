@@ -23,8 +23,8 @@ import (
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/connection"
+	"github.com/VolantMQ/volantmq/metrics"
 	"github.com/VolantMQ/volantmq/subscriber"
-	"github.com/VolantMQ/volantmq/systree"
 	topicsTypes "github.com/VolantMQ/volantmq/topics/types"
 	"github.com/VolantMQ/volantmq/transport"
 	"github.com/VolantMQ/volantmq/types"
@@ -41,7 +41,7 @@ type Config struct {
 	configuration.MqttConfig
 	TopicsMgr        topicsTypes.Provider
 	Persist          vlpersistence.IFace
-	Systree          systree.Provider
+	Metrics          metrics.Informer
 	OnReplaceAttempt func(string, bool)
 	NodeName         string
 }
@@ -117,6 +117,8 @@ func NewManager(c *Config) (*Manager, error) {
 	}
 
 	pCount := m.persistence.Count()
+
+	m.Metrics.Clients().OnPersisted(pCount)
 
 	if pCount > 0 {
 		pBars := mpb.New(mpb.WithWidth(64))
@@ -269,11 +271,6 @@ func (m *Manager) LoadSession(context interface{}, id []byte, state *vlpersisten
 
 	var err error
 
-	status := &systree.SessionCreatedStatus{
-		Clean:     false,
-		Timestamp: state.Timestamp,
-	}
-
 	if err = m.decodeSessionExpiry(ctx, sID, state); err != nil {
 		m.log.Error("Decode session expiry", zap.String("ClientID", sID), zap.Error(err))
 	}
@@ -285,14 +282,8 @@ func (m *Manager) LoadSession(context interface{}, id []byte, state *vlpersisten
 		}
 	}
 
-	if cfg, ok := ctx.preloadConfigs[sID]; ok && cfg.exp != nil {
-		status.WillDelay = strconv.FormatUint(uint64(cfg.exp.willIn), 10)
-		if cfg.exp.expireIn != nil {
-			status.ExpiryInterval = strconv.FormatUint(uint64(*cfg.exp.expireIn), 10)
-		}
-	}
+	m.Metrics.Clients().OnPersisted(1)
 
-	m.Systree.Sessions().Created(sID, status)
 	return nil
 }
 
@@ -310,7 +301,7 @@ func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) (err
 		connection.NetConn(conn),
 		connection.TxQuota(types.DefaultReceiveMax),
 		connection.RxQuota(int32(m.Options.ReceiveMax)),
-		connection.Metric(m.Systree.Metric().Packets()),
+		connection.Metric(m.Metrics.Packets()),
 		connection.RetainAvailable(m.Options.RetainAvailable),
 		connection.OfflineQoS0(m.Options.OfflineQoS0),
 		connection.MaxTxPacketSize(types.DefaultMaxPacketSize),
@@ -364,32 +355,42 @@ func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) (err
 func (m *Manager) processConnect(params *connection.ConnectParams, authMngr *auth.Manager) (mqttp.IFace, error) {
 	var resp mqttp.IFace
 
+	pkt := mqttp.NewConnAck(params.Version)
+
+	if params.Error != nil {
+		if e, ok := params.Error.(mqttp.ReasonCode); ok {
+			_ = pkt.SetReturnCode(e)
+			resp = pkt
+		}
+		return nil, params.Error
+	}
+
 	if allowed, ok := m.allowedVersions[params.Version]; !ok || !allowed {
 		reason := mqttp.CodeRefusedUnacceptableProtocolVersion
 		if params.Version == mqttp.ProtocolV50 {
 			reason = mqttp.CodeUnsupportedProtocol
 		}
 
-		return nil, reason
-	}
-
-	if len(params.AuthMethod) > 0 {
-		// TODO(troian): verify method is allowed
-	} else {
-		var reason mqttp.ReasonCode
-
-		if status := authMngr.Password(params.ID, string(params.Username), string(params.Password)); status == vlauth.StatusAllow {
-			reason = mqttp.CodeSuccess
-		} else {
-			reason = mqttp.CodeRefusedBadUsernameOrPassword
-			if params.Version == mqttp.ProtocolV50 {
-				reason = mqttp.CodeBadUserOrPassword
-			}
-		}
-
-		pkt := mqttp.NewConnAck(params.Version)
 		_ = pkt.SetReturnCode(reason)
+
 		resp = pkt
+	} else {
+		if len(params.AuthMethod) > 0 {
+			// TODO (troian): verify method is allowed
+		} else {
+			var reason mqttp.ReasonCode
+			if status := authMngr.Password(params.ID, string(params.Username), string(params.Password)); status == vlauth.StatusAllow {
+				reason = mqttp.CodeSuccess
+			} else {
+				reason = mqttp.CodeRefusedNotAuthorized
+				if params.Version == mqttp.ProtocolV50 {
+					reason = mqttp.CodeNotAuthorized
+				}
+			}
+
+			_ = pkt.SetReturnCode(reason)
+			resp = pkt
+		}
 	}
 
 	return resp, nil
@@ -420,22 +421,11 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 
 			ses.start()
 
-			// fixme(troian): add remote address
-			status := &systree.ClientConnectStatus{
-				Username:          string(params.Username),
-				Timestamp:         time.Now().Format(time.RFC3339),
-				ReceiveMaximum:    uint32(params.SendQuota),
-				MaximumPacketSize: params.MaxTxPacketSize,
-				GeneratedID:       params.IDGen,
-				SessionPresent:    ack.SessionPresent(),
-				KeepAlive:         uint16(keepAlive),
-				ConnAckCode:       ack.ReturnCode(),
-				Protocol:          params.Version,
-				CleanSession:      params.CleanStart,
-				Durable:           params.Durable,
-			}
+			m.Metrics.Clients().OnConnected()
 
-			m.Systree.Clients().Connected(params.ID, status)
+			if params.Cleaned || (ack != nil && ack.SessionPresent()) {
+				m.Metrics.Clients().OnRemoved(1)
+			}
 		}
 	}()
 
@@ -571,6 +561,8 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 				currContainer.setRemovable(true)
 				currContainer.release()
 				newContainer = nil
+				m.Metrics.Clients().OnRejected()
+
 				return
 			}
 
@@ -623,15 +615,17 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 			Version:        params.Version,
 		})
 
-	if params.CleanStart {
+	persisted := m.persistence.Exists([]byte(params.ID))
+
+	if params.CleanStart && persisted {
+		params.Cleaned = true
+		persisted = false
 		if err = m.persistence.Delete([]byte(params.ID)); err != nil && err != vlpersistence.ErrNotFound {
 			m.log.Error("Couldn't wipe session", zap.String("clientId", params.ID), zap.Error(err))
-		} else {
-			err = nil
 		}
-	}
 
-	persisted := m.persistence.Exists([]byte(params.ID))
+		err = nil
+	}
 
 	if !persisted {
 		err = m.persistence.Create([]byte(params.ID),
@@ -645,15 +639,6 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 	}
 
 	if err == nil {
-		if !persisted {
-			status := &systree.SessionCreatedStatus{
-				Clean:     params.CleanStart,
-				Durable:   params.Durable,
-				Timestamp: time.Now().Format(time.RFC3339),
-			}
-			m.Systree.Sessions().Created(params.ID, status)
-		}
-
 		cont = &containerInfo{
 			ses:     newContainer.ses,
 			sub:     sub,
@@ -730,8 +715,8 @@ func (m *Manager) writeSessionProperties(resp *mqttp.ConnAck, id string) error {
 	return nil
 }
 
-func (m *Manager) connectionClosed(id string, reason mqttp.ReasonCode) {
-	m.Systree.Clients().Disconnected(id, reason)
+func (m *Manager) connectionClosed(id string, durable bool, reason mqttp.ReasonCode) {
+	m.Metrics.Clients().OnDisconnected(durable)
 }
 
 func (m *Manager) subscriberShutdown(id string, sub vlsubscriber.IFace) {
@@ -744,16 +729,20 @@ func (m *Manager) subscriberShutdown(id string, sub vlsubscriber.IFace) {
 	}
 }
 
-func (m *Manager) sessionOffline(id string, keep bool, expCfg *expiryConfig) {
+func (m *Manager) sessionOffline(id string, state sessionOfflineState) {
 	if obj, ok := m.sessions.Load(id); ok {
 		if cont, kk := obj.(*container); kk {
 			cont.rmLock.Lock()
 			cont.ses = nil
 
-			if keep {
-				if expCfg != nil {
-					expCfg.expiryEvent = m
-					exp := newExpiry(*expCfg)
+			if state.durable {
+				m.Metrics.Packets().OnAddStore(state.qos0 + state.qos12 + state.unAck)
+			}
+
+			if state.keepContainer {
+				if state.exp != nil {
+					state.exp.expiryEvent = m
+					exp := newExpiry(*state.exp)
 					cont.expiry.Store(exp)
 
 					m.expiryCount.Add(1)
@@ -761,15 +750,11 @@ func (m *Manager) sessionOffline(id string, keep bool, expCfg *expiryConfig) {
 				}
 			} else {
 				if cont.removable {
-					state := &systree.SessionDeletedStatus{
-						Timestamp: time.Now().Format(time.RFC3339),
-						Reason:    "shutdown",
-					}
-
-					m.Systree.Sessions().Removed(id, state)
 					m.sessions.Delete(id)
 					m.sessionsCount.Done()
-					_ = m.persistence.Delete([]byte(id))
+					if !state.durable {
+						_ = m.persistence.Delete([]byte(id))
+					}
 					cont.removed = true
 				}
 			}
@@ -783,25 +768,13 @@ func (m *Manager) sessionOffline(id string, keep bool, expCfg *expiryConfig) {
 }
 
 func (m *Manager) sessionTimer(id string, expired bool) {
-	rs := "shutdown"
 	if expired {
-		rs = "expired"
-
 		_ = m.persistence.Delete([]byte(id))
 
 		m.sessions.Delete(id)
 		m.sessionsCount.Done()
-	}
-
-	state := &systree.SessionDeletedStatus{
-		Timestamp: time.Now().Format(time.RFC3339),
-		Reason:    rs,
-	}
-
-	m.Systree.Sessions().Removed(id, state)
-
-	if expired {
 		m.expiryCount.Done()
+		m.Metrics.Clients().OnRemoved(1)
 	}
 }
 
@@ -979,7 +952,7 @@ func (m *Manager) decodeSubscriber(ctx *loadContext, id string, from []byte) err
 
 		offset += total
 
-		params := &vlsubscriber.SubscriptionParams{}
+		params := vlsubscriber.SubscriptionParams{}
 
 		params.Ops = mqttp.SubscriptionOptions(from[offset])
 		offset++
@@ -1073,5 +1046,7 @@ func (m *Manager) sessionPersistPublish(id string, p *mqttp.Publish) {
 
 	if err != nil {
 		m.log.Error("Couldn't persist message", zap.String("ClientID", id), zap.Error(err))
+	} else {
+		m.Metrics.Packets().OnAddStore(1)
 	}
 }
