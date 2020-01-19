@@ -4,7 +4,7 @@ import (
 	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/VolantMQ/vlapi/vlpersistence"
 
-	"github.com/VolantMQ/volantmq/systree"
+	"github.com/VolantMQ/volantmq/metrics"
 )
 
 // ProviderConfig interface implemented by every backend
@@ -12,8 +12,9 @@ type ProviderConfig interface{}
 
 // MemConfig of topics manager
 type MemConfig struct {
-	Stat                     systree.TopicsStat
 	Persist                  vlpersistence.Retained
+	MetricsPackets           metrics.Packets
+	MetricsSubs              metrics.Subscriptions
 	OnCleanUnsubscribe       func([]string)
 	Name                     string
 	MaxQos                   mqttp.QosType

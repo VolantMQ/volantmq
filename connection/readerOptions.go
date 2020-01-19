@@ -6,7 +6,7 @@ import (
 	"github.com/VolantMQ/vlapi/mqttp"
 	"go.uber.org/zap"
 
-	"github.com/VolantMQ/volantmq/systree"
+	"github.com/VolantMQ/volantmq/metrics"
 	"github.com/VolantMQ/volantmq/transport"
 )
 
@@ -48,7 +48,7 @@ func rdConnect(val chan interface{}) readerOption {
 	}
 }
 
-func rdMetric(val systree.PacketsMetric) readerOption {
+func rdMetric(val metrics.Packets) readerOption {
 	return func(t *reader) error {
 		t.metric = val
 		return nil

@@ -5,10 +5,10 @@ import (
 	"net"
 	"time"
 
+	"github.com/VolantMQ/volantmq/metrics"
 	"github.com/VolantMQ/volantmq/types"
 
 	"github.com/VolantMQ/volantmq/configuration"
-	"github.com/VolantMQ/volantmq/systree"
 )
 
 // ConfigTCP configuration of tcp transport
@@ -94,7 +94,7 @@ func (l *tcp) Close() error {
 	return err
 }
 
-func (l *tcp) newConn(cn net.Conn, stat systree.BytesMetric) Conn {
+func (l *tcp) newConn(cn net.Conn, stat metrics.Bytes) Conn {
 	c := newConn(cn, stat)
 
 	if l.tls != nil {
@@ -133,7 +133,7 @@ func (l *tcp) Serve() error {
 				default:
 				}
 
-				l.handleConnection(l.newConn(cn, l.Metric.Bytes()))
+				l.handleConnection(l.newConn(cn, l.Metrics))
 			}
 		})
 

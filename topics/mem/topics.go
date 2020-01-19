@@ -20,46 +20,47 @@ import (
 
 	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/VolantMQ/vlapi/vlpersistence"
-	"github.com/VolantMQ/vlapi/vlsubscriber"
+	"github.com/VolantMQ/vlapi/vltypes"
 	"go.uber.org/zap"
 
 	"github.com/VolantMQ/volantmq/configuration"
-	"github.com/VolantMQ/volantmq/systree"
-	topicsTypes "github.com/VolantMQ/volantmq/topics/types"
-	"github.com/VolantMQ/volantmq/types"
+	"github.com/VolantMQ/volantmq/metrics"
+	topicstypes "github.com/VolantMQ/volantmq/topics/types"
 )
 
 type provider struct {
 	smu                sync.RWMutex
 	root               *node
-	stat               systree.TopicsStat
+	metricsPackets     metrics.Packets
+	metricsSubs        metrics.Subscriptions
 	persist            vlpersistence.Retained
 	log                *zap.SugaredLogger
 	onCleanUnsubscribe func([]string)
 	wgPublisher        sync.WaitGroup
 	wgPublisherStarted sync.WaitGroup
 	inbound            chan *mqttp.Publish
-	inRetained         chan types.RetainObject
-	subIn              chan topicsTypes.SubscribeReq
-	unSubIn            chan topicsTypes.UnSubscribeReq
+	inRetained         chan vltypes.RetainObject
+	subIn              chan topicstypes.SubscribeReq
+	unSubIn            chan topicstypes.UnSubscribeReq
 	allowOverlapping   bool
 }
 
-var _ topicsTypes.Provider = (*provider)(nil)
+var _ topicstypes.Provider = (*provider)(nil)
 
 // NewMemProvider returns an new instance of the provider, which is implements the
 // TopicsProvider interface. provider is a hidden struct that stores the topic
 // subscriptions and retained messages in memory. The content is not persistent so
 // when the server goes, everything will be gone. Use with care.
-func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error) {
+func NewMemProvider(config *topicstypes.MemConfig) (topicstypes.Provider, error) {
 	p := &provider{
-		stat:               config.Stat,
+		metricsPackets:     config.MetricsPackets,
+		metricsSubs:        config.MetricsSubs,
 		persist:            config.Persist,
 		onCleanUnsubscribe: config.OnCleanUnsubscribe,
 		inbound:            make(chan *mqttp.Publish, 1024*512),
-		inRetained:         make(chan types.RetainObject, 1024*512),
-		subIn:              make(chan topicsTypes.SubscribeReq, 1024*512),
-		unSubIn:            make(chan topicsTypes.UnSubscribeReq, 1024*512),
+		inRetained:         make(chan vltypes.RetainObject, 1024*512),
+		subIn:              make(chan topicstypes.SubscribeReq, 1024*512),
+		unSubIn:            make(chan topicstypes.UnSubscribeReq, 1024*512),
 	}
 	p.root = newNode(p.allowOverlapping, nil)
 
@@ -121,12 +122,12 @@ func NewMemProvider(config *topicsTypes.MemConfig) (topicsTypes.Provider, error)
 	return p, nil
 }
 
-func (mT *provider) Subscribe(req topicsTypes.SubscribeReq) topicsTypes.SubscribeResp {
+func (mT *provider) Subscribe(req topicstypes.SubscribeReq) topicstypes.SubscribeResp {
 	cAllocated := false
 
 	if req.Chan == nil {
 		cAllocated = true
-		req.Chan = make(chan topicsTypes.SubscribeResp)
+		req.Chan = make(chan topicstypes.SubscribeResp)
 	}
 
 	mT.subIn <- req
@@ -140,12 +141,12 @@ func (mT *provider) Subscribe(req topicsTypes.SubscribeReq) topicsTypes.Subscrib
 	return resp
 }
 
-func (mT *provider) UnSubscribe(req topicsTypes.UnSubscribeReq) topicsTypes.UnSubscribeResp {
+func (mT *provider) UnSubscribe(req topicstypes.UnSubscribeReq) topicstypes.UnSubscribeResp {
 	cAllocated := false
 
 	if req.Chan == nil {
 		cAllocated = true
-		req.Chan = make(chan topicsTypes.UnSubscribeResp)
+		req.Chan = make(chan topicstypes.UnSubscribeResp)
 	}
 
 	mT.unSubIn <- req
@@ -159,29 +160,7 @@ func (mT *provider) UnSubscribe(req topicsTypes.UnSubscribeReq) topicsTypes.UnSu
 	return resp
 }
 
-func (mT *provider) subscribe(filter string, s topicsTypes.Subscriber, p *vlsubscriber.SubscriptionParams) ([]*mqttp.Publish, error) {
-	defer mT.smu.Unlock()
-	mT.smu.Lock()
-
-	if s == nil || p == nil {
-		return []*mqttp.Publish{}, topicsTypes.ErrInvalidArgs
-	}
-
-	p.Granted = p.Ops.QoS()
-	exists := mT.subscriptionInsert(filter, s, p)
-
-	var r []*mqttp.Publish
-
-	// [MQTT-3.3.1-5]
-	rh := p.Ops.RetainHandling()
-	if (rh == mqttp.RetainHandlingRetain) || ((rh == mqttp.RetainHandlingIfNotExists) && !exists) {
-		mT.retainSearch(filter, &r)
-	}
-
-	return r, nil
-}
-
-func (mT *provider) unSubscribe(topic string, sub topicsTypes.Subscriber) error {
+func (mT *provider) unSubscribe(topic string, sub topicstypes.Subscriber) error {
 	defer mT.smu.Unlock()
 	mT.smu.Lock()
 
@@ -191,14 +170,14 @@ func (mT *provider) unSubscribe(topic string, sub topicsTypes.Subscriber) error 
 func (mT *provider) Publish(m interface{}) error {
 	msg, ok := m.(*mqttp.Publish)
 	if !ok {
-		return topicsTypes.ErrUnexpectedObjectType
+		return topicstypes.ErrUnexpectedObjectType
 	}
 	mT.inbound <- msg
 
 	return nil
 }
 
-func (mT *provider) Retain(obj types.RetainObject) error {
+func (mT *provider) Retain(obj vltypes.RetainObject) error {
 	mT.inRetained <- obj
 
 	return nil
@@ -264,14 +243,15 @@ func (mT *provider) Shutdown() error {
 	return nil
 }
 
-func (mT *provider) retain(obj types.RetainObject) {
+func (mT *provider) retain(obj vltypes.RetainObject) {
 	insert := true
 
 	mT.smu.Lock()
 
 	switch t := obj.(type) {
 	case *mqttp.Publish:
-		// [MQTT-3.3.1-10]            [MQTT-3.3.1-7]
+		// [MQTT-3.3.1-10]
+		// [MQTT-3.3.1-7]
 		if len(t.Payload()) == 0 || t.QoS() == mqttp.QoS0 {
 			_ = mT.retainRemove(obj.Topic()) // nolint: errcheck
 			if len(t.Payload()) == 0 {
@@ -282,6 +262,9 @@ func (mT *provider) retain(obj types.RetainObject) {
 
 	if insert {
 		mT.retainInsert(obj.Topic(), obj)
+		mT.metricsPackets.OnAddRetain()
+	} else {
+		mT.metricsPackets.OnSubRetain()
 	}
 
 	mT.smu.Unlock()
@@ -292,8 +275,36 @@ func (mT *provider) subscriber() {
 	mT.wgPublisherStarted.Done()
 
 	for req := range mT.subIn {
-		retained, _ := mT.subscribe(req.Filter, req.S, req.Params)
-		req.Chan <- topicsTypes.SubscribeResp{Retained: retained}
+		var resp topicstypes.SubscribeResp
+
+		if req.S == nil {
+			resp.Err = topicstypes.ErrInvalidArgs
+		} else {
+			if req.Params.Ops.QoS() > mqttp.QoS2 {
+				resp.Err = mqttp.ErrInvalidQoS
+			} else {
+				req.Params.Granted = req.Params.Ops.QoS()
+				resp.Params = req.Params
+
+				exists := mT.subscriptionInsert(req.Filter, req.S, req.Params)
+
+				var r []*mqttp.Publish
+
+				// [MQTT-3.3.1-5]
+				rh := req.Params.Ops.RetainHandling()
+				if (rh == mqttp.RetainHandlingRetain) || ((rh == mqttp.RetainHandlingIfNotExists) && !exists) {
+					mT.retainSearch(req.Filter, &r)
+				}
+
+				resp.Retained = r
+
+				if !exists {
+					mT.metricsSubs.OnSubscribe()
+				}
+			}
+		}
+
+		req.Chan <- resp
 	}
 }
 
@@ -302,7 +313,11 @@ func (mT *provider) unSubscriber() {
 	mT.wgPublisherStarted.Done()
 
 	for req := range mT.unSubIn {
-		req.Chan <- topicsTypes.UnSubscribeResp{Err: mT.unSubscribe(req.Filter, req.S)}
+		err := mT.unSubscribe(req.Filter, req.S)
+		req.Chan <- topicstypes.UnSubscribeResp{Err: err}
+		if err == nil {
+			mT.metricsSubs.OnUnsubscribe()
+		}
 	}
 }
 
@@ -331,7 +346,6 @@ func (mT *provider) publisher() {
 				if err := e.s.Publish(msg, e.qos, e.ops, e.ids); err != nil {
 					mT.log.Error("Publish error", zap.Error(err))
 				}
-				e.s.Release()
 			}
 		}
 	}

@@ -7,8 +7,7 @@ import (
 
 	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/VolantMQ/vlapi/vlpersistence"
-
-	"github.com/VolantMQ/volantmq/types"
+	"github.com/VolantMQ/vlapi/vltypes"
 )
 
 type expiryEvent interface {
@@ -20,7 +19,7 @@ type expiryConfig struct {
 	id            string
 	createdAt     time.Time
 	expiringSince time.Time
-	messenger     types.TopicMessenger
+	messenger     vltypes.TopicMessenger
 	will          *mqttp.Publish
 	expireIn      *uint32
 	willIn        uint32

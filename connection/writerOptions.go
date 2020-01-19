@@ -5,7 +5,7 @@ import (
 	"github.com/VolantMQ/vlapi/vlpersistence"
 	"go.uber.org/zap"
 
-	"github.com/VolantMQ/volantmq/systree"
+	"github.com/VolantMQ/volantmq/metrics"
 	"github.com/VolantMQ/volantmq/transport"
 )
 
@@ -40,7 +40,7 @@ func wrConn(val transport.Conn) writerOption {
 	}
 }
 
-func wrMetric(val systree.PacketsMetric) writerOption {
+func wrMetric(val metrics.Packets) writerOption {
 	return func(t *writer) error {
 		t.metric = val
 		return nil

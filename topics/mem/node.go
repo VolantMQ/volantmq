@@ -4,22 +4,21 @@ import (
 	"strings"
 
 	"github.com/VolantMQ/vlapi/mqttp"
+	"github.com/VolantMQ/vlapi/vlmonitoring"
 	"github.com/VolantMQ/vlapi/vlsubscriber"
+	"github.com/VolantMQ/vlapi/vltypes"
 
-	"github.com/VolantMQ/volantmq/systree"
-	topicsTypes "github.com/VolantMQ/volantmq/topics/types"
-	"github.com/VolantMQ/volantmq/types"
+	topicstypes "github.com/VolantMQ/volantmq/topics/types"
 )
 
 type topicSubscriber struct {
-	s topicsTypes.Subscriber
-	p *vlsubscriber.SubscriptionParams
+	s topicstypes.Subscriber
+	p vlsubscriber.SubscriptionParams
 }
 
 type subscribers map[uintptr]*topicSubscriber
 
 func (s *topicSubscriber) acquire() *publish {
-	s.s.Acquire()
 	pe := &publish{
 		s:   s.s,
 		qos: s.p.Granted,
@@ -34,7 +33,7 @@ func (s *topicSubscriber) acquire() *publish {
 }
 
 type publish struct {
-	s   topicsTypes.Subscriber
+	s   topicstypes.Subscriber
 	ops mqttp.SubscriptionOptions
 	qos mqttp.QosType
 	ids []uint32
@@ -100,7 +99,7 @@ func (mT *provider) leafSearchNode(levels []string) *node {
 	return root
 }
 
-func (mT *provider) subscriptionInsert(filter string, sub topicsTypes.Subscriber, p *vlsubscriber.SubscriptionParams) bool {
+func (mT *provider) subscriptionInsert(filter string, sub topicstypes.Subscriber, p vlsubscriber.SubscriptionParams) bool {
 	levels := strings.Split(filter, "/")
 
 	root := mT.leafInsertNode(levels)
@@ -121,14 +120,14 @@ func (mT *provider) subscriptionInsert(filter string, sub topicsTypes.Subscriber
 	return exists
 }
 
-func (mT *provider) subscriptionRemove(topic string, sub topicsTypes.Subscriber) error {
+func (mT *provider) subscriptionRemove(topic string, sub topicstypes.Subscriber) error {
 	levels := strings.Split(topic, "/")
 
 	var err error
 
 	root := mT.leafSearchNode(levels)
 	if root == nil {
-		return topicsTypes.ErrNotFound
+		return topicstypes.ErrNotFound
 	}
 
 	// path matching the topic exists.
@@ -142,7 +141,7 @@ func (mT *provider) subscriptionRemove(topic string, sub topicsTypes.Subscriber)
 		if _, ok := root.subs[id]; ok {
 			delete(root.subs, id)
 		} else {
-			err = topicsTypes.ErrNotFound
+			err = topicstypes.ErrNotFound
 		}
 	}
 
@@ -170,11 +169,11 @@ func subscriptionRecurseSearch(root *node, levels []string, publishID uintptr, p
 		// leaf level of the topic
 		// get all subscribers and return
 		root.getSubscribers(publishID, p)
-		if n, ok := root.children[topicsTypes.MWC]; ok {
+		if n, ok := root.children[topicstypes.MWC]; ok {
 			n.getSubscribers(publishID, p)
 		}
 	} else {
-		if n, ok := root.children[topicsTypes.MWC]; ok && len(levels[0]) != 0 {
+		if n, ok := root.children[topicstypes.MWC]; ok && len(levels[0]) != 0 {
 			n.getSubscribers(publishID, p)
 		}
 
@@ -182,7 +181,7 @@ func subscriptionRecurseSearch(root *node, levels []string, publishID uintptr, p
 			subscriptionRecurseSearch(n, levels[1:], publishID, p)
 		}
 
-		if n, ok := root.children[topicsTypes.SWC]; ok {
+		if n, ok := root.children[topicstypes.SWC]; ok {
 			subscriptionRecurseSearch(n, levels[1:], publishID, p)
 		}
 	}
@@ -200,7 +199,7 @@ func (mT *provider) subscriptionSearch(topic string, publishID uintptr, p *publi
 	}
 }
 
-func (mT *provider) retainInsert(topic string, obj types.RetainObject) {
+func (mT *provider) retainInsert(topic string, obj vltypes.RetainObject) {
 	levels := strings.Split(topic, "/")
 
 	root := mT.leafInsertNode(levels)
@@ -213,7 +212,7 @@ func (mT *provider) retainRemove(topic string) error {
 
 	root := mT.leafSearchNode(levels)
 	if root == nil {
-		return topicsTypes.ErrNotFound
+		return topicstypes.ErrNotFound
 	}
 
 	root.retained = nil
@@ -240,16 +239,16 @@ func retainRecurseSearch(root *node, levels []string, retained *[]*mqttp.Publish
 	if len(levels) == 0 {
 		// leaf level of the topic
 		root.getRetained(retained)
-		if n, ok := root.children[topicsTypes.MWC]; ok {
+		if n, ok := root.children[topicstypes.MWC]; ok {
 			n.allRetained(retained)
 		}
 	} else {
 		switch levels[0] {
-		case topicsTypes.MWC:
+		case topicstypes.MWC:
 			// If '#', add all retained messages starting this node
 			root.allRetained(retained)
 			return
-		case topicsTypes.SWC:
+		case topicstypes.SWC:
 			// If '+', check all nodes at this level. Next levels must be matched.
 			for _, n := range root.children {
 				retainRecurseSearch(n, levels[1:], retained)
@@ -266,7 +265,7 @@ func (mT *provider) retainSearch(filter string, retained *[]*mqttp.Publish) {
 	levels := strings.Split(filter, "/")
 	level := levels[0]
 
-	if level == topicsTypes.MWC {
+	if level == topicstypes.MWC {
 		for t, n := range mT.root.children {
 			if t != "" && !strings.HasPrefix(t, "$") {
 				n.allRetained(retained)
@@ -286,7 +285,7 @@ func (sn *node) getRetained(retained *[]*mqttp.Publish) {
 		switch t := sn.retained.(type) {
 		case *mqttp.Publish:
 			p = t
-		case systree.DynamicValue:
+		case vlmonitoring.DynamicIFace:
 			p = t.Retained()
 		default:
 			panic("unknown retained type")

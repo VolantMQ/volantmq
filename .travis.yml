@@ -21,7 +21,7 @@ jobs:
     - stage: test
       script:
         - cd cmd/volantmq
-        - go build -race -v -gcflags "-N -l" .
+        - go build -v -gcflags "-N -l" .
         - cd ../..
         - ./go.test.sh
       after_success:

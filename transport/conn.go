@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/VolantMQ/volantmq/auth"
-	"github.com/VolantMQ/volantmq/systree"
+	"github.com/VolantMQ/volantmq/metrics"
 )
 
 // Conn is wrapper to net.Conn
@@ -17,7 +17,7 @@ type Conn interface {
 
 type conn struct {
 	net.Conn
-	stat systree.BytesMetric
+	stat metrics.Bytes
 }
 
 var _ Conn = (*conn)(nil)
@@ -27,7 +27,7 @@ type Handler interface {
 	OnConnection(Conn, *auth.Manager) error
 }
 
-func newConn(cn net.Conn, stat systree.BytesMetric) *conn {
+func newConn(cn net.Conn, stat metrics.Bytes) *conn {
 	c := &conn{
 		Conn: cn,
 		stat: stat,
@@ -40,7 +40,7 @@ func newConn(cn net.Conn, stat systree.BytesMetric) *conn {
 func (c *conn) Read(b []byte) (int, error) {
 	n, err := c.Conn.Read(b)
 
-	c.stat.Received(uint64(n))
+	c.stat.OnRecv(n)
 
 	return n, err
 }
@@ -48,7 +48,7 @@ func (c *conn) Read(b []byte) (int, error) {
 // Write ...
 func (c *conn) Write(b []byte) (int, error) {
 	n, err := c.Conn.Write(b)
-	c.stat.Sent(uint64(n))
+	c.stat.OnSent(n)
 
 	return n, err
 }

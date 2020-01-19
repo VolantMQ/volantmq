@@ -8,6 +8,7 @@ import (
 	"github.com/VolantMQ/vlapi/vlauth"
 	"github.com/VolantMQ/vlapi/vlpersistence"
 	"github.com/VolantMQ/vlapi/vlsubscriber"
+	"github.com/VolantMQ/vlapi/vltypes"
 	"go.uber.org/zap"
 
 	"github.com/VolantMQ/volantmq/configuration"
@@ -16,15 +17,15 @@ import (
 )
 
 type sessionEvents interface {
-	sessionOffline(string, bool, *expiryConfig)
-	connectionClosed(string, mqttp.ReasonCode)
+	sessionOffline(string, sessionOfflineState)
+	connectionClosed(string, bool, mqttp.ReasonCode)
 	subscriberShutdown(string, vlsubscriber.IFace)
 }
 
 type sessionPreConfig struct {
 	id          string
 	createdAt   time.Time
-	messenger   types.TopicMessenger
+	messenger   vltypes.TopicMessenger
 	conn        connection.Session
 	persistence vlpersistence.Packets
 	permissions vlauth.Permissions
@@ -39,6 +40,15 @@ type sessionConfig struct {
 	durable             bool
 	sharedSubscriptions bool // nolint:structcheck
 	version             mqttp.ProtocolVersion
+}
+
+type sessionOfflineState struct {
+	durable       bool
+	keepContainer bool
+	qos0          int
+	qos12         int
+	unAck         int
+	exp           *expiryConfig
 }
 
 type session struct {
@@ -139,7 +149,7 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 				Ops: t.Ops(),
 			}
 
-			if retained, ee := s.subscriber.Subscribe(t.Filter(), &params); ee != nil {
+			if retained, ee := s.subscriber.Subscribe(t.Filter(), params); ee != nil {
 				reason = mqttp.QosFailure
 			} else {
 				reason = mqttp.ReasonCode(params.Granted)
@@ -288,6 +298,13 @@ func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 	// if session is clean send will regardless to will delay
 	willIn := uint32(0)
 
+	state := sessionOfflineState{
+		durable: s.durable,
+		qos0:    len(params.Packets.QoS0),
+		qos12:   len(params.Packets.QoS12),
+		unAck:   len(params.Packets.UnAck),
+	}
+
 	if s.will != nil {
 		if val := s.will.PropertyGet(mqttp.PropertyWillDelayInterval); val != nil {
 			willIn, _ = val.AsInt()
@@ -301,11 +318,11 @@ func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 		}
 	}
 
-	s.connectionClosed(s.id, params.Reason)
+	state.keepContainer = (s.durable && s.subscriber.HasSubscriptions()) || (willIn > 0)
 
-	keepContainer := (s.durable && s.subscriber.HasSubscriptions()) || (willIn > 0)
+	s.connectionClosed(s.id, s.durable, params.Reason)
 
-	if !keepContainer {
+	if !state.keepContainer {
 		s.subscriberShutdown(s.id, s.subscriber)
 		s.subscriber = nil
 	}
@@ -331,11 +348,13 @@ func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 				willIn:    willIn,
 			}
 
-			keepContainer = true
+			state.keepContainer = true
 		}
 	}
 
-	s.sessionOffline(s.id, keepContainer, exp)
+	state.exp = exp
+
+	s.sessionOffline(s.id, state)
 
 	s.stopReq.Do(func() {})
 }

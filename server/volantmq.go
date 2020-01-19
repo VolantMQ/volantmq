@@ -6,16 +6,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/VolantMQ/vlapi/vlpersistence"
 	"github.com/VolantMQ/vlapi/vlplugin"
 	"github.com/VolantMQ/vlapi/vlsubscriber"
+	"github.com/VolantMQ/vlapi/vltypes"
 	"github.com/troian/healthcheck"
 	"go.uber.org/zap"
 
 	"github.com/VolantMQ/volantmq/clients"
 	"github.com/VolantMQ/volantmq/configuration"
-	"github.com/VolantMQ/volantmq/systree"
+	"github.com/VolantMQ/volantmq/metrics"
 	"github.com/VolantMQ/volantmq/topics"
 	topicsTypes "github.com/VolantMQ/volantmq/topics/types"
 	"github.com/VolantMQ/volantmq/transport"
@@ -49,11 +49,11 @@ type Config struct {
 	// TransportStatus user provided callback to track transport status
 	// If not set than defaults to mock function
 	TransportStatus func(id string, status string)
-
-	Health healthcheck.Checks
-
-	// NodeName
-	NodeName string
+	Health          healthcheck.Checks
+	Metrics         metrics.IFace
+	NodeName        string
+	Version         string
+	BuildTimestamp  string
 }
 
 // Server server API
@@ -67,6 +67,8 @@ type Server interface {
 	// Shutdown terminates the server by shutting down all the client connections and closing
 	// configured listeners. It does full clean up of the resources and
 	Shutdown() error
+
+	vlplugin.Messaging
 }
 
 // server is a library implementation of the MQTT server that, as best it can, complies
@@ -76,20 +78,13 @@ type server struct {
 	sessionsMgr *clients.Manager
 	log         *zap.SugaredLogger
 	topicsMgr   topicsTypes.Provider
-	sysTree     systree.Provider
 	quit        chan struct{}
 	lock        sync.Mutex
 	onClose     sync.Once
-	// ePoll       netpoll.EventPoll
-	acceptPool types.Pool
-	transports struct {
+	acceptPool  types.Pool
+	transports  struct {
 		list map[string]transport.Provider
 		wg   sync.WaitGroup
-	}
-	systree struct {
-		publishes []systree.DynamicValue
-		timer     *time.Ticker
-		wg        sync.WaitGroup
 	}
 }
 
@@ -119,18 +114,13 @@ func NewServer(config Config) (Server, error) {
 	}
 
 	var persisRetained vlpersistence.Retained
-	var retains []types.RetainObject
-
-	if s.sysTree, retains, s.systree.publishes, err = systree.NewTree("$SYS/servers/" + s.NodeName); err != nil {
-		s.log.Errorf("cannot create systree")
-		return nil, err
-	}
 
 	persisRetained, _ = s.Persistence.Retained()
 
 	topicsConfig := topicsTypes.NewMemConfig()
 
-	topicsConfig.Stat = s.sysTree.Topics()
+	topicsConfig.MetricsPackets = s.Metrics.Packets()
+	topicsConfig.MetricsSubs = s.Metrics.Subs()
 	topicsConfig.Persist = persisRetained
 	topicsConfig.OverlappingSubscriptions = s.MQTT.Options.SubsOverlap
 
@@ -139,35 +129,13 @@ func NewServer(config Config) (Server, error) {
 		return nil, err
 	}
 
-	if s.MQTT.Systree.Enabled {
-		s.sysTree.SetCallbacks(s.topicsMgr)
-
-		for _, o := range retains {
-			if err = s.topicsMgr.Retain(o); err != nil {
-				s.log.Errorf("cannot start retain")
-				return nil, err
-			}
-		}
-
-		if s.MQTT.Systree.UpdateInterval > 0 {
-			s.systree.timer = time.NewTicker(time.Duration(s.MQTT.Systree.UpdateInterval) * time.Second)
-			s.systree.wg.Add(1)
-			go s.systreeUpdater()
-		}
-	}
-
-	// if s.ePoll, err = netpoll.New(nil); err != nil {
-	// 	s.log.Errorf("cannot create netpoll")
-	// 	return nil, err
-	// }
-
 	s.acceptPool = types.NewPool(s.Config.Acceptor.MaxIncoming, 1, s.Config.Acceptor.PreSpawn)
 
 	mConfig := &clients.Config{
 		MqttConfig:       s.MQTT,
 		TopicsMgr:        s.topicsMgr,
 		Persist:          s.Persistence,
-		Systree:          s.sysTree,
+		Metrics:          s.Metrics,
 		OnReplaceAttempt: s.OnDuplicate,
 		NodeName:         s.NodeName,
 	}
@@ -185,6 +153,14 @@ func (s *server) GetSubscriber(id string) (vlsubscriber.IFace, error) {
 	return s.sessionsMgr.GetSubscriber(id)
 }
 
+func (s *server) Publish(vl interface{}) error {
+	return s.topicsMgr.Publish(vl)
+}
+
+func (s *server) Retain(rt vltypes.RetainObject) error {
+	return s.topicsMgr.Retain(rt)
+}
+
 // ListenAndServe start listener
 func (s *server) ListenAndServe(config interface{}) error {
 	var l transport.Provider
@@ -192,16 +168,14 @@ func (s *server) ListenAndServe(config interface{}) error {
 	var err error
 
 	internalConfig := transport.InternalConfig{
-		Handler: s.sessionsMgr,
-		// EPoll:      s.ePoll,
+		Handler:    s.sessionsMgr,
 		AcceptPool: s.acceptPool,
-		Metric:     s.sysTree.Metric(),
+		Metrics:    s.Metrics.Bytes(),
 	}
 
 	switch c := config.(type) {
 	case *transport.ConfigTCP:
 		l, err = transport.NewTCP(c, &internalConfig)
-	// todo (troian) proper websocket implementation
 	case *transport.ConfigWS:
 		l, err = transport.NewWS(c, &internalConfig)
 	default:
@@ -216,7 +190,7 @@ func (s *server) ListenAndServe(config interface{}) error {
 	s.lock.Lock()
 
 	if _, ok := s.transports.list[l.Port()]; ok {
-		_ = l.Close() // nolint: errcheck
+		_ = l.Close()
 		return errors.New("already exists")
 	}
 
@@ -280,16 +254,14 @@ func (s *server) Shutdown() error {
 			delete(s.transports.list, port)
 		}
 
-		_ = s.sessionsMgr.Stop() // nolint: errcheck, gas
-
-		// shutdown systree updater
-		if s.systree.timer != nil {
-			s.systree.timer.Stop()
-			s.systree.wg.Wait()
-		}
+		_ = s.sessionsMgr.Stop()
 
 		if err := s.sessionsMgr.Shutdown(); err != nil {
 			s.log.Error("stop session manager", zap.Error(err))
+		}
+
+		if err := s.Metrics.Shutdown(); err != nil {
+			s.log.Error("stop metrics", zap.Error(err))
 		}
 
 		if err := s.topicsMgr.Shutdown(); err != nil {
@@ -300,25 +272,4 @@ func (s *server) Shutdown() error {
 	})
 
 	return nil
-}
-
-func (s *server) systreeUpdater() {
-	defer func() {
-		s.systree.wg.Done()
-	}()
-
-	select {
-	case <-s.systree.timer.C:
-		for _, val := range s.systree.publishes {
-			p := val.Publish()
-			pkt := mqttp.NewPublish(mqttp.ProtocolV311)
-
-			pkt.SetPayload(p.Payload())
-			_ = pkt.SetTopic(p.Topic())  // nolint: errcheck
-			_ = pkt.SetQoS(p.QoS())      // nolint: errcheck
-			_ = s.topicsMgr.Publish(pkt) // nolint: errcheck
-		}
-	case <-s.quit:
-		return
-	}
 }

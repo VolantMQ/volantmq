@@ -13,7 +13,7 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
-	"github.com/VolantMQ/volantmq/systree"
+	"github.com/VolantMQ/volantmq/metrics"
 	"github.com/VolantMQ/volantmq/transport"
 	"github.com/VolantMQ/volantmq/types"
 )
@@ -26,13 +26,14 @@ type writer struct {
 	id                string
 	onConnectionClose signalConnectionClose
 	conn              transport.Conn
-	metric            systree.PacketsMetric
+	metric            metrics.Packets
 	persist           vlpersistence.Packets
 	flow              flow
 	pubOut            ackQueue
 	gMessages         *types.Queue
 	qos0Messages      *types.Queue
 	qos12Messages     *types.Queue
+	pubrelMessages    *types.Queue
 	quit              chan struct{}
 	topicAlias        map[string]uint16
 	wg                sync.WaitGroup
@@ -69,6 +70,7 @@ func newWriter() *writer {
 	w.gMessages = types.NewQueue()
 	w.qos0Messages = types.NewQueue()
 	w.qos12Messages = types.NewQueue()
+	w.pubrelMessages = types.NewQueue()
 
 	w.wgStarted.Add(1)
 
@@ -94,26 +96,38 @@ func (s *writer) start(start bool) {
 		}()
 
 		if start {
+			tmpQueue := types.NewQueue()
+
 			ctx := &packetLoaderCtx{
 				unAck:   true,
 				count:   0xFFFF,
-				packets: s.qos12Messages,
+				packets: tmpQueue,
 			}
 
 			if err := s.persist.PacketsForEachUnAck([]byte(s.id), ctx, s.packetLoader); err != nil {
 				s.log.Errorf("load unacknowleded packets")
 			}
 
-			ctx.unAck = false
+			for m := tmpQueue.Remove(); m != nil; m = tmpQueue.Remove() {
+				switch m.(type) {
+				case *mqttp.Publish:
+					s.qos12Messages.Add(m)
+				case *mqttp.Ack:
+					s.pubrelMessages.Add(m)
+				}
+			}
 
-			ctx.count = s.qos12Messages.Length()
+			ctx.unAck = false
+			ctx.packets = s.qos12Messages
+
+			ctx.count = int(^uint(0) >> 1) //  s.qos12Messages.Length()
 
 			if err := s.persist.PacketsForEachQoS12([]byte(s.id), ctx, s.packetLoader); err != nil {
 				s.log.Errorf("load QoS12 packets")
 			}
 
 			ctx.packets = s.qos0Messages
-			ctx.count = s.qos0Messages.Length()
+			ctx.count = int(^uint(0) >> 1) // ctx.count = s.qos0Messages.Length()
 
 			if err := s.persist.PacketsForEachQoS0([]byte(s.id), ctx, s.packetLoader); err != nil {
 				s.log.Errorf("load QoS0 packets")
@@ -163,6 +177,8 @@ func (s *writer) packetLoader(c interface{}, entry *vlpersistence.PersistedPacke
 
 	ctx.count--
 
+	s.metric.OnSubStore(1)
+
 	if ctx.count == 0 {
 		return true, errors.New("exit")
 	}
@@ -194,6 +210,12 @@ func (s *writer) send(pkt mqttp.IFace) {
 			s.sendQoS0(pkt)
 		} else {
 			s.sendQoS12(pkt)
+		}
+	case *mqttp.Ack:
+		if p.Type() == mqttp.PUBREL {
+			s.sendPubrel(pkt)
+		} else {
+			s.sendGeneric(pkt)
 		}
 	default:
 		s.sendGeneric(pkt)
@@ -227,17 +249,11 @@ func (s *writer) sendQoS0(pkt mqttp.IFace) {
 
 func (s *writer) sendQoS12(pkt mqttp.IFace) {
 	s.qos12Messages.Add(pkt)
-	// if (atomic.LoadUint32(&s.qos12Redirect) == 0) && (maxPacketCount-s.qos12Messages.Length() > 0) {
-	// 	s.qos12Messages.Add(pkt)
-	// } else {
-	// 	atomic.StoreUint32(&s.qos12Redirect, 1)
-	// 	if p := s.encodeForPersistence(pkt); p != nil {
-	// 		if err := s.persist.PacketStoreQoS12([]byte(s.id), p); err != nil {
-	// 			s.log.Error("persist packet", zap.String("clientId", s.id), zap.Error(err))
-	// 		}
-	// 	}
-	// }
+	s.signalAndRun()
+}
 
+func (s *writer) sendPubrel(pkt mqttp.IFace) {
+	s.pubrelMessages.Add(pkt)
 	s.signalAndRun()
 }
 
@@ -266,36 +282,41 @@ func (s *writer) qos0Available() bool {
 	return s.qos0Messages.Length() > 0
 }
 
-func (s *writer) qos12Available() bool {
-	return s.flow.quotaAvailable() && (s.qos12Messages.Length() > 0)
+func (s *writer) pubrelAvailable() bool {
+	return s.pubrelMessages.Length() > 0
 }
 
-func (s *writer) packetsAvailable() bool {
-	return s.gAvailable() || s.qos0Available() || s.qos12Available()
+func (s *writer) qos12Available() bool {
+	return s.flow.quotaAvailable() && (s.qos12Messages.Length() > 0)
 }
 
 func (s *writer) qos12PopPacket() mqttp.IFace {
 	var pkt mqttp.IFace
 
-	if s.flow.quotaAvailable() && s.qos12Messages.Length() > 0 {
-		value := s.qos12Messages.Remove()
-		switch m := value.(type) {
+	if pt := s.qos12Messages.Peek(); pt != nil {
+		switch m := pt.(type) {
 		case *mqttp.Publish:
-			// try acquire packet id
-			id, _ := s.flow.acquire()
+			if s.flow.quotaAvailable() {
+				// try acquire packet id
+				id, _ := s.flow.acquire()
 
-			m.SetPacketID(id)
-			pkt = m
-		case *mqttp.Ack:
-			pkt = m
+				m.SetPacketID(id)
+				pkt = m
+
+				s.qos12Messages.Remove()
+				s.pubOut.store(pkt)
+				s.metric.OnAddUnAckSent(1)
+			}
 		default:
-			s.log.Panic("unexpected type", zap.String("type", reflect.TypeOf(value).String()))
+			s.log.Panic("unexpected type", zap.String("type", reflect.TypeOf(m).String()))
 		}
-
-		s.pubOut.store(pkt)
 	}
 
 	return pkt
+}
+
+func (s *writer) packetsAvailable() bool {
+	return s.pubrelAvailable() || s.gAvailable() || s.qos0Available() || s.qos12Available()
 }
 
 func (s *writer) routine() {
@@ -362,7 +383,7 @@ func (s *writer) routine() {
 						return
 					}
 
-					s.metric.Sent(p.Type())
+					s.metric.OnSent(p.Type())
 				}
 			}
 		} else {
@@ -385,13 +406,20 @@ func (s *writer) routine() {
 func (s *writer) popPackets() []mqttp.IFace {
 	var packets []mqttp.IFace
 	if s.isAlive() {
-		if pkt := s.gMessages.Remove(); pkt != nil {
+		if pkt := s.pubrelMessages.Remove(); pkt != nil {
 			p := pkt.(mqttp.IFace)
 			packets = append(packets, p)
+			s.pubOut.store(p)
+			s.metric.OnAddUnAckSent(1)
 		}
 
 		if pkt := s.qos12PopPacket(); pkt != nil {
 			packets = append(packets, pkt)
+		}
+
+		if pkt := s.gMessages.Remove(); pkt != nil {
+			p := pkt.(mqttp.IFace)
+			packets = append(packets, p)
 		}
 
 		if pkt := s.qos0Messages.Remove(); pkt != nil {
@@ -557,9 +585,16 @@ func (s *writer) getQueuedPackets() vlpersistence.PersistedPackets {
 		packets.QoS12 = append(packets.QoS12, packetEncode(m))
 	}
 
+	for m = s.pubrelMessages.Remove(); m != nil; m = s.pubrelMessages.Remove() {
+		if pkt, ok := m.(mqttp.IFace); ok {
+			packets.UnAck = append(packets.UnAck, packetEncode(&unacknowledged{pkt}))
+		}
+	}
+
 	s.pubOut.messages.Range(func(k, v interface{}) bool {
 		if pkt, ok := v.(mqttp.IFace); ok {
 			packets.UnAck = append(packets.UnAck, packetEncode(&unacknowledged{pkt}))
+			s.metric.OnSubUnAckSent(1)
 		}
 
 		s.pubOut.messages.Delete(k)

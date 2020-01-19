@@ -62,7 +62,7 @@ func TestTopicsSubscribeInvalidQoS(t *testing.T) {
 		req := topicsTypes.SubscribeReq{
 			Filter: "test",
 			S:      sub,
-			Params: &vlsubscriber.SubscriptionParams{
+			Params: vlsubscriber.SubscriptionParams{
 				Ops: mqttp.SubscriptionOptions(mqttp.QosType(3)),
 			},
 		}

@@ -31,7 +31,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/VolantMQ/volantmq/configuration"
-	"github.com/VolantMQ/volantmq/systree"
+	"github.com/VolantMQ/volantmq/metrics"
 	"github.com/VolantMQ/volantmq/transport"
 	"github.com/VolantMQ/volantmq/types"
 )
@@ -149,6 +149,7 @@ type ConnectParams struct {
 	KeepAlive       uint16
 	IDGen           bool
 	CleanStart      bool
+	Cleaned         bool
 	Durable         bool
 	Version         mqttp.ProtocolVersion
 }
@@ -169,7 +170,7 @@ type impl struct {
 	SessionCallbacks
 	id               string
 	conn             transport.Conn
-	metric           systree.PacketsMetric
+	metric           metrics.Packets
 	permissions      vlauth.Permissions
 	signalAuth       OnAuthCb
 	onConnClose      func(error)
@@ -359,7 +360,7 @@ func (s *impl) Acknowledge(p *mqttp.ConnAck, opts ...Option) error {
 	if _, err = bufs.WriteTo(s.conn); err != nil {
 		ack = ErrConnectionNack
 	} else {
-		s.metric.Sent(p.Type())
+		s.metric.OnSent(p.Type())
 	}
 
 	if ack != nil {
@@ -367,10 +368,11 @@ func (s *impl) Acknowledge(p *mqttp.ConnAck, opts ...Option) error {
 	} else {
 		s.onConnClose = s.onConnectionCloseStage2
 		s.callStop = s.onConnectionClose
-		s.SignalOnline()
 
-		s.rx.run()
 		s.tx.start(true)
+		s.rx.run()
+
+		s.SignalOnline()
 	}
 
 	return ack
@@ -420,6 +422,7 @@ func (s *impl) onConnect(pkt *mqttp.Connect) error {
 			KeepAlive:  pkt.KeepAlive(),
 			Version:    pkt.Version(),
 			CleanStart: pkt.IsClean(),
+			Cleaned:    false,
 			Durable:    true,
 		}
 
@@ -618,8 +621,18 @@ func (s *impl) processIncoming(p mqttp.IFace) error {
 	case *mqttp.Ack:
 		resp = s.onAck(pkt)
 	case *mqttp.Subscribe:
+		// [MQTT-2.3.1-1]
+		if id, _ := pkt.ID(); id == 0 {
+			return mqttp.CodeProtocolError
+		}
+
 		resp, err = s.SignalSubscribe(pkt)
 	case *mqttp.UnSubscribe:
+		// [MQTT-2.3.1-1]
+		if id, _ := pkt.ID(); id == 0 {
+			return mqttp.CodeProtocolError
+		}
+
 		resp, err = s.SignalUnSubscribe(pkt)
 	case *mqttp.PingReq:
 		resp = mqttp.NewPingResp(s.version)
@@ -711,7 +724,7 @@ func (s *impl) onReleaseIn(o, n mqttp.IFace) {
 	}
 }
 
-func (s *impl) onConnectionCloseStage1(status error) {
+func (s *impl) onConnectionCloseStage1(error) {
 	// shutdown quit channel tells all routines finita la commedia
 	close(s.quit)
 
@@ -727,6 +740,7 @@ func (s *impl) onConnectionCloseStage1(status error) {
 
 	s.rx.shutdown()
 	s.tx.shutdown()
+
 	s.tx = nil
 	s.rx = nil
 
@@ -744,7 +758,6 @@ func (s *impl) onConnectionCloseStage2(status error) {
 	close(s.quit)
 
 	var err error
-	// s.conn.SetReadDeadline(time.Time{})
 
 	// clean up transmitter to allow send disconnect command to client if needed
 	s.onStop.Do(func() {
@@ -809,6 +822,7 @@ func (s *impl) onConnectionCloseStage2(status error) {
 
 	s.pubIn.messages.Range(func(k, v interface{}) bool {
 		s.pubIn.messages.Delete(k)
+		// s.metric.OnSubUnAckRecv(1)
 		return true
 	})
 }
@@ -853,8 +867,14 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 
 	switch pkt.QoS() {
 	case mqttp.QoS2:
+		// [MQTT-2.3.1-1]
+		if id, _ := pkt.ID(); id == 0 {
+			return nil, mqttp.CodeProtocolError
+		}
+
 		if s.rxQuota == 0 {
 			err = mqttp.CodeReceiveMaximumExceeded
+			s.metric.OnRejected(1)
 		} else {
 			s.rxQuota--
 			r := mqttp.NewPubRec(s.version)
@@ -869,13 +889,22 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 			// might come before store in case message store done after write PUBREC
 			if reason < mqttp.CodeUnspecifiedError {
 				s.pubIn.store(pkt)
+				r.SetReason(mqttp.CodeSuccess)
+				// s.metric.OnAddUnAckRecv(1)
+			} else {
+				s.metric.OnRejected(1)
+				r.SetReason(reason)
 			}
-
-			r.SetReason(mqttp.CodeSuccess)
 		}
 	case mqttp.QoS1:
+		// [MQTT-2.3.1-1]
+		if id, _ := pkt.ID(); id == 0 {
+			return nil, mqttp.CodeProtocolError
+		}
+
 		if s.rxQuota == 0 {
 			err = mqttp.CodeReceiveMaximumExceeded
+			s.metric.OnRejected(1)
 			break
 		}
 
@@ -888,6 +917,7 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 		resp = r
 
 		if reason >= mqttp.CodeUnspecifiedError {
+			s.metric.OnRejected(1)
 			break
 		}
 
@@ -914,10 +944,17 @@ func (s *impl) onAck(pkt *mqttp.Ack) mqttp.IFace {
 	switch pkt.Type() {
 	case mqttp.PUBACK:
 		// remote acknowledged PUBLISH QoS 1 message sent by this server
-		s.tx.pubOut.release(pkt)
+		fallthrough
+	case mqttp.PUBCOMP:
+		// PUBREL message has been acknowledged, release from queue
+		if s.tx.pubOut.release(pkt) {
+			s.metric.OnSubUnAckSent(1)
+		}
 	case mqttp.PUBREC:
 		// remote received PUBLISH message sent by this server
-		s.tx.pubOut.release(pkt)
+		if s.tx.pubOut.release(pkt) {
+			s.metric.OnSubUnAckSent(1)
+		}
 
 		discard := false
 
@@ -938,7 +975,8 @@ func (s *impl) onAck(pkt *mqttp.Ack) mqttp.IFace {
 			// 2. Put PUBREL into ack queue
 			// Do it before writing into network as theoretically response may come
 			// faster than put into queue
-			s.tx.pubOut.store(resp)
+			// s.tx.pubOut.store(resp)
+			// s.metric.OnAddUnAckSent(1)
 		}
 	case mqttp.PUBREL:
 		// Remote has released PUBLISH
@@ -950,9 +988,7 @@ func (s *impl) onAck(pkt *mqttp.Ack) mqttp.IFace {
 
 		s.pubIn.release(pkt)
 		s.rxQuota++
-	case mqttp.PUBCOMP:
-		// PUBREL message has been acknowledged, release from queue
-		s.tx.pubOut.release(pkt)
+		// s.metric.OnSubUnAckRecv(1)
 	default:
 		s.log.Error("Unsupported ack message type",
 			zap.String("clientId", s.id),

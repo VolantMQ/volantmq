@@ -7,7 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/VolantMQ/volantmq/auth"
-	"github.com/VolantMQ/volantmq/systree"
+	"github.com/VolantMQ/volantmq/metrics"
 	"github.com/VolantMQ/volantmq/types"
 )
 
@@ -24,9 +24,8 @@ type Config struct {
 // InternalConfig used by server implementation to configure internal specific needs
 type InternalConfig struct {
 	Handler
-	// EPoll      netpoll.EventPoll
 	AcceptPool types.Pool
-	Metric     systree.Metric
+	Metrics    metrics.Bytes
 }
 
 type baseConfig struct {
