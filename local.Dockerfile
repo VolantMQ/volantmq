@@ -67,6 +67,13 @@ RUN \
     && cd plugin \
     && go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -ldflags "-X main.version=$(print_version.sh)" -o $VOLANTMQ_WORK_DIR/plugins/persistence_bbolt.so
 
+#build auth plugins
+RUN \
+       GO111MODULE=off go get gitlab.com/VolantMQ/vlplugin/auth/http \
+    && cd $GOPATH/src/gitlab.com/VolantMQ/vlplugin/auth/http \
+    && GO111MODULE=on go mod tidy \
+    && go build $VOLANTMQ_BUILD_FLAGS -buildmode=plugin -ldflags "-X main.version=$(print_version.sh)" -o $VOLANTMQ_WORK_DIR/plugins/auth_http.so
+
 FROM alpine
 ENV \
     VOLANTMQ_WORK_DIR=/usr/lib/volantmq
