@@ -49,10 +49,9 @@ jobs:
           file: coverage.txt
   test-docker-build:
     executor: docker/docker
-    working_directory: /go/src/github.com/VolantMQ/volantmq
     steps:
-      - setup_remote_docker
       - <<: *workspace
+      - setup_remote_docker
       - docker/build:
           dockerfile: local.Dockerfile
           image: volantmq/volantmq
