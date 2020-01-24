@@ -49,7 +49,7 @@ jobs:
           command: |
             /tmp/codeclimate/cc-test-reporter before-build
             ./go.test.sh
-            /tmp/codeclimate/cc-test-reporter --coverage-input-type coverage --exit-code $?
+            /tmp/codeclimate/cc-test-reporter after-build --exit-code $?
   test-build-docker:
     <<: *docker_job
     steps:
