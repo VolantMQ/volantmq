@@ -6,7 +6,7 @@ docker_job_setup: &docker_job
 
 attach_workspace: &workspace
   attach_workspace:
-    at: /go/src/github.com/VolantMQ/volantmq
+    at: /go/src/github.com/VolantMQ
 
 jobs:
   pull-sources:
