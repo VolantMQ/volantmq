@@ -30,9 +30,6 @@ mqtt:
   keepAlive:
     period: 60
     force: false
-  systree:
-    enabled: true
-    updateInterval: 10
   options:
     connectTimeout: 2
     offlineQoS0: true

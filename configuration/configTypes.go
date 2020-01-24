@@ -114,11 +114,7 @@ type PortConfig struct {
 
 // MqttConfig server config
 type MqttConfig struct {
-	Version []string `yaml:"version,omitempty"`
-	Systree struct {
-		Enabled        bool `yaml:"enabled,omitempty"`
-		UpdateInterval int  `yaml:"updateInterval,omitempty"`
-	} `yaml:"systree,omitempty"`
+	Version   []string `yaml:"version,omitempty"`
 	KeepAlive struct {
 		Period int  `yaml:"period,omitempty"`
 		Force  bool `yaml:"force,omitempty"`

@@ -65,11 +65,6 @@ mqtt:
     # Default is 60 seconds
     force: false             # Force connection to use server keep alive interval (MQTT 5.0 only)
     # Default is false
-  systree:
-    enabled: true            # Either systree available or not
-    # Default is false
-    updateInterval: 10       # Systree update interval
-    # Default is 10 seconds
   options:
     connectTimeout: 5        # The number of seconds to wait for the CONNECT message before disconnecting.
     # If not set then default to 2 seconds.
