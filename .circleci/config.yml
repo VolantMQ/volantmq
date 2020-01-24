@@ -10,6 +10,7 @@ attach_workspace: &workspace
 
 orbs:
   codecov: codecov/codecov@1.0.5
+  docker: circleci/docker@0.5.20
 
 jobs:
   pull-sources:
@@ -47,26 +48,15 @@ jobs:
       - codecov/upload:
           file: coverage.txt
   test-docker-build:
-    <<: *docker_job
+    executor: docker/docker
+    working_directory: /go/src/github.com/VolantMQ/volantmq
     steps:
       - setup_remote_docker
       - <<: *workspace
-      - run:
-          name: Docker build
-          command: |
-            ./dockerBuildLocal.sh
-  release-docker:
-    <<: *docker_job
-    steps:
-      - setup_remote_docker
-      - <<: *workspace
-      - run:
-          name: Docker build
-          command: |
-            ./dockerBuildLocal.sh volantmq/volantmq:${CIRCLE_TAG}
-            docker login -u \$DOCKER_USERNAME -p \$DOCKER_PASSWORD
-            docker push volantmq/volantmq:${CIRCLE_TAG}
-
+      - docker/build:
+          dockerfile: local.Dockerfile
+          image: volantmq/volantmq
+          tag: 'latest'
 workflows:
   version: 2.1
   test-on-commit:
@@ -117,7 +107,7 @@ workflows:
               only: /^[vV]?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/
             branches:
               ignore: /.*/
-      - release-docker:
+      - docker/publish:
           context: volantmq
           requires:
             - test
@@ -126,3 +116,7 @@ workflows:
               only: /^[vV]?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/
             branches:
               ignore: /.*/
+          image: volantmq/volantmq
+          lint-dockerfile: true
+          treat-warnings-as-errors: true
+          tag: '${CIRCLE_TAG},latest'
