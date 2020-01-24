@@ -48,8 +48,7 @@ jobs:
       - codecov/upload:
           file: coverage.txt
   test-docker-build:
-    executor: docker/docker
-    working_directory: /go/src/github.com/VolantMQ/volantmq
+    <<: *docker_job
     steps:
       - <<: *workspace
       - setup_remote_docker
@@ -58,8 +57,7 @@ jobs:
           image: volantmq/volantmq
           tag: 'latest'
   release-docker:
-    executor: docker/docker
-    working_directory: /go/src/github.com/VolantMQ/volantmq
+    <<: *docker_job
     steps:
       - <<: *workspace
       - setup_remote_docker
