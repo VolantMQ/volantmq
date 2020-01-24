@@ -8,6 +8,9 @@ attach_workspace: &workspace
   attach_workspace:
     at: /go/src/github.com/VolantMQ
 
+orbs:
+  codecov: codecov/codecov@1.0.5
+
 jobs:
   pull-sources:
     <<: *docker_job
@@ -37,19 +40,12 @@ jobs:
     steps:
       - <<: *workspace
       - run:
-          name: Setup Code Climate test-reporter
-          command: |
-            # download test reporter as a static binary
-            mkdir -p /tmp/codeclimate
-            curl -L https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64 > /tmp/codeclimate/cc-test-reporter
-            chmod +x /tmp/codeclimate/cc-test-reporter
-      - run:
           shell: /bin/bash
           name: Tests
           command: |
-            /tmp/codeclimate/cc-test-reporter before-build
-            ./go.test.codeclimate.sh
-            /tmp/codeclimate/cc-test-reporter after-build --exit-code $?
+            ./go.test.codecov.sh
+      - codecov/upload:
+          file: coverage.txt
   test-build-docker:
     <<: *docker_job
     steps:
