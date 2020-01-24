@@ -68,7 +68,7 @@ jobs:
           image: volantmq/volantmq
           tag: 'latest'
       - run:
-          name: tag docker image
+          name: Tag docker image
           command: |
             docker tag volantmq/volantmq:latest volantmq/volantmq:${CIRCLE_TAG}
       - docker/push:
