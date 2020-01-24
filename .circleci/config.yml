@@ -1,4 +1,4 @@
-version: 2
+version: 2.1
 docker_job_setup: &docker_job
   docker:
     - image: circleci/golang:1.13.6
@@ -6,7 +6,11 @@ docker_job_setup: &docker_job
 
 attach_workspace: &workspace
   attach_workspace:
-    at: /go/src/github.com/VolantMQ/volantmq
+    at: /go/src/github.com/VolantMQ
+
+orbs:
+  codecov: codecov/codecov@1.0.5
+  docker: circleci/docker@0.5.20
 
 jobs:
   pull-sources:
@@ -23,6 +27,7 @@ jobs:
   lint:
     <<: *docker_job
     steps:
+      - <<: *workspace
       - run:
           name: Install golangci-lint
           command: |
@@ -36,52 +41,63 @@ jobs:
     steps:
       - <<: *workspace
       - run:
-          name: Setup Code Climate test-reporter
-          command: |
-            # download test reporter as a static binary
-            mkdir -p /tmp/codeclimate
-            curl -L https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64 > /tmp/codeclimate/cc-test-reporter
-            chmod +x /tmp/codeclimate/cc-test-reporter
-      - run:
+          shell: /bin/bash
           name: Tests
           command: |
-            /tmp/codeclimate/cc-test-reporter before-build
-            ./go.test.sh
-            /tmp/codeclimate/cc-test-reporter --coverage-input-type coverage --exit-code $?
-  test-build-docker:
+            ./go.test.codecov.sh
+      - codecov/upload:
+          file: coverage.txt
+  test-docker-build:
     <<: *docker_job
     steps:
       - <<: *workspace
-      - run:
-          name: Docker build
-          command: |
-            ./dockerBuildLocal.sh
-  build-docker:
+      - setup_remote_docker
+      - docker/build:
+          dockerfile: local.Dockerfile
+          image: volantmq/volantmq
+          tag: 'latest'
+  release-docker:
     <<: *docker_job
     steps:
       - <<: *workspace
+      - setup_remote_docker
+      - docker/build:
+          dockerfile: local.Dockerfile
+          lint-dockerfile: false
+          treat-warnings-as-errors: false
+          image: volantmq/volantmq
+          tag: 'latest'
       - run:
-          name: Docker build
+          name: Tag docker image
           command: |
-            ./dockerBuildLocal.sh volantmq/volantmq:${CIRCLE_TAG}
-            docker login -u \$DOCKER_USERNAME -p \$DOCKER_PASSWORD
-            docker push volantmq/volantmq:${CIRCLE_TAG}
-
+            docker tag volantmq/volantmq:latest volantmq/volantmq:${CIRCLE_TAG}
+      - docker/check:
+          docker-username: DOCKER_LOGIN
+          docker-password: DOCKER_PASSWORD
+      - docker/push:
+          image: volantmq/volantmq
+          tag: '${CIRCLE_TAG},latest'
 workflows:
-  version: 2
+  version: 2.1
   test-on-commit:
     jobs:
       - pull-sources:
           filters:
             tags:
               ignore: /.*/
-      - test:
+      - lint:
           requires:
             - pull-sources
           filters:
             tags:
               ignore: /.*/
-      - test-build-docker:
+      - test:
+          requires:
+            - lint
+          filters:
+            tags:
+              ignore: /.*/
+      - test-docker-build:
           requires:
             - test
           filters:
@@ -89,7 +105,15 @@ workflows:
               ignore: /.*/
   release:
     jobs:
-      - pull-source:
+      - pull-sources:
+          filters:
+            tags:
+              only: /^[vV]?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/
+            branches:
+              ignore: /.*/
+      - lint:
+          requires:
+            - pull-sources
           filters:
             tags:
               only: /^[vV]?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/
@@ -97,13 +121,13 @@ workflows:
               ignore: /.*/
       - test:
           requires:
-            - pull-source
+            - lint
           filters:
             tags:
               only: /^[vV]?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/
             branches:
               ignore: /.*/
-      - build-docker:
+      - release-docker:
           context: volantmq
           requires:
             - test
