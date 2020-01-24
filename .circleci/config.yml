@@ -23,6 +23,7 @@ jobs:
   lint:
     <<: *docker_job
     steps:
+      - <<: *workspace
       - run:
           name: Install golangci-lint
           command: |
@@ -43,6 +44,7 @@ jobs:
             curl -L https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64 > /tmp/codeclimate/cc-test-reporter
             chmod +x /tmp/codeclimate/cc-test-reporter
       - run:
+          shell: /bin/bash
           name: Tests
           command: |
             /tmp/codeclimate/cc-test-reporter before-build
