@@ -7,8 +7,6 @@ jobs:
         go-version: [1.13.6]
         platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
-    with:
-      go-version: ${{ matrix.go-version }}
     steps:
       - name: Install Go
         uses: actions/setup-go@v1
