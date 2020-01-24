@@ -77,9 +77,15 @@ workflows:
           filters:
             tags:
               ignore: /.*/
-      - test:
+      - lint:
           requires:
             - pull-sources
+          filters:
+            tags:
+              ignore: /.*/
+      - test:
+          requires:
+            - lint
           filters:
             tags:
               ignore: /.*/
