@@ -46,7 +46,7 @@ jobs:
             ./go.test.codecov.sh
       - codecov/upload:
           file: coverage.txt
-  test-build-docker:
+  test-docker-build:
     <<: *docker_job
     steps:
       - setup_remote_docker
@@ -55,7 +55,7 @@ jobs:
           name: Docker build
           command: |
             ./dockerBuildLocal.sh
-  build-docker:
+  release-docker:
     <<: *docker_job
     steps:
       - setup_remote_docker
@@ -87,7 +87,7 @@ workflows:
           filters:
             tags:
               ignore: /.*/
-      - test-build-docker:
+      - test-docker-build:
           requires:
             - test
           filters:
@@ -101,15 +101,21 @@ workflows:
               only: /^[vV]?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/
             branches:
               ignore: /.*/
-      - test:
+      - lint:
           requires:
             - pull-sources
+          filters:
+            tags:
+              ignore: /.*/
+      - test:
+          requires:
+            - lint
           filters:
             tags:
               only: /^[vV]?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/
             branches:
               ignore: /.*/
-      - build-docker:
+      - release-docker:
           context: volantmq
           requires:
             - test
