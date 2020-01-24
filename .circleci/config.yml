@@ -48,7 +48,7 @@ jobs:
           name: Tests
           command: |
             /tmp/codeclimate/cc-test-reporter before-build
-            ./go.test.sh
+            ./go.test.codeclimate.sh
             /tmp/codeclimate/cc-test-reporter after-build --exit-code $?
   test-build-docker:
     <<: *docker_job
