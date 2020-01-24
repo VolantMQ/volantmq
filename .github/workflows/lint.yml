@@ -1,13 +1,14 @@
 on: [push, pull_request]
 name: Lint
 jobs:
-  name: Lint the project using GolangCI Lint
-  runs-on: ubuntu-latest
-  steps:
-    - name: Checkout code
-      uses: actions/checkout@v1.1.0
-    - name: lint
-      uses: docker://matoous/golangci-lint-action:v1.1.0
-      with:
-        config: .golangci.yml
-      run: golangci-lint run
+  golang-ci-lint:
+    name: Lint the project using GolangCI Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v1.1.0
+      - name: lint
+        uses: docker://matoous/golangci-lint-action:v1.1.0
+        with:
+          config: .golangci.yml
+        run: golangci-lint run
