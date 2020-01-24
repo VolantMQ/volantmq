@@ -49,6 +49,7 @@ jobs:
   test-build-docker:
     <<: *docker_job
     steps:
+      - setup_remote_docker
       - <<: *workspace
       - run:
           name: Docker build
@@ -57,6 +58,7 @@ jobs:
   build-docker:
     <<: *docker_job
     steps:
+      - setup_remote_docker
       - <<: *workspace
       - run:
           name: Docker build
