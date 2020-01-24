@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -300,6 +301,20 @@ func (ctx *appContext) loadAuth(cfg *configuration.Config) (*auth.Manager, error
 			var authPlugins pluginType
 			if authPlugins, ok = ctx.plugins.acquired["auth"]; ok {
 				if pl, kk := authPlugins[backend]; kk {
+					// check if there is environment variable with API token for this particular plugin
+					if backend == "http" {
+						varName := fmt.Sprintf("VOLANTMQ_PLUGIN_AUTH_%s_TOKEN", strings.ToUpper(name))
+						var val string
+						val, ok = os.LookupEnv(varName)
+						if ok {
+							var injCfg map[string]interface{}
+							if injCfg, ok = config.(map[string]interface{}); ok {
+								injCfg["apiToken"] = val
+							} else {
+								logger.Errorf("cannot inject \"apiToken\" field into config of plugins.config.auth[%d]", idx)
+							}
+						}
+					}
 					var plObject interface{}
 					if plObject, err = ctx.configurePlugin(pl, config); err != nil {
 						logger.Fatalf(err.Error())
