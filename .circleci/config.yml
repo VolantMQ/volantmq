@@ -1,0 +1,114 @@
+version: 2
+docker_job_setup: &docker_job
+  docker:
+    - image: circleci/golang:1.13.6
+  working_directory: /go/src/github.com/VolantMQ/volantmq
+
+attach_workspace: &workspace
+  attach_workspace:
+    at: /go/src/github.com/VolantMQ/volantmq
+
+jobs:
+  pull-sources:
+    <<: *docker_job
+    steps:
+      - checkout
+      - run:
+          name: go mod tidy
+          command: go mod tidy
+      - persist_to_workspace:
+          root: /go/src/github.com/VolantMQ
+          paths:
+            - volantmq
+  lint:
+    <<: *docker_job
+    steps:
+      - run:
+          name: Install golangci-lint
+          command: |
+            go get -u github.com/golangci/golangci-lint/cmd/golangci-lint
+      - run:
+          name: lint
+          command: |
+            golangci-lint run
+  test:
+    <<: *docker_job
+    steps:
+      - <<: *workspace
+      - run:
+          name: Setup Code Climate test-reporter
+          command: |
+            # download test reporter as a static binary
+            mkdir -p /tmp/codeclimate
+            curl -L https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64 > /tmp/codeclimate/cc-test-reporter
+            chmod +x /tmp/codeclimate/cc-test-reporter
+      - run:
+          name: Tests
+          command: |
+            /tmp/codeclimate/cc-test-reporter before-build
+            ./go.test.sh
+            /tmp/codeclimate/cc-test-reporter --coverage-input-type coverage --exit-code $?
+  test-build-docker:
+    <<: *docker_job
+    steps:
+      - <<: *workspace
+      - run:
+          name: Docker build
+          command: |
+            ./dockerBuildLocal.sh
+  build-docker:
+    <<: *docker_job
+    steps:
+      - <<: *workspace
+      - run:
+          name: Docker build
+          command: |
+            ./dockerBuildLocal.sh volantmq/volantmq:${CIRCLE_TAG}
+            docker login -u \$DOCKER_USERNAME -p \$DOCKER_PASSWORD
+            docker push volantmq/volantmq:${CIRCLE_TAG}
+
+workflows:
+  version: 2
+  test-on-commit:
+    jobs:
+      - pull-sources:
+          filters:
+            tags:
+              ignore: /.*/
+      - test:
+          requires:
+            - pull-sources
+          filters:
+            tags:
+              ignore: /.*/
+      - test-build-docker:
+          requires:
+            - test
+          filters:
+            tags:
+              ignore: /.*/
+  release:
+    jobs:
+      - pull-source:
+          filters:
+            tags:
+              only: /^[vV]?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/
+            branches:
+              ignore: /.*/
+      - test:
+          requires:
+            - pull-source
+          filters:
+            tags:
+              only: /^[vV]?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/
+            branches:
+              ignore: /.*/
+      - build-docker:
+          context: volantmq
+          requires:
+            - test
+          filters:
+            tags:
+              only: /^[vV]?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/
+            branches:
+              ignore: /.*/
