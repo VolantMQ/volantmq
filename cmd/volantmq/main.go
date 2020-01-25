@@ -303,7 +303,7 @@ func (ctx *appContext) loadAuth(cfg *configuration.Config) (*auth.Manager, error
 				if pl, kk := authPlugins[backend]; kk {
 					// check if there is environment variable with API token for this particular plugin
 					if backend == "http" {
-						varName := fmt.Sprintf("VOLANTMQ_PLUGIN_AUTH_%s_TOKEN", strings.ToUpper(name))
+						varName := fmt.Sprintf("VOLANTMQ_PLUGIN_AUTH_HTTP_%s_TOKEN", strings.ToUpper(name))
 						var val string
 						val, ok = os.LookupEnv(varName)
 						if ok {
