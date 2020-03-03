@@ -27,11 +27,9 @@ type Type struct {
 	lock          sync.RWMutex
 	publisher     vlsubscriber.Publisher
 	log           *zap.SugaredLogger
-	// access        sync.WaitGroup
-	subSignal   chan topicsTypes.SubscribeResp
-	unSubSignal chan topicsTypes.UnSubscribeResp
-	quit        chan struct{}
-	// stop sync.Once
+	subSignal     chan topicsTypes.SubscribeResp
+	unSubSignal   chan topicsTypes.UnSubscribeResp
+	quit          chan struct{}
 	Config
 }
 
@@ -79,7 +77,7 @@ func (s *Type) Subscriptions() vlsubscriber.Subscriptions {
 	return s.subscriptions
 }
 
-// Subscribe to given topic
+// Subscribe to topic
 func (s *Type) Subscribe(topic string, params vlsubscriber.SubscriptionParams) ([]*mqttp.Publish, error) {
 	resp := s.Topics.Subscribe(topicsTypes.SubscribeReq{
 		Filter: topic,
@@ -168,8 +166,8 @@ func (s *Type) Publish(p *mqttp.Publish, grantedQoS mqttp.QosType, ops mqttp.Sub
 	return nil
 }
 
-// Online moves subscriber to online state
-// since this moment all of publishes are forwarded to provided callback
+// Online move subscriber to online state
+// since this moment all publish packets forwarded to provided callback
 func (s *Type) Online(c vlsubscriber.Publisher) {
 	s.lock.Lock()
 	s.publisher = c
