@@ -108,7 +108,7 @@ type AuthConfig struct {
 type PortConfig struct {
 	Host string     `yaml:"host,omitempty"`
 	Auth AuthConfig `yaml:"auth"`
-	TLS  TLSConfig  `yaml:"tls,omitempty"`
+	TLS  *TLSConfig `yaml:"tls,omitempty"`
 	Path string     `yaml:"path,omitempty"`
 }
 

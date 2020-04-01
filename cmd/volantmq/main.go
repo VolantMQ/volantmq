@@ -128,27 +128,37 @@ func loadMqttListeners(defaultAuth *auth.Manager, lCfg *configuration.ListenersC
 			}
 
 			switch name {
-			case "tcp", "ssl":
+			case "ssl":
+				if cfg.TLS == nil {
+					return nil, errors.New("listeners.mqtt.ssl: must provide TLS config")
+				}
+				logger.Warnf("listeners.mqtt.ssl is deprecated. Now TLS config can be provided in tcp section")
+				fallthrough
+			case "tcp":
 				tcpConfig := transport.NewConfigTCP(tCfg)
 
-				if name == "ssl" {
+				if cfg.TLS != nil {
 					tlsConfig, err := cfg.TLS.LoadConfig()
 					if err != nil {
-						logger.Error("\tlisteners.mqtt.ssl: ", err.Error())
-						return nil, err
+						return nil, fmt.Errorf("listeners.mqtt.ssl: %w", err)
 					}
 					tcpConfig.TLS = tlsConfig
 				}
 
 				listeners = append(listeners, tcpConfig)
-			case "ws", "wss":
+			case "wss":
+				if cfg.TLS == nil {
+					return nil, errors.New("listeners.mqtt.wss: must provide TLS config")
+				}
+				logger.Warnf("listeners.mqtt.wss is deprecated. Now TLS config can be provided in ws section")
+				fallthrough
+			case "ws":
 				configWs := transport.NewConfigWS(tCfg)
 				configWs.Path = cfg.Path
 
-				if name == "wss" {
+				if cfg.TLS != nil {
 					if _, err := cfg.TLS.Validate(); err != nil {
-						logger.Error("\tlisteners.mqtt.wss: ", err.Error())
-						return nil, err
+						return nil, fmt.Errorf("listeners.mqtt.wss: %w", err)
 					}
 					configWs.CertFile = cfg.TLS.Cert
 					configWs.KeyFile = cfg.TLS.Key
@@ -156,8 +166,7 @@ func loadMqttListeners(defaultAuth *auth.Manager, lCfg *configuration.ListenersC
 
 				listeners = append(listeners, configWs)
 			default:
-				logger.Fatal("\tunknown mqtt listener type", zap.String("type", name))
-				return nil, errors.New("")
+				return nil, fmt.Errorf("unknown mqtt listener type %s", name)
 			}
 		}
 	}
