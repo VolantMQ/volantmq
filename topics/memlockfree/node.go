@@ -386,7 +386,7 @@ func nonOverlappingSubscribers(sn *node, publishID uintptr, p *publishes) {
 
 		if !sub.p.Ops.NL() || id != publishID {
 			if pe := sub.acquire(); pe != nil {
-				if _, ok := (*p)[id]; ok {
+				if _, ok := (*p)[id]; ok { // nolint: gosimple
 					(*p)[id] = append((*p)[id], pe)
 				} else {
 					(*p)[id] = []*publish{pe}
