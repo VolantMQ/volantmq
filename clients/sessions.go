@@ -317,13 +317,15 @@ func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) (err
 
 	var connParams *connection.ConnectParams
 	var ack *mqttp.ConnAck
+	var acl vlauth.Permissions
+
 	if ch, e := cn.Accept(); e == nil {
 		for dl := range ch {
 			var resp mqttp.IFace
 			switch obj := dl.(type) {
 			case *connection.ConnectParams:
 				connParams = obj
-				resp, e = m.processConnect(connParams, authMngr)
+				resp, acl, e = m.processConnect(connParams, authMngr)
 			case connection.AuthParams:
 				resp, e = m.processAuth(connParams, obj)
 			case error:
@@ -347,13 +349,14 @@ func (m *Manager) OnConnection(conn transport.Conn, authMngr *auth.Manager) (err
 		}
 	}
 
-	m.newSession(cn, connParams, ack, authMngr)
+	m.newSession(cn, connParams, ack, acl)
 
 	return nil
 }
 
-func (m *Manager) processConnect(params *connection.ConnectParams, authMngr *auth.Manager) (mqttp.IFace, error) {
+func (m *Manager) processConnect(params *connection.ConnectParams, authMngr *auth.Manager) (mqttp.IFace, vlauth.Permissions, error) {
 	var resp mqttp.IFace
+	var acl vlauth.Permissions
 
 	pkt := mqttp.NewConnAck(params.Version)
 
@@ -362,7 +365,7 @@ func (m *Manager) processConnect(params *connection.ConnectParams, authMngr *aut
 			_ = pkt.SetReturnCode(e)
 			resp = pkt
 		}
-		return nil, params.Error
+		return nil, nil, params.Error
 	}
 
 	if allowed, ok := m.allowedVersions[params.Version]; !ok || !allowed {
@@ -379,8 +382,10 @@ func (m *Manager) processConnect(params *connection.ConnectParams, authMngr *aut
 			// TODO (troian): verify method is allowed
 		} else {
 			var reason mqttp.ReasonCode
-			if status := authMngr.Password(params.ID, string(params.Username), string(params.Password)); status == vlauth.StatusAllow {
+
+			if perm, status := authMngr.Password(params.ID, string(params.Username), string(params.Password)); status == vlauth.StatusAllow {
 				reason = mqttp.CodeSuccess
+				acl = perm
 			} else {
 				reason = mqttp.CodeRefusedNotAuthorized
 				if params.Version == mqttp.ProtocolV50 {
@@ -393,17 +398,17 @@ func (m *Manager) processConnect(params *connection.ConnectParams, authMngr *aut
 		}
 	}
 
-	return resp, nil
+	return resp, acl, nil
 }
 
-func (m *Manager) processAuth(params *connection.ConnectParams, auth connection.AuthParams) (mqttp.IFace, error) {
+func (m *Manager) processAuth(_ *connection.ConnectParams, _ connection.AuthParams) (mqttp.IFace, error) {
 	var resp mqttp.IFace
 
 	return resp, nil
 }
 
 // newSession create new session with provided established connection
-func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectParams, ack *mqttp.ConnAck, authMngr *auth.Manager) {
+func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectParams, ack *mqttp.ConnAck, acl vlauth.Permissions) {
 	var ses *session
 	var err error
 
@@ -417,7 +422,7 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 
 		if cn.Acknowledge(ack,
 			connection.KeepAlive(keepAlive),
-			connection.Permissions(authMngr)) == nil {
+			connection.Permissions(acl)) == nil {
 
 			ses.start()
 
@@ -452,7 +457,7 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 	}
 
 	var info *containerInfo
-	if info, err = m.loadContainer(cn.Session(), params, authMngr); err == nil {
+	if info, err = m.loadContainer(cn.Session(), params, acl); err == nil {
 		ses = info.ses
 		config := sessionConfig{
 			sessionEvents: m,
@@ -481,7 +486,7 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 	}
 }
 
-func (m *Manager) onAuth(id string, params *connection.AuthParams) (mqttp.IFace, error) {
+func (m *Manager) onAuth(_ string, _ *connection.AuthParams) (mqttp.IFace, error) {
 	return nil, nil
 }
 
@@ -507,14 +512,14 @@ func (m *Manager) checkServerStatus(v mqttp.ProtocolVersion, resp *mqttp.ConnAck
 }
 
 // allocContainer
-func (m *Manager) allocContainer(id string, username string, authMngr *auth.Manager, createdAt time.Time, cn connection.Session) *container {
+func (m *Manager) allocContainer(id string, username string, acl vlauth.Permissions, createdAt time.Time, cn connection.Session) *container {
 	ses := newSession(sessionPreConfig{
 		id:          id,
 		createdAt:   createdAt,
 		conn:        cn,
 		messenger:   m.TopicsMgr,
 		persistence: m.persistence,
-		permissions: authMngr,
+		permissions: acl,
 		username:    username,
 	})
 
@@ -530,8 +535,8 @@ func (m *Manager) allocContainer(id string, username string, authMngr *auth.Mana
 	return cont
 }
 
-func (m *Manager) loadContainer(cn connection.Session, params *connection.ConnectParams, authMngr *auth.Manager) (cont *containerInfo, err error) {
-	newContainer := m.allocContainer(params.ID, string(params.Username), authMngr, time.Now(), cn)
+func (m *Manager) loadContainer(cn connection.Session, params *connection.ConnectParams, acl vlauth.Permissions) (cont *containerInfo, err error) {
+	newContainer := m.allocContainer(params.ID, string(params.Username), acl, time.Now(), cn)
 
 	// search for existing container with given id
 	if curr, present := m.sessions.LoadOrStore(params.ID, newContainer); present {
@@ -715,7 +720,7 @@ func (m *Manager) writeSessionProperties(resp *mqttp.ConnAck, id string) error {
 	return nil
 }
 
-func (m *Manager) connectionClosed(id string, durable bool, reason mqttp.ReasonCode) {
+func (m *Manager) connectionClosed(_ string, durable bool, _ mqttp.ReasonCode) {
 	m.Metrics.Clients().OnDisconnected(durable)
 }
 

@@ -9,15 +9,14 @@ import (
 
 // Manager auth
 type Manager struct {
-	p         []vlauth.IFace
-	anonymous bool
+	p []vlauth.IFace
 }
 
 var providers = make(map[string]vlauth.IFace)
 
 // Register auth provider
 func Register(name string, i vlauth.IFace) error {
-	if name == "" && i == nil {
+	if name == "" || i == nil {
 		return errors.New("invalid args")
 	}
 
@@ -36,10 +35,8 @@ func UnRegister(name string) {
 }
 
 // NewManager new auth manager
-func NewManager(p []string, allowAnonymous bool) (*Manager, error) {
-	m := Manager{
-		anonymous: allowAnonymous,
-	}
+func NewManager(p []string) (*Manager, error) {
+	m := &Manager{}
 
 	for _, pa := range p {
 		pvd, ok := providers[pa]
@@ -50,40 +47,16 @@ func NewManager(p []string, allowAnonymous bool) (*Manager, error) {
 		m.p = append(m.p, pvd)
 	}
 
-	return &m, nil
-}
-
-// AllowAnonymous allow anonymous connections
-func (m *Manager) AllowAnonymous() error {
-	if m.anonymous {
-		return vlauth.StatusAllow
-	}
-
-	return vlauth.StatusDeny
+	return m, nil
 }
 
 // Password authentication
-func (m *Manager) Password(clientID, user, password string) error {
-	if user == "" && m.anonymous {
-		return vlauth.StatusAllow
-	}
-
+func (m *Manager) Password(clientID, user, password string) (vlauth.Permissions, error) {
 	for _, p := range m.p {
 		if status := p.Password(clientID, user, password); status == vlauth.StatusAllow {
-			return status
+			return p, status
 		}
 	}
 
-	return vlauth.StatusDeny
-}
-
-// ACL check permissions
-func (m *Manager) ACL(clientID, user, topic string, access vlauth.AccessType) error {
-	for _, p := range m.p {
-		if status := p.ACL(clientID, user, topic, access); status == vlauth.StatusAllow {
-			return status
-		}
-	}
-
-	return vlauth.StatusDeny
+	return nil, vlauth.StatusDeny
 }

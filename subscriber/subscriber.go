@@ -119,7 +119,7 @@ func (s *Type) UnSubscribe(topic string) error {
 // Publish message accordingly to subscriber state
 // online: forward message to session
 // offline: persist message
-func (s *Type) Publish(p *mqttp.Publish, grantedQoS mqttp.QosType, ops mqttp.SubscriptionOptions, ids []uint32) error {
+func (s *Type) Publish(p *mqttp.Publish, grantedQoS mqttp.QosType, _ mqttp.SubscriptionOptions, ids []uint32) error {
 	select {
 	case <-s.quit:
 		return nil

@@ -100,8 +100,7 @@ type SecurityConfig struct {
 }
 
 type AuthConfig struct {
-	Anonymous bool     `yaml:"anonymous,omitempty" default:"false"`
-	Order     []string `yaml:"order"`
+	Order []string `yaml:"order"`
 }
 
 // PortConfig configuration of tcp/ssl/ws(s) listeners
