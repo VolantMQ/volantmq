@@ -169,6 +169,7 @@ type SessionCallbacks interface {
 type impl struct {
 	SessionCallbacks
 	id               string
+	user             string
 	conn             transport.Conn
 	metric           metrics.Packets
 	permissions      vlauth.Permissions
@@ -428,6 +429,7 @@ func (s *impl) onConnect(pkt *mqttp.Connect) error {
 
 		params.Username, params.Password = pkt.Credentials()
 		s.version = params.Version
+		s.user = string(params.Username)
 
 		s.readConnProperties(pkt, params)
 
@@ -861,7 +863,7 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 	//   - ignore the message but send acks
 	//   - return error leading to disconnect
 	// TODO: publish permissions
-	if e := s.permissions.ACL(s.id, "", pkt.Topic(), vlauth.AccessWrite); e != vlauth.StatusAllow {
+	if e := s.permissions.ACL(s.id, s.user, pkt.Topic(), vlauth.AccessWrite); e != vlauth.StatusAllow {
 		reason = mqttp.CodeRefusedNotAuthorized
 	}
 

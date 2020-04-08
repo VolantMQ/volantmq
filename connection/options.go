@@ -142,3 +142,10 @@ func Permissions(val vlauth.Permissions) Option {
 		return nil
 	}
 }
+
+func Username(val string) Option {
+	return func(t *impl) error {
+		t.user = val
+		return nil
+	}
+}

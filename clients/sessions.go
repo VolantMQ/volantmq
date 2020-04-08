@@ -417,7 +417,8 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 
 		if cn.Acknowledge(ack,
 			connection.KeepAlive(keepAlive),
-			connection.Permissions(authMngr)) == nil {
+			connection.Permissions(authMngr),
+			connection.Username(string(params.Username))) == nil {
 
 			ses.start()
 
