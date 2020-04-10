@@ -64,7 +64,8 @@ By default server starts with in-memory persistence which means all sessions and
 #### Monitoring
 - [x] [![Build status](https://gitlab.com/volantmq/vlplugin/monitoring/systree/badges/master/pipeline.svg)](https://gitlab.com/volantmq/vlplugin/monitoring/systree/commits/master) [Systree](https://gitlab.com/volantmq/vlplugin/monitoring/systree)
 - [x] [![Build status](https://gitlab.com/volantmq/vlplugin/monitoring/prometheus/badges/master/pipeline.svg)](https://gitlab.com/volantmq/vlplugin/monitoring/prometheus/commits/master) [Prometheus](https://gitlab.com/volantmq/vlplugin/monitoring/prometheus)
-  - [ ] [Grafana dashboard](https://github.com/VolantMQ/volantmq/issues/151)
+  - [x] [Grafana dashboard](https://gitlab.com/VolantMQ/vlplugin/monitoring/prometheus/-/blob/master/examples/grafana-prometheus-mqtt-dashboard.json). Credits to [Oleg Beletskyi](https://github.com/olebel)
+  - [x] [Service monitor for Kubernetes](https://gitlab.com/VolantMQ/vlplugin/monitoring/prometheus/-/blob/master/examples/volantmq-service-monitor.yml). Credits to [Oleg Beletskyi](https://github.com/olebel)
 #### Persistence
 - [x] In-Memory server built in
 - [x] [![Build status](https://gitlab.com/volantmq/vlplugin/persistence/bbolt/badges/master/pipeline.svg)](https://gitlab.com/volantmq/vlplugin/persistence/bbolt/commits/master) [BBolt](https://gitlab.com/volantmq/vlplugin/persistence/bbolt)
