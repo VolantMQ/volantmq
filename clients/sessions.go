@@ -1045,7 +1045,7 @@ func (m *Manager) sessionPersistPublish(id string, p *mqttp.Publish) {
 	}
 
 	if err != nil {
-		m.log.Error("Couldn't persist message", zap.String("ClientID", id), zap.Error(err))
+		m.log.Errorf("couldn't persist message for clientId \"%s\" %s", id, err.Error())
 	} else {
 		m.Metrics.Packets().OnAddStore(1)
 	}
