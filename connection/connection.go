@@ -604,10 +604,7 @@ func (s *impl) processIncoming(p mqttp.IFace) error {
 	//                   the Client MUST NOT send any packets other than AUTH or DISCONNECT packets
 	//                   until it has received a CONNACK packet
 	if _, ok := expectedPacketType[s.state][p.Type()]; !ok {
-		s.log.Debug("Unexpected packet for current state",
-			zap.String("clientId", s.id),
-			zap.String("state", s.state.desc()),
-			zap.String("packet", p.Type().Name()))
+		s.log.Debugf("clientId \"%s\" sent unexpected packet %s for state %s", s.id, s.state.desc(), p.Type().Name())
 		return mqttp.CodeProtocolError
 	}
 
@@ -703,9 +700,6 @@ func (s *impl) publishToTopic(p *mqttp.Publish) error {
 		// [MQTT-3.3.2.3.3]
 		if prop := p.PropertyGet(mqttp.PropertyPublicationExpiry); prop != nil {
 			if val, err := prop.AsInt(); err == nil {
-				s.log.Debug("Set pub expiration",
-					zap.String("clientId", s.id),
-					zap.Duration("val", time.Duration(val)*time.Second))
 				p.SetExpireAt(time.Now().Add(time.Duration(val) * time.Second))
 			} else {
 				return err

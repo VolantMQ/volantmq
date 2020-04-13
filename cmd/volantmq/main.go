@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,10 +18,10 @@ import (
 	"github.com/VolantMQ/vlapi/vlplugin"
 	"github.com/VolantMQ/vlapi/vlsubscriber"
 	"github.com/VolantMQ/vlapi/vltypes"
+	"github.com/mitchellh/mapstructure"
 	"github.com/troian/healthcheck"
 	persistenceMem "gitlab.com/VolantMQ/vlplugin/persistence/mem"
 	"go.uber.org/zap"
-	"gopkg.in/yaml.v3"
 
 	"github.com/VolantMQ/volantmq/auth"
 	"github.com/VolantMQ/volantmq/configuration"
@@ -223,43 +222,27 @@ func (ctx *appContext) loadPlugins(cfg *configuration.PluginsConfig) {
 }
 
 func configureSimpleAuth(cfg interface{}) (vlauth.IFace, error) {
-	sAuth := newSimpleAuth()
+	// authConfig, err := vltypes.NormalizeConfig(cfg)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	//
 
-	authConfig, err := vltypes.NormalizeConfig(cfg)
-	if err != nil {
+	var c authConfig
+	var err error
+	if err = mapstructure.Decode(cfg, &c); err != nil {
 		return nil, err
 	}
 
-	if list, kk := authConfig["users"].(map[string]interface{}); kk {
-		for u, p := range list {
-			sAuth.addUser(u, strings.ToLower(p.(string)))
-		}
-	}
+	var sAuth *simpleAuth
 
-	if list, kk := authConfig["users"].(map[string]interface{}); kk {
-		for u, p := range list {
-			sAuth.addUser(u, strings.ToLower(p.(string)))
-		}
-	}
-
-	if uFile, kk := authConfig["usersFile"].(string); kk {
-		if fl, e := ioutil.ReadFile(uFile); e != nil {
-			logger.Error("\treading simpleAuth users file: ", e.Error())
-		} else {
-			users := make(map[string]string)
-			if e = yaml.Unmarshal(fl, &users); e != nil {
-				logger.Error("\tdecoding simpleAuth users file: ", e.Error())
-			} else {
-				for u, p := range users {
-					sAuth.addUser(u, p)
-				}
-			}
-		}
+	if sAuth, err = newSimpleAuth(c); err != nil {
+		return nil, err
 	}
 
 	if len(sAuth.creds) == 0 {
 		logger.Warn("\tsimpleAuth config without users. setting default to guest:guest")
-		sAuth.addUser("guest", string(sha256.New().Sum([]byte("guest"))))
+		_ = sAuth.addUser("guest", string(sha256.New().Sum([]byte("guest"))), "", "")
 	}
 
 	return sAuth, nil
