@@ -636,13 +636,14 @@ func (s *impl) processIncoming(p mqttp.IFace) error {
 	case *mqttp.PingReq:
 		resp = mqttp.NewPingResp(s.version)
 	case *mqttp.Disconnect:
+		resp, err = s.SignalDisconnect(pkt)
+
 		s.onStop.Do(func() {
 			s.SignalOffline()
 
 			s.tx.stop()
 		})
 
-		resp, err = s.SignalDisconnect(pkt)
 		if resp != nil {
 			if b, e := mqttp.Encode(p); e == nil {
 				_, e = s.tx.conn.Write(b)
