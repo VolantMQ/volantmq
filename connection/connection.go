@@ -668,55 +668,55 @@ func (s *impl) processIncoming(p mqttp.IFace) error {
 	return err
 }
 
-// forward PUBLISH message to topics manager which takes care about subscribers
-func (s *impl) publishToTopic(p *mqttp.Publish) error {
-	// v5.0
-	// If the Server included Retain Available in its CONNACK response to a Client with its value set to 0 and it
-	// receives a PUBLISH packet with the RETAIN flag is set to 1, then it uses the DISCONNECT Reason
-	// Code of 0x9A (Retain not supported) as described in section 4.13.
-	if s.version >= mqttp.ProtocolV50 {
-		// [MQTT-3.3.2.3.4]
-		if prop := p.PropertyGet(mqttp.PropertyTopicAlias); prop != nil {
-			if val, err := prop.AsShort(); err == nil {
-				if len(p.Topic()) != 0 {
-					// renew alias with new topic
-					s.rx.topicAlias[val] = p.Topic()
-				} else {
-					if topic, kk := s.rx.topicAlias[val]; kk {
-						// do not check for error as topic has been validated when arrived
-						if err = p.SetTopic(topic); err != nil {
-							s.log.Error("publish to topic",
-								zap.String("clientId", s.id),
-								zap.String("topic", topic),
-								zap.Error(err))
-						}
-					} else {
-						return mqttp.CodeInvalidTopicAlias
-					}
-				}
-			} else {
-				return mqttp.CodeInvalidTopicAlias
-			}
-		}
-
-		// [MQTT-3.3.2.3.3]
-		if prop := p.PropertyGet(mqttp.PropertyPublicationExpiry); prop != nil {
-			if val, err := prop.AsInt(); err == nil {
-				p.SetExpireAt(time.Now().Add(time.Duration(val) * time.Second))
-			} else {
-				return err
-			}
-		}
-	}
-
-	return s.SignalPublish(p)
-}
+// // forward PUBLISH message to topics manager which takes care about subscribers
+// func (s *impl) publishToTopic(p *mqttp.Publish) error {
+// 	// // v5.0
+// 	// // If the Server included Retain Available in its CONNACK response to a Client with its value set to 0 and it
+// 	// // receives a PUBLISH packet with the RETAIN flag is set to 1, then it uses the DISCONNECT Reason
+// 	// // Code of 0x9A (Retain not supported) as described in section 4.13.
+// 	// if s.version >= mqttp.ProtocolV50 {
+// 	// 	// [MQTT-3.3.2.3.4]
+// 	// 	if prop := p.PropertyGet(mqttp.PropertyTopicAlias); prop != nil {
+// 	// 		if val, err := prop.AsShort(); err == nil {
+// 	// 			if len(p.Topic()) != 0 {
+// 	// 				// renew alias with new topic
+// 	// 				s.rx.topicAlias[val] = p.Topic()
+// 	// 			} else {
+// 	// 				if topic, kk := s.rx.topicAlias[val]; kk {
+// 	// 					// do not check for error as topic has been validated when arrived
+// 	// 					if err = p.SetTopic(topic); err != nil {
+// 	// 						s.log.Error("publish to topic",
+// 	// 							zap.String("clientId", s.id),
+// 	// 							zap.String("topic", topic),
+// 	// 							zap.Error(err))
+// 	// 					}
+// 	// 				} else {
+// 	// 					return mqttp.CodeInvalidTopicAlias
+// 	// 				}
+// 	// 			}
+// 	// 		} else {
+// 	// 			return mqttp.CodeInvalidTopicAlias
+// 	// 		}
+// 	// 	}
+// 	//
+// 	// 	// [MQTT-3.3.2.3.3]
+// 	// 	if prop := p.PropertyGet(mqttp.PropertyPublicationExpiry); prop != nil {
+// 	// 		if val, err := prop.AsInt(); err == nil {
+// 	// 			p.SetExpireAt(time.Now().Add(time.Duration(val) * time.Second))
+// 	// 		} else {
+// 	// 			return err
+// 	// 		}
+// 	// 	}
+// 	// }
+//
+// 	return s.SignalPublish(p)
+// }
 
 // onReleaseIn ack process for incoming messages
 func (s *impl) onReleaseIn(o, _ mqttp.IFace) {
 	switch p := o.(type) {
 	case *mqttp.Publish:
-		_ = s.publishToTopic(p)
+		_ = s.SignalPublish(p)
 	}
 }
 
@@ -838,6 +838,10 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 	var err error
 	reason := mqttp.CodeSuccess
 
+	aclPerformed := false
+
+	var topicAlias uint16
+
 	if s.version >= mqttp.ProtocolV50 {
 		if !s.retainAvailable && pkt.Retain() {
 			return nil, mqttp.CodeRetainNotSupported
@@ -848,6 +852,51 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 				return nil, mqttp.CodeInvalidTopicAlias
 			}
 		}
+
+		// v5.0
+		// If the Server included Retain Available in its CONNACK response to a Client with its value set to 0 and it
+		// receives a PUBLISH packet with the RETAIN flag is set to 1, then it uses the DISCONNECT Reason
+		// Code of 0x9A (Retain not supported) as described in section 4.13.
+		// [MQTT-3.3.2.3.4]
+		if prop := pkt.PropertyGet(mqttp.PropertyTopicAlias); prop != nil {
+			if topicAlias, err = prop.AsShort(); err == nil {
+				// [MQTT-3.3.2-8] A Topic Alias of 0 is not permitted.
+				// A sender MUST NOT send a PUBLISH packet containing a Topic Alias which has the value 0
+				if topicAlias == 0 {
+					return nil, mqttp.CodeInvalidTopicAlias
+				}
+
+				if len(pkt.Topic()) == 0 {
+					if topic, kk := s.rx.topicAlias[topicAlias]; kk {
+						// do not check for error as topic has been validated when arrived
+						if err = pkt.SetTopic(topic); err != nil {
+							s.log.Error("publish to topic",
+								zap.String("clientId", s.id),
+								zap.String("topic", topic),
+								zap.Error(err))
+							return nil, mqttp.CodeUnspecifiedError
+						}
+
+						topicAlias = 0
+						aclPerformed = true
+					} else {
+						return nil, mqttp.CodeInvalidTopicAlias
+					}
+				}
+			} else {
+				return nil, mqttp.CodeInvalidTopicAlias
+			}
+		}
+
+		// [MQTT-3.3.2.3.3]
+		if prop := pkt.PropertyGet(mqttp.PropertyPublicationExpiry); prop != nil {
+			var val uint32
+			if val, err = prop.AsInt(); err == nil {
+				pkt.SetExpireAt(time.Now().Add(time.Duration(val) * time.Second))
+			} else {
+				return nil, err
+			}
+		}
 	}
 
 	var resp mqttp.IFace
@@ -856,9 +905,15 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 	// To deal with V3.1.1 two ways left:
 	//   - ignore the message but send acks
 	//   - return error leading to disconnect
-	// TODO: publish permissions
-	if e := s.permissions.ACL(s.id, string(s.username), pkt.Topic(), vlauth.AccessWrite); e != vlauth.StatusAllow {
-		reason = mqttp.CodeRefusedNotAuthorized
+	if !aclPerformed {
+		if e := s.permissions.ACL(s.id, string(s.username), pkt.Topic(), vlauth.AccessWrite); e != vlauth.StatusAllow {
+			reason = mqttp.CodeRefusedNotAuthorized
+		}
+	}
+
+	// there is a new topic alias
+	if topicAlias > 0 {
+		s.rx.topicAlias[topicAlias] = pkt.Topic()
 	}
 
 	switch pkt.QoS() {
@@ -922,8 +977,8 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 		// [MQTT-4.3.1]
 		// [MQTT-4.3.2-4]
 		// TODO(troian): ignore if publish permissions not validated
-		if err = s.publishToTopic(pkt); err != nil {
-			s.log.Error("Couldn't publish message",
+		if err = s.SignalPublish(pkt); err != nil {
+			s.log.Errorf("Couldn't publish message",
 				zap.String("clientId", s.id),
 				zap.Uint8("QoS", uint8(pkt.QoS())),
 				zap.Error(err))
