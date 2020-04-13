@@ -134,7 +134,7 @@ type MqttConfig struct {
 	}
 }
 
-// ListenersConfig
+// ListenersConfig ...
 type ListenersConfig struct {
 	DefaultAddr string                           `yaml:"defaultAddr,omitempty"`
 	MQTT        map[string]map[string]PortConfig `yaml:"mqtt,omitempty"`
