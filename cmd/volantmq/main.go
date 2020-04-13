@@ -109,7 +109,7 @@ func loadMqttListeners(defaultAuth *auth.Manager, lCfg *configuration.ListenersC
 
 			if len(cfg.Auth.Order) > 0 {
 				var err error
-				if transportAuth, err = auth.NewManager(cfg.Auth.Order, cfg.Auth.Anonymous); err != nil {
+				if transportAuth, err = auth.NewManager(cfg.Auth.Order); err != nil {
 					return nil, err
 				}
 			}
@@ -330,7 +330,7 @@ func (ctx *appContext) loadAuth(cfg *configuration.Config) (*auth.Manager, error
 		}
 	}
 
-	def, err := auth.NewManager(cfg.Auth.Order, cfg.Auth.Anonymous)
+	def, err := auth.NewManager(cfg.Auth.Order)
 
 	if err != nil {
 		logger.Error("\tcreating default auth:", err.Error())
@@ -338,7 +338,6 @@ func (ctx *appContext) loadAuth(cfg *configuration.Config) (*auth.Manager, error
 	}
 
 	logger.Info("\tdefault auth order: ", cfg.Auth.Order)
-	logger.Info("\tdefault auth anonymous: ", cfg.Auth.Anonymous)
 
 	return def, nil
 }

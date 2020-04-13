@@ -169,6 +169,7 @@ type SessionCallbacks interface {
 type impl struct {
 	SessionCallbacks
 	id               string
+	username         []byte
 	conn             transport.Conn
 	metric           metrics.Packets
 	permissions      vlauth.Permissions
@@ -391,7 +392,7 @@ func (s *impl) stopNonAck(reason error) bool {
 }
 
 // Publish ...
-func (s *impl) Publish(id string, pkt *mqttp.Publish) {
+func (s *impl) Publish(_ string, pkt *mqttp.Publish) {
 	s.tx.send(pkt)
 }
 
@@ -413,8 +414,6 @@ func (s *impl) onConnect(pkt *mqttp.Connect) error {
 			id = genClientID()
 		}
 
-		s.id = id
-
 		params := &ConnectParams{
 			ID:         id,
 			IDGen:      idGen,
@@ -428,6 +427,9 @@ func (s *impl) onConnect(pkt *mqttp.Connect) error {
 
 		params.Username, params.Password = pkt.Credentials()
 		s.version = params.Version
+
+		s.id = id
+		s.username = params.Username
 
 		s.readConnProperties(pkt, params)
 
@@ -711,7 +713,7 @@ func (s *impl) publishToTopic(p *mqttp.Publish) error {
 }
 
 // onReleaseIn ack process for incoming messages
-func (s *impl) onReleaseIn(o, n mqttp.IFace) {
+func (s *impl) onReleaseIn(o, _ mqttp.IFace) {
 	switch p := o.(type) {
 	case *mqttp.Publish:
 		_ = s.publishToTopic(p)
@@ -855,7 +857,7 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 	//   - ignore the message but send acks
 	//   - return error leading to disconnect
 	// TODO: publish permissions
-	if e := s.permissions.ACL(s.id, "", pkt.Topic(), vlauth.AccessWrite); e != vlauth.StatusAllow {
+	if e := s.permissions.ACL(s.id, string(s.username), pkt.Topic(), vlauth.AccessWrite); e != vlauth.StatusAllow {
 		reason = mqttp.CodeRefusedNotAuthorized
 	}
 
@@ -881,7 +883,7 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 			// [MQTT-4.3.3-9]
 			// store incoming QoS 2 message before sending PUBREC as theoretically PUBREL
 			// might come before store in case message store done after write PUBREC
-			if reason < mqttp.CodeUnspecifiedError {
+			if reason == mqttp.CodeSuccess {
 				s.pubIn.store(pkt)
 				r.SetReason(mqttp.CodeSuccess)
 				// s.metric.OnAddUnAckRecv(1)
@@ -910,13 +912,13 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 		r.SetReason(reason)
 		resp = r
 
-		if reason >= mqttp.CodeUnspecifiedError {
+		fallthrough
+	case mqttp.QoS0: // QoS 0
+		if reason != mqttp.CodeSuccess {
 			s.metric.OnRejected(1)
 			break
 		}
 
-		fallthrough
-	case mqttp.QoS0: // QoS 0
 		// [MQTT-4.3.1]
 		// [MQTT-4.3.2-4]
 		// TODO(troian): ignore if publish permissions not validated

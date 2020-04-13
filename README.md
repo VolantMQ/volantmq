@@ -113,7 +113,6 @@ plugins:
 #### Default auth config
 ```yaml
 auth:
-  anonymous: false # anonymous auth is prohibited. Listener can override
   order: # default auth order. Authenticators invoked in the order they present in the config. Listener can override
     - internal
 ```
@@ -157,12 +156,10 @@ listeners:
       1883:                # port number. can be as many ports configurations as needed
         host: 127.0.0.1    # optional. listen address. defaultAddr is used if omitted
         auth:              # optional. default auth configuration is used if omitted
-          anonymous: true  # optional. default auth configuration is used if omitted
           order:           # optional. default auth configuration is used if omitted
             - internal
       1884:
         auth:
-          anonymous: false
           order:
             - http1
         tls:               # TLS configuration
