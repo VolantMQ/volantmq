@@ -426,9 +426,8 @@ func (s *impl) onConnect(pkt *mqttp.Connect) error {
 		}
 
 		params.Username, params.Password = pkt.Credentials()
-		s.version = params.Version
-
 		s.id = id
+		s.version = params.Version
 		s.username = params.Username
 
 		s.readConnProperties(pkt, params)
