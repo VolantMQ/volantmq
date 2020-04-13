@@ -121,7 +121,7 @@ type MqttConfig struct {
 	Options struct {
 		ConnectTimeout  int           `yaml:"connectTimeout,omitempty"`
 		SessionPreempt  bool          `yaml:"sessionPreempt,omitempty" yaml:"sessionDups,omitempty"` // nolint:staticcheck
-		RetainAvailable bool          `yaml:"retainAvailable,omitempty"`
+		RetainAvailable bool          `yaml:"retainAvail,omitempty"`
 		SubsOverlap     bool          `yaml:"subsOverlap,omitempty"`
 		SubsID          bool          `yaml:"subsId,omitempty"`
 		SubsShared      bool          `yaml:"subsShared,omitempty"`
