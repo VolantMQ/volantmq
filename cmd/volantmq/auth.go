@@ -16,7 +16,7 @@ const (
 	defaultAuthACL = `^.*$`
 )
 
-type authAclConfig struct {
+type authACLConfig struct {
 	Read  string `yaml:"read" mapstructure:"read"`
 	Write string `yaml:"write" mapstructure:"write"`
 }
@@ -24,29 +24,29 @@ type authAclConfig struct {
 type authEnhUserConfig struct {
 	User     string        `yaml:"user" mapstructure:"user"`
 	Password string        `yaml:"password" mapstructure:"password"`
-	Acl      authAclConfig `yaml:"acl" mapstructure:"acl"`
+	ACL      authACLConfig `yaml:"acl" mapstructure:"acl"`
 }
 
 type authConfig struct {
 	UsersFile  string              `yaml:"usersFile" mapstructure:"usersFile"`
 	Users      map[string]string   `yaml:"users" mapstructure:"users"`
 	EnhUsers   []authEnhUserConfig `yaml:"enhUsers" mapstructure:"enhUsers"`
-	DefaultAcl authAclConfig       `yaml:"defaultAcl" mapstructure:"defaultAcl"`
+	DefaultACL authACLConfig       `yaml:"defaultAcl" mapstructure:"defaultAcl"`
 }
 
-type authAcl struct {
+type authACL struct {
 	read  *regexp.Regexp
 	write *regexp.Regexp
 }
 
 type creds struct {
 	hash string
-	authAcl
+	authACL
 }
 
 type simpleAuth struct {
 	creds map[string]creds
-	authAcl
+	authACL
 }
 
 var _ vlauth.IFace = (*simpleAuth)(nil)
@@ -56,57 +56,57 @@ func newSimpleAuth(cfg authConfig) (*simpleAuth, error) {
 		creds: make(map[string]creds),
 	}
 
-	if cfg.DefaultAcl.Read == "" {
+	if cfg.DefaultACL.Read == "" {
 		logger.Warn("\tsimpleAuth config does not have defaultAcl.read. defaulting to \"^.*$\"")
-		cfg.DefaultAcl.Read = defaultAuthACL
+		cfg.DefaultACL.Read = defaultAuthACL
 	}
 
-	if cfg.DefaultAcl.Write == "" {
+	if cfg.DefaultACL.Write == "" {
 		logger.Warn("\tsimpleAuth config does not have defaultAcl.write. defaulting to \"^.*$\"")
-		cfg.DefaultAcl.Write = defaultAuthACL
+		cfg.DefaultACL.Write = defaultAuthACL
 	}
 
 	var err error
-	if s.read, err = regexp.Compile(cfg.DefaultAcl.Read); err != nil {
+	if s.read, err = regexp.Compile(cfg.DefaultACL.Read); err != nil {
 		return nil, err
 	}
 
-	if s.write, err = regexp.Compile(cfg.DefaultAcl.Write); err != nil {
+	if s.write, err = regexp.Compile(cfg.DefaultACL.Write); err != nil {
 		return nil, err
 	}
 
 	for u, p := range cfg.Users {
 		s.creds[u] = creds{
 			hash:    p,
-			authAcl: s.authAcl,
+			authACL: s.authACL,
 		}
 	}
 
 	eLoad := func(users []authEnhUserConfig) error {
 		for _, entry := range users {
-			acl := authAcl{}
+			acl := authACL{}
 
 			var e error
 
-			if entry.Acl.Read == "" {
+			if entry.ACL.Read == "" {
 				acl.read = s.read
 			} else {
-				if acl.read, e = regexp.Compile(entry.Acl.Read); e != nil {
+				if acl.read, e = regexp.Compile(entry.ACL.Read); e != nil {
 					return e
 				}
 			}
 
-			if entry.Acl.Write == "" {
+			if entry.ACL.Write == "" {
 				acl.read = s.write
 			} else {
-				if acl.write, e = regexp.Compile(entry.Acl.Write); e != nil {
+				if acl.write, e = regexp.Compile(entry.ACL.Write); e != nil {
 					return e
 				}
 			}
 
 			s.creds[entry.User] = creds{
 				hash:    entry.Password,
-				authAcl: acl,
+				authACL: acl,
 			}
 		}
 
