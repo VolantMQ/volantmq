@@ -181,9 +181,15 @@ func (s *Type) Offline(shutdown bool) {
 	if shutdown {
 		select {
 		case <-s.quit:
+			return
 		default:
 			close(s.quit)
 		}
+
+		// s.access.Wait()
+		s.lock.Lock()
+		s.publisher = func(s string, publish *mqttp.Publish) {}
+		s.lock.Unlock()
 
 		for topic := range s.subscriptions {
 			if err := s.UnSubscribe(topic); err != nil {
@@ -202,11 +208,6 @@ func (s *Type) Offline(shutdown bool) {
 		default:
 			close(s.unSubSignal)
 		}
-
-		// s.access.Wait()
-		s.lock.Lock()
-		s.publisher = func(s string, publish *mqttp.Publish) {}
-		s.lock.Unlock()
 	} else {
 		s.lock.Lock()
 		s.publisher = s.OfflinePublish
