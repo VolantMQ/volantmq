@@ -277,7 +277,14 @@ func (mT *provider) subscribe(req *topicstypes.SubscribeReq, resp *topicstypes.S
 				mT.retainSearch(req.Filter, &r)
 			}
 
-			resp.Retained = r
+			for _, rt := range r {
+				msg, err := rt.Clone(mqttp.ProtocolV50)
+				if err != nil {
+					mT.log.Errorf("clone error %s", err.Error())
+				} else {
+					resp.Retained = append(resp.Retained, msg)
+				}
+			}
 
 			if !exists {
 				mT.metricsSubs.OnSubscribe()
@@ -332,8 +339,11 @@ func (mT *provider) publisher() {
 
 		for _, pub := range pubEntries {
 			for _, e := range pub {
-				if err := e.s.Publish(msg, e.qos, e.ops, e.ids); err != nil {
-					mT.log.Error("Publish error", zap.Error(err))
+				cl, err := msg.Clone(mqttp.ProtocolV50)
+				if err != nil {
+					mT.log.Errorf("clone error %s", err.Error())
+				} else if err = e.s.Publish(cl, e.qos, e.ops, e.ids); err != nil {
+					mT.log.Error("publish error", zap.Error(err))
 				}
 			}
 		}

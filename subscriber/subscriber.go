@@ -78,7 +78,7 @@ func (s *Type) Subscriptions() vlsubscriber.Subscriptions {
 }
 
 // Subscribe to topic
-func (s *Type) Subscribe(topic string, params vlsubscriber.SubscriptionParams) ([]*mqttp.Publish, error) {
+func (s *Type) Subscribe(topic string, params vlsubscriber.SubscriptionParams) (mqttp.QosType, []*mqttp.Publish, error) {
 	resp := s.Topics.Subscribe(topicsTypes.SubscribeReq{
 		Filter: topic,
 		Params: params,
@@ -87,7 +87,7 @@ func (s *Type) Subscribe(topic string, params vlsubscriber.SubscriptionParams) (
 	})
 
 	if resp.Err != nil {
-		return []*mqttp.Publish{}, resp.Err
+		return mqttp.QosFailure, []*mqttp.Publish{}, resp.Err
 	}
 
 	s.subscriptions[topic] = resp.Params
@@ -98,7 +98,7 @@ func (s *Type) Subscribe(topic string, params vlsubscriber.SubscriptionParams) (
 		}
 	}
 
-	return resp.Retained, nil
+	return resp.Params.Granted, resp.Retained, nil
 }
 
 // UnSubscribe from given topic
@@ -119,17 +119,16 @@ func (s *Type) UnSubscribe(topic string) error {
 // Publish message accordingly to subscriber state
 // online: forward message to session
 // offline: persist message
-func (s *Type) Publish(p *mqttp.Publish, grantedQoS mqttp.QosType, _ mqttp.SubscriptionOptions, ids []uint32) error {
+func (s *Type) Publish(pkt *mqttp.Publish, grantedQoS mqttp.QosType, _ mqttp.SubscriptionOptions, ids []uint32) error {
 	select {
 	case <-s.quit:
 		return nil
 	default:
 	}
 
-	pkt, err := p.Clone(s.Version)
-	if err != nil {
-		return err
-	}
+	pkt.SetVersion(s.Version)
+
+	var err error
 
 	if len(ids) > 0 {
 		if err = pkt.PropertySet(mqttp.PropertySubscriptionIdentifier, ids); err != nil {

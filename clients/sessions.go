@@ -798,7 +798,7 @@ func (m *Manager) configurePersistedSubscribers(ctx *loadContext) {
 			})
 
 		for topic, ops := range t.sub.topics {
-			if _, err := sub.Subscribe(topic, ops); err != nil {
+			if _, _, err := sub.Subscribe(topic, ops); err != nil {
 				m.log.Error("Couldn't subscribe", zap.Error(err))
 			}
 		}

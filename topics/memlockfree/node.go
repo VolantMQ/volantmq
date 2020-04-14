@@ -77,20 +77,13 @@ func (mT *provider) leafInsertNode(levels []string) *node {
 			value, ok := root.children.LoadOrStore(level, newNode(root))
 			n := value.(*node)
 
-			// atomic.AddInt32(&n.subsCount, 1)
-
 			if ok {
 				atomic.AddInt32(&root.kidsCount, -1)
 				if atomic.LoadInt32(&n.remove) == 1 {
-					// atomic.AddInt32(&n.subsCount, -1)
 					n.wgDeleted.Wait()
 					continue
 				}
 			}
-
-			// if i != len(levels)-1 {
-			// atomic.AddInt32(&n.subsCount, -1)
-			// }
 
 			root = n
 			break

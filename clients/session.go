@@ -151,10 +151,10 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 				Ops: t.Ops(),
 			}
 
-			if retained, ee := s.subscriber.Subscribe(t.Filter(), params); ee != nil {
+			if granted, retained, ee := s.subscriber.Subscribe(t.Filter(), params); ee != nil {
 				reason = mqttp.QosFailure
 			} else {
-				reason = mqttp.ReasonCode(params.Granted)
+				reason = mqttp.ReasonCode(granted)
 				retainedPublishes = append(retainedPublishes, retained...)
 			}
 		} else {
@@ -248,11 +248,8 @@ func (s *session) SignalUnSubscribe(pkt *mqttp.UnSubscribe) (mqttp.IFace, error)
 }
 
 // SignalDisconnect process DISCONNECT packet from client
-func (s *session) SignalDisconnect(pkt *mqttp.Disconnect) (mqttp.IFace, error) {
+func (s *session) SignalDisconnect(pkt *mqttp.Disconnect) error {
 	var err error
-	var resp mqttp.IFace
-
-	err = mqttp.CodeSuccess
 
 	if s.version == mqttp.ProtocolV50 {
 		// FIXME: CodeRefusedBadUsernameOrPassword has same id as CodeDisconnectWithWill
@@ -268,9 +265,6 @@ func (s *session) SignalDisconnect(pkt *mqttp.Disconnect) (mqttp.IFace, error) {
 				// uses DISCONNECT with Reason Code 0x82 (Protocol Error) as described in section 4.13.
 				if (s.expireIn != nil && *s.expireIn == 0) && val != 0 {
 					err = mqttp.CodeProtocolError
-					p := mqttp.NewDisconnect(s.version)
-					p.SetReasonCode(mqttp.CodeProtocolError)
-					resp = p
 				} else {
 					s.expireIn = &val
 				}
@@ -280,7 +274,7 @@ func (s *session) SignalDisconnect(pkt *mqttp.Disconnect) (mqttp.IFace, error) {
 		s.will = nil
 	}
 
-	return resp, err
+	return err
 }
 
 // SignalOnline signal state is get online

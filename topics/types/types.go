@@ -81,7 +81,6 @@ type SubscribeReq struct {
 }
 
 type SubscribeResp struct {
-	// Granted  mqttp.QosType
 	Params   vlsubscriber.SubscriptionParams
 	Retained []*mqttp.Publish
 	Err      error

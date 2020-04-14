@@ -159,7 +159,7 @@ type SessionCallbacks interface {
 	SignalPublish(*mqttp.Publish) error
 	SignalSubscribe(*mqttp.Subscribe) (mqttp.IFace, error)
 	SignalUnSubscribe(*mqttp.UnSubscribe) (mqttp.IFace, error)
-	SignalDisconnect(*mqttp.Disconnect) (mqttp.IFace, error)
+	SignalDisconnect(*mqttp.Disconnect) error
 	SignalOnline()
 	SignalOffline()
 	SignalConnectionClose(DisconnectParams)
@@ -635,33 +635,18 @@ func (s *impl) processIncoming(p mqttp.IFace) error {
 	case *mqttp.PingReq:
 		resp = mqttp.NewPingResp(s.version)
 	case *mqttp.Disconnect:
-		resp, err = s.SignalDisconnect(pkt)
+		if err = s.SignalDisconnect(pkt); err == nil {
+			err = errors.New("disconnect")
+		}
+	}
 
+	if err != nil {
 		s.onStop.Do(func() {
 			s.SignalOffline()
 
 			s.tx.stop()
 		})
-
-		if resp != nil {
-			if b, e := mqttp.Encode(p); e == nil {
-				_, e = s.tx.conn.Write(b)
-				if e != nil {
-					s.log.Infof("[clientId: %s] cannot write DISCONNECT packet: %s", s.id, e.Error())
-				}
-			} else {
-				s.log.Errorf("[clientId: %s] cannot encode DISCONNECT packet: %s", s.id, e.Error())
-			}
-		}
-
-		resp = nil
-
-		if err == nil {
-			err = errors.New("disconnect")
-		}
-	}
-
-	if resp != nil {
+	} else if resp != nil {
 		s.tx.send(resp)
 	}
 
