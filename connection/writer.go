@@ -486,7 +486,7 @@ func (s *writer) releaseID(id mqttp.IDType) {
 // onReleaseOut process messages that required ack cycle
 // onAckTimeout if publish message has not been acknowledged within specified ackTimeout
 // server should mark it as a dup and send again
-func (s *writer) onReleaseOut(o, n mqttp.IFace) {
+func (s *writer) onReleaseOut(_, n mqttp.IFace) {
 	switch n.Type() {
 	case mqttp.PUBACK:
 		fallthrough

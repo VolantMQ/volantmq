@@ -605,7 +605,7 @@ func (s *impl) processIncoming(p mqttp.IFace) error {
 	//                   the Client MUST NOT send any packets other than AUTH or DISCONNECT packets
 	//                   until it has received a CONNACK packet
 	if _, ok := expectedPacketType[s.state][p.Type()]; !ok {
-		s.log.Debugf("clientId \"%s\" sent unexpected packet %s for state %s", s.id, s.state.desc(), p.Type().Name())
+		s.log.Debugf("clientId \"%s\" sent unexpected packet %s for state %s", s.id, p.Type().Name(), s.state.desc())
 		return mqttp.CodeProtocolError
 	}
 
@@ -667,50 +667,6 @@ func (s *impl) processIncoming(p mqttp.IFace) error {
 
 	return err
 }
-
-// // forward PUBLISH message to topics manager which takes care about subscribers
-// func (s *impl) publishToTopic(p *mqttp.Publish) error {
-// 	// // v5.0
-// 	// // If the Server included Retain Available in its CONNACK response to a Client with its value set to 0 and it
-// 	// // receives a PUBLISH packet with the RETAIN flag is set to 1, then it uses the DISCONNECT Reason
-// 	// // Code of 0x9A (Retain not supported) as described in section 4.13.
-// 	// if s.version >= mqttp.ProtocolV50 {
-// 	// 	// [MQTT-3.3.2.3.4]
-// 	// 	if prop := p.PropertyGet(mqttp.PropertyTopicAlias); prop != nil {
-// 	// 		if val, err := prop.AsShort(); err == nil {
-// 	// 			if len(p.Topic()) != 0 {
-// 	// 				// renew alias with new topic
-// 	// 				s.rx.topicAlias[val] = p.Topic()
-// 	// 			} else {
-// 	// 				if topic, kk := s.rx.topicAlias[val]; kk {
-// 	// 					// do not check for error as topic has been validated when arrived
-// 	// 					if err = p.SetTopic(topic); err != nil {
-// 	// 						s.log.Error("publish to topic",
-// 	// 							zap.String("clientId", s.id),
-// 	// 							zap.String("topic", topic),
-// 	// 							zap.Error(err))
-// 	// 					}
-// 	// 				} else {
-// 	// 					return mqttp.CodeInvalidTopicAlias
-// 	// 				}
-// 	// 			}
-// 	// 		} else {
-// 	// 			return mqttp.CodeInvalidTopicAlias
-// 	// 		}
-// 	// 	}
-// 	//
-// 	// 	// [MQTT-3.3.2.3.3]
-// 	// 	if prop := p.PropertyGet(mqttp.PropertyPublicationExpiry); prop != nil {
-// 	// 		if val, err := prop.AsInt(); err == nil {
-// 	// 			p.SetExpireAt(time.Now().Add(time.Duration(val) * time.Second))
-// 	// 		} else {
-// 	// 			return err
-// 	// 		}
-// 	// 	}
-// 	// }
-//
-// 	return s.SignalPublish(p)
-// }
 
 // onReleaseIn ack process for incoming messages
 func (s *impl) onReleaseIn(o, _ mqttp.IFace) {

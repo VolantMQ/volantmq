@@ -19,7 +19,7 @@ import (
 type sessionEvents interface {
 	sessionOffline(string, sessionOfflineState)
 	connectionClosed(string, bool, mqttp.ReasonCode)
-	subscriberShutdown(string, vlsubscriber.IFace)
+	subscriberShutdown(string)
 }
 
 type sessionPreConfig struct {
@@ -34,12 +34,13 @@ type sessionPreConfig struct {
 
 type sessionConfig struct {
 	sessionEvents
-	subscriber          vlsubscriber.IFace
-	will                *mqttp.Publish
-	expireIn            *uint32
-	durable             bool
-	sharedSubscriptions bool // nolint:structcheck
-	version             mqttp.ProtocolVersion
+	subscriber            vlsubscriber.IFace
+	will                  *mqttp.Publish
+	expireIn              *uint32
+	durable               bool
+	sharedSubscriptions   bool // nolint:structcheck
+	subscriptionIdAllowed bool
+	version               mqttp.ProtocolVersion
 }
 
 type sessionOfflineState struct {
@@ -119,30 +120,31 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 	// V5.0 [MQTT-3.8.2.1.2]
 	if prop := pkt.PropertyGet(mqttp.PropertySubscriptionIdentifier); prop != nil {
 		if v, e := prop.AsInt(); e == nil {
+			if !s.subscriptionIdAllowed {
+				return nil, mqttp.CodeSubscriptionIDNotSupported
+			}
 			subsID = v
+		} else {
+			return nil, mqttp.CodeProtocolError
 		}
 	}
 
 	err := pkt.ForEachTopic(func(t *mqttp.Topic) error {
 		// V5.0
-		// [MQTT-3.8.3-4] It is a Protocol Error to set the No Local bit to 1 on a Shared Subscription
-		if t.Ops().NL() && (t.ShareName() != "") {
-			return mqttp.CodeProtocolError
+		if t.ShareName() != "" {
+			// [MQTT-3.8.3-4] It is a Protocol Error to set the No Local bit to 1 on a Shared Subscription
+			if t.Ops().NL() {
+				return mqttp.CodeProtocolError
+			}
+
+			if !s.sharedSubscriptions {
+				retCodes = append(retCodes, mqttp.CodeSharedSubscriptionNotSupported)
+				return nil
+			}
 		}
 
-		if !s.sharedSubscriptions && (t.ShareName() != "") {
-			return mqttp.CodeSharedSubscriptionNotSupported
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	_ = pkt.ForEachTopic(func(t *mqttp.Topic) error {
 		var reason mqttp.ReasonCode
+
 		if e := s.permissions.ACL(s.id, s.username, t.Filter(), vlauth.AccessRead); e == vlauth.StatusAllow {
 			params := vlsubscriber.SubscriptionParams{
 				ID:  subsID,
@@ -167,6 +169,10 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 		retCodes = append(retCodes, reason)
 		return nil
 	})
+
+	if err != nil {
+		return nil, err
+	}
 
 	if err = resp.AddReturnCodes(retCodes); err != nil {
 		return nil, err
@@ -323,7 +329,7 @@ func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 	s.connectionClosed(s.id, s.durable, params.Reason)
 
 	if !state.keepContainer {
-		s.subscriberShutdown(s.id, s.subscriber)
+		s.subscriberShutdown(s.id)
 		s.subscriber = nil
 	}
 
