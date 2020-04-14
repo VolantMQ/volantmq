@@ -304,7 +304,7 @@ func (s *writer) qos12PopPacket() mqttp.IFace {
 				pkt = m
 
 				s.qos12Messages.Remove()
-				s.pubOut.store(pkt)
+				s.pubOut.store(pkt, true)
 				s.metric.OnAddUnAckSent(1)
 			}
 		default:
@@ -409,7 +409,7 @@ func (s *writer) popPackets() []mqttp.IFace {
 		if pkt := s.pubrelMessages.Remove(); pkt != nil {
 			p := pkt.(mqttp.IFace)
 			packets = append(packets, p)
-			s.pubOut.store(p)
+			s.pubOut.store(p, true)
 			s.metric.OnAddUnAckSent(1)
 		}
 
@@ -486,7 +486,7 @@ func (s *writer) releaseID(id mqttp.IDType) {
 // onReleaseOut process messages that required ack cycle
 // onAckTimeout if publish message has not been acknowledged within specified ackTimeout
 // server should mark it as a dup and send again
-func (s *writer) onReleaseOut(o, n mqttp.IFace) {
+func (s *writer) onReleaseOut(_, n mqttp.IFace) {
 	switch n.Type() {
 	case mqttp.PUBACK:
 		fallthrough

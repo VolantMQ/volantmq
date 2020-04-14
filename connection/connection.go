@@ -159,7 +159,7 @@ type SessionCallbacks interface {
 	SignalPublish(*mqttp.Publish) error
 	SignalSubscribe(*mqttp.Subscribe) (mqttp.IFace, error)
 	SignalUnSubscribe(*mqttp.UnSubscribe) (mqttp.IFace, error)
-	SignalDisconnect(*mqttp.Disconnect) (mqttp.IFace, error)
+	SignalDisconnect(*mqttp.Disconnect) error
 	SignalOnline()
 	SignalOffline()
 	SignalConnectionClose(DisconnectParams)
@@ -426,9 +426,8 @@ func (s *impl) onConnect(pkt *mqttp.Connect) error {
 		}
 
 		params.Username, params.Password = pkt.Credentials()
-		s.version = params.Version
-
 		s.id = id
+		s.version = params.Version
 		s.username = params.Username
 
 		s.readConnProperties(pkt, params)
@@ -606,7 +605,7 @@ func (s *impl) processIncoming(p mqttp.IFace) error {
 	//                   the Client MUST NOT send any packets other than AUTH or DISCONNECT packets
 	//                   until it has received a CONNACK packet
 	if _, ok := expectedPacketType[s.state][p.Type()]; !ok {
-		s.log.Debugf("clientId \"%s\" sent unexpected packet %s for state %s", s.id, s.state.desc(), p.Type().Name())
+		s.log.Debugf("clientId \"%s\" sent unexpected packet %s for state %s", s.id, p.Type().Name(), s.state.desc())
 		return mqttp.CodeProtocolError
 	}
 
@@ -636,87 +635,29 @@ func (s *impl) processIncoming(p mqttp.IFace) error {
 	case *mqttp.PingReq:
 		resp = mqttp.NewPingResp(s.version)
 	case *mqttp.Disconnect:
+		if err = s.SignalDisconnect(pkt); err == nil {
+			err = errors.New("disconnect")
+		}
+	}
+
+	if err != nil {
 		s.onStop.Do(func() {
 			s.SignalOffline()
 
 			s.tx.stop()
 		})
-
-		resp, err = s.SignalDisconnect(pkt)
-		if resp != nil {
-			if b, e := mqttp.Encode(p); e == nil {
-				_, e = s.tx.conn.Write(b)
-				if e != nil {
-					s.log.Infof("[clientId: %s] cannot write DISCONNECT packet: %s", s.id, e.Error())
-				}
-			} else {
-				s.log.Errorf("[clientId: %s] cannot encode DISCONNECT packet: %s", s.id, e.Error())
-			}
-		}
-
-		resp = nil
-
-		if err == nil {
-			err = errors.New("disconnect")
-		}
-	}
-
-	if resp != nil {
+	} else if resp != nil {
 		s.tx.send(resp)
 	}
 
 	return err
 }
 
-// forward PUBLISH message to topics manager which takes care about subscribers
-func (s *impl) publishToTopic(p *mqttp.Publish) error {
-	// v5.0
-	// If the Server included Retain Available in its CONNACK response to a Client with its value set to 0 and it
-	// receives a PUBLISH packet with the RETAIN flag is set to 1, then it uses the DISCONNECT Reason
-	// Code of 0x9A (Retain not supported) as described in section 4.13.
-	if s.version >= mqttp.ProtocolV50 {
-		// [MQTT-3.3.2.3.4]
-		if prop := p.PropertyGet(mqttp.PropertyTopicAlias); prop != nil {
-			if val, err := prop.AsShort(); err == nil {
-				if len(p.Topic()) != 0 {
-					// renew alias with new topic
-					s.rx.topicAlias[val] = p.Topic()
-				} else {
-					if topic, kk := s.rx.topicAlias[val]; kk {
-						// do not check for error as topic has been validated when arrived
-						if err = p.SetTopic(topic); err != nil {
-							s.log.Error("publish to topic",
-								zap.String("clientId", s.id),
-								zap.String("topic", topic),
-								zap.Error(err))
-						}
-					} else {
-						return mqttp.CodeInvalidTopicAlias
-					}
-				}
-			} else {
-				return mqttp.CodeInvalidTopicAlias
-			}
-		}
-
-		// [MQTT-3.3.2.3.3]
-		if prop := p.PropertyGet(mqttp.PropertyPublicationExpiry); prop != nil {
-			if val, err := prop.AsInt(); err == nil {
-				p.SetExpireAt(time.Now().Add(time.Duration(val) * time.Second))
-			} else {
-				return err
-			}
-		}
-	}
-
-	return s.SignalPublish(p)
-}
-
 // onReleaseIn ack process for incoming messages
 func (s *impl) onReleaseIn(o, _ mqttp.IFace) {
 	switch p := o.(type) {
 	case *mqttp.Publish:
-		_ = s.publishToTopic(p)
+		_ = s.SignalPublish(p)
 	}
 }
 
@@ -833,10 +774,15 @@ func (s *impl) onConnectionClose(status error) bool {
 // On QoS == 0, we should just take the next step, no ack required
 // On QoS == 1, send back PUBACK, then take the next step
 // On QoS == 2, we need to put it in the ack queue, send back PUBREC
+// nolint: gocyclo
 func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 	// check for topic access
 	var err error
 	reason := mqttp.CodeSuccess
+
+	aclPerformed := false
+
+	var topicAlias uint16
 
 	if s.version >= mqttp.ProtocolV50 {
 		if !s.retainAvailable && pkt.Retain() {
@@ -848,6 +794,51 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 				return nil, mqttp.CodeInvalidTopicAlias
 			}
 		}
+
+		// v5.0
+		// If the Server included Retain Available in its CONNACK response to a Client with its value set to 0 and it
+		// receives a PUBLISH packet with the RETAIN flag is set to 1, then it uses the DISCONNECT Reason
+		// Code of 0x9A (Retain not supported) as described in section 4.13.
+		// [MQTT-3.3.2.3.4]
+		if prop := pkt.PropertyGet(mqttp.PropertyTopicAlias); prop != nil {
+			if topicAlias, err = prop.AsShort(); err == nil {
+				// [MQTT-3.3.2-8] A Topic Alias of 0 is not permitted.
+				// A sender MUST NOT send a PUBLISH packet containing a Topic Alias which has the value 0
+				if topicAlias == 0 {
+					return nil, mqttp.CodeInvalidTopicAlias
+				}
+
+				if len(pkt.Topic()) == 0 {
+					if topic, kk := s.rx.topicAlias[topicAlias]; kk {
+						// do not check for error as topic has been validated when arrived
+						if err = pkt.SetTopic(topic); err != nil {
+							s.log.Error("publish to topic",
+								zap.String("clientId", s.id),
+								zap.String("topic", topic),
+								zap.Error(err))
+							return nil, mqttp.CodeUnspecifiedError
+						}
+
+						topicAlias = 0
+						aclPerformed = true
+					} else {
+						return nil, mqttp.CodeInvalidTopicAlias
+					}
+				}
+			} else {
+				return nil, mqttp.CodeInvalidTopicAlias
+			}
+		}
+
+		// [MQTT-3.3.2.3.3]
+		if prop := pkt.PropertyGet(mqttp.PropertyPublicationExpiry); prop != nil {
+			var val uint32
+			if val, err = prop.AsInt(); err == nil {
+				pkt.SetExpireAt(time.Now().Add(time.Duration(val) * time.Second))
+			} else {
+				return nil, err
+			}
+		}
 	}
 
 	var resp mqttp.IFace
@@ -856,60 +847,67 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 	// To deal with V3.1.1 two ways left:
 	//   - ignore the message but send acks
 	//   - return error leading to disconnect
-	// TODO: publish permissions
-	if e := s.permissions.ACL(s.id, string(s.username), pkt.Topic(), vlauth.AccessWrite); e != vlauth.StatusAllow {
-		reason = mqttp.CodeRefusedNotAuthorized
+	if !aclPerformed {
+		if e := s.permissions.ACL(s.id, string(s.username), pkt.Topic(), vlauth.AccessWrite); e != vlauth.StatusAllow {
+			reason = mqttp.CodeNotAuthorized
+		}
+	}
+
+	// there is a new topic alias
+	if (reason == mqttp.CodeSuccess) && (topicAlias > 0) {
+		s.rx.topicAlias[topicAlias] = pkt.Topic()
 	}
 
 	switch pkt.QoS() {
 	case mqttp.QoS2:
 		// [MQTT-2.3.1-1]
-		if id, _ := pkt.ID(); id == 0 {
+		var id mqttp.IDType
+		if id, _ = pkt.ID(); id == 0 {
 			return nil, mqttp.CodeProtocolError
 		}
 
-		if s.rxQuota == 0 {
-			err = mqttp.CodeReceiveMaximumExceeded
-			s.metric.OnRejected(1)
-		} else {
-			s.rxQuota--
-			r := mqttp.NewPubRec(s.version)
-			id, _ := pkt.ID()
-
-			r.SetPacketID(id)
-
-			resp = r
-
-			// [MQTT-4.3.3-9]
-			// store incoming QoS 2 message before sending PUBREC as theoretically PUBREL
-			// might come before store in case message store done after write PUBREC
-			if reason == mqttp.CodeSuccess {
-				s.pubIn.store(pkt)
-				r.SetReason(mqttp.CodeSuccess)
-				// s.metric.OnAddUnAckRecv(1)
-			} else {
-				s.metric.OnRejected(1)
-				r.SetReason(reason)
+		if reason == mqttp.CodeSuccess {
+			// [MQTT-3.3.4-7]
+			if s.rxQuota == 0 {
+				return nil, mqttp.CodeReceiveMaximumExceeded
 			}
+
+			s.rxQuota--
 		}
+
+		r := mqttp.NewPubRec(s.version)
+		r.SetPacketID(id)
+
+		resp = r
+
+		// [MQTT-4.3.3-9]
+		// store incoming QoS 2 message before sending PUBREC as theoretically PUBREL
+		// might come before store in case message store done after write PUBREC
+		if reason == mqttp.CodeSuccess {
+			if !s.pubIn.store(pkt, false) {
+				reason = mqttp.CodePacketIDInUse
+			}
+			// s.metric.OnAddUnAckRecv(1)
+		} else {
+			s.metric.OnRejected(1)
+		}
+
+		r.SetReason(reason)
 	case mqttp.QoS1:
 		// [MQTT-2.3.1-1]
-		if id, _ := pkt.ID(); id == 0 {
+		var id mqttp.IDType
+		if id, _ = pkt.ID(); id == 0 {
 			return nil, mqttp.CodeProtocolError
 		}
 
-		if s.rxQuota == 0 {
-			err = mqttp.CodeReceiveMaximumExceeded
-			s.metric.OnRejected(1)
-			break
+		if (reason == mqttp.CodeSuccess) && (s.rxQuota == 0) {
+			return nil, mqttp.CodeReceiveMaximumExceeded
 		}
 
 		r := mqttp.NewPubAck(s.version)
-
-		id, _ := pkt.ID()
-
 		r.SetPacketID(id)
 		r.SetReason(reason)
+
 		resp = r
 
 		fallthrough
@@ -922,8 +920,8 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 		// [MQTT-4.3.1]
 		// [MQTT-4.3.2-4]
 		// TODO(troian): ignore if publish permissions not validated
-		if err = s.publishToTopic(pkt); err != nil {
-			s.log.Error("Couldn't publish message",
+		if err = s.SignalPublish(pkt); err != nil {
+			s.log.Errorf("Couldn't publish message",
 				zap.String("clientId", s.id),
 				zap.Uint8("QoS", uint8(pkt.QoS())),
 				zap.Error(err))
@@ -982,8 +980,11 @@ func (s *impl) onAck(pkt *mqttp.Ack) mqttp.IFace {
 		id, _ := pkt.ID()
 		r.SetPacketID(id)
 
-		s.pubIn.release(pkt)
-		s.rxQuota++
+		if s.pubIn.release(pkt) {
+			s.rxQuota++
+		} else {
+			r.SetReason(mqttp.CodePacketIDNotFound)
+		}
 		// s.metric.OnSubUnAckRecv(1)
 	default:
 		s.log.Error("Unsupported ack message type",

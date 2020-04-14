@@ -460,12 +460,14 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 	if info, err = m.loadContainer(cn.Session(), params, acl); err == nil {
 		ses = info.ses
 		config := sessionConfig{
-			sessionEvents: m,
-			expireIn:      params.ExpireIn,
-			will:          params.Will,
-			durable:       params.Durable,
-			version:       params.Version,
-			subscriber:    info.sub,
+			sessionEvents:         m,
+			expireIn:              params.ExpireIn,
+			will:                  params.Will,
+			durable:               params.Durable,
+			version:               params.Version,
+			sharedSubscriptions:   m.Config.Options.SubsShared,
+			subscriptionIDAllowed: m.Config.Options.SubsID,
+			subscriber:            info.sub,
 		}
 
 		_ = ses.configure(config)
@@ -724,11 +726,12 @@ func (m *Manager) connectionClosed(_ string, durable bool, _ mqttp.ReasonCode) {
 	m.Metrics.Clients().OnDisconnected(durable)
 }
 
-func (m *Manager) subscriberShutdown(id string, sub vlsubscriber.IFace) {
-	sub.Offline(true)
+func (m *Manager) subscriberShutdown(id string) {
 	if val, ok := m.sessions.Load(id); ok {
 		wrap := val.(*container)
-		wrap.sub = nil
+		if wrap.sub != nil {
+			wrap.sub.Offline(true)
+		}
 	} else {
 		m.log.Error("subscriber shutdown. container not found", zap.String("ClientID", id))
 	}
@@ -774,8 +777,9 @@ func (m *Manager) sessionOffline(id string, state sessionOfflineState) {
 
 func (m *Manager) sessionTimer(id string, expired bool) {
 	if expired {
-		_ = m.persistence.Delete([]byte(id))
+		m.subscriberShutdown(id)
 
+		_ = m.persistence.Delete([]byte(id))
 		m.sessions.Delete(id)
 		m.sessionsCount.Done()
 		m.expiryCount.Done()
@@ -794,7 +798,7 @@ func (m *Manager) configurePersistedSubscribers(ctx *loadContext) {
 			})
 
 		for topic, ops := range t.sub.topics {
-			if _, err := sub.Subscribe(topic, ops); err != nil {
+			if _, _, err := sub.Subscribe(topic, ops); err != nil {
 				m.log.Error("Couldn't subscribe", zap.Error(err))
 			}
 		}

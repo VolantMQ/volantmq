@@ -19,7 +19,7 @@ import (
 type sessionEvents interface {
 	sessionOffline(string, sessionOfflineState)
 	connectionClosed(string, bool, mqttp.ReasonCode)
-	subscriberShutdown(string, vlsubscriber.IFace)
+	subscriberShutdown(string)
 }
 
 type sessionPreConfig struct {
@@ -34,12 +34,13 @@ type sessionPreConfig struct {
 
 type sessionConfig struct {
 	sessionEvents
-	subscriber          vlsubscriber.IFace
-	will                *mqttp.Publish
-	expireIn            *uint32
-	durable             bool
-	sharedSubscriptions bool // nolint:structcheck
-	version             mqttp.ProtocolVersion
+	subscriber            vlsubscriber.IFace
+	will                  *mqttp.Publish
+	expireIn              *uint32
+	durable               bool
+	sharedSubscriptions   bool // nolint:structcheck
+	subscriptionIDAllowed bool
+	version               mqttp.ProtocolVersion
 }
 
 type sessionOfflineState struct {
@@ -119,40 +120,41 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 	// V5.0 [MQTT-3.8.2.1.2]
 	if prop := pkt.PropertyGet(mqttp.PropertySubscriptionIdentifier); prop != nil {
 		if v, e := prop.AsInt(); e == nil {
+			if !s.subscriptionIDAllowed {
+				return nil, mqttp.CodeSubscriptionIDNotSupported
+			}
 			subsID = v
+		} else {
+			return nil, mqttp.CodeProtocolError
 		}
 	}
 
 	err := pkt.ForEachTopic(func(t *mqttp.Topic) error {
 		// V5.0
-		// [MQTT-3.8.3-4] It is a Protocol Error to set the No Local bit to 1 on a Shared Subscription
-		if t.Ops().NL() && (t.ShareName() != "") {
-			return mqttp.CodeProtocolError
+		if t.ShareName() != "" {
+			// [MQTT-3.8.3-4] It is a Protocol Error to set the No Local bit to 1 on a Shared Subscription
+			if t.Ops().NL() {
+				return mqttp.CodeProtocolError
+			}
+
+			if !s.sharedSubscriptions {
+				retCodes = append(retCodes, mqttp.CodeSharedSubscriptionNotSupported)
+				return nil
+			}
 		}
 
-		if !s.sharedSubscriptions && (t.ShareName() != "") {
-			return mqttp.CodeSharedSubscriptionNotSupported
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	_ = pkt.ForEachTopic(func(t *mqttp.Topic) error {
 		var reason mqttp.ReasonCode
+
 		if e := s.permissions.ACL(s.id, s.username, t.Filter(), vlauth.AccessRead); e == vlauth.StatusAllow {
 			params := vlsubscriber.SubscriptionParams{
 				ID:  subsID,
 				Ops: t.Ops(),
 			}
 
-			if retained, ee := s.subscriber.Subscribe(t.Filter(), params); ee != nil {
+			if granted, retained, ee := s.subscriber.Subscribe(t.Filter(), params); ee != nil {
 				reason = mqttp.QosFailure
 			} else {
-				reason = mqttp.ReasonCode(params.Granted)
+				reason = mqttp.ReasonCode(granted)
 				retainedPublishes = append(retainedPublishes, retained...)
 			}
 		} else {
@@ -167,6 +169,10 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 		retCodes = append(retCodes, reason)
 		return nil
 	})
+
+	if err != nil {
+		return nil, err
+	}
 
 	if err = resp.AddReturnCodes(retCodes); err != nil {
 		return nil, err
@@ -242,11 +248,8 @@ func (s *session) SignalUnSubscribe(pkt *mqttp.UnSubscribe) (mqttp.IFace, error)
 }
 
 // SignalDisconnect process DISCONNECT packet from client
-func (s *session) SignalDisconnect(pkt *mqttp.Disconnect) (mqttp.IFace, error) {
+func (s *session) SignalDisconnect(pkt *mqttp.Disconnect) error {
 	var err error
-	var resp mqttp.IFace
-
-	err = mqttp.CodeSuccess
 
 	if s.version == mqttp.ProtocolV50 {
 		// FIXME: CodeRefusedBadUsernameOrPassword has same id as CodeDisconnectWithWill
@@ -262,9 +265,6 @@ func (s *session) SignalDisconnect(pkt *mqttp.Disconnect) (mqttp.IFace, error) {
 				// uses DISCONNECT with Reason Code 0x82 (Protocol Error) as described in section 4.13.
 				if (s.expireIn != nil && *s.expireIn == 0) && val != 0 {
 					err = mqttp.CodeProtocolError
-					p := mqttp.NewDisconnect(s.version)
-					p.SetReasonCode(mqttp.CodeProtocolError)
-					resp = p
 				} else {
 					s.expireIn = &val
 				}
@@ -274,7 +274,7 @@ func (s *session) SignalDisconnect(pkt *mqttp.Disconnect) (mqttp.IFace, error) {
 		s.will = nil
 	}
 
-	return resp, err
+	return err
 }
 
 // SignalOnline signal state is get online
@@ -323,7 +323,7 @@ func (s *session) SignalConnectionClose(params connection.DisconnectParams) {
 	s.connectionClosed(s.id, s.durable, params.Reason)
 
 	if !state.keepContainer {
-		s.subscriberShutdown(s.id, s.subscriber)
+		s.subscriberShutdown(s.id)
 		s.subscriber = nil
 	}
 

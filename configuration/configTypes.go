@@ -121,7 +121,7 @@ type MqttConfig struct {
 	Options struct {
 		ConnectTimeout  int           `yaml:"connectTimeout,omitempty"`
 		SessionPreempt  bool          `yaml:"sessionPreempt,omitempty" yaml:"sessionDups,omitempty"` // nolint:staticcheck
-		RetainAvailable bool          `yaml:"retainAvailable,omitempty"`
+		RetainAvailable bool          `yaml:"retainAvail,omitempty"`
 		SubsOverlap     bool          `yaml:"subsOverlap,omitempty"`
 		SubsID          bool          `yaml:"subsId,omitempty"`
 		SubsShared      bool          `yaml:"subsShared,omitempty"`
@@ -134,7 +134,7 @@ type MqttConfig struct {
 	}
 }
 
-// ListenersConfig
+// ListenersConfig ...
 type ListenersConfig struct {
 	DefaultAddr string                           `yaml:"defaultAddr,omitempty"`
 	MQTT        map[string]map[string]PortConfig `yaml:"mqtt,omitempty"`
