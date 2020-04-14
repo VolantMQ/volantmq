@@ -849,64 +849,65 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 	//   - return error leading to disconnect
 	if !aclPerformed {
 		if e := s.permissions.ACL(s.id, string(s.username), pkt.Topic(), vlauth.AccessWrite); e != vlauth.StatusAllow {
-			reason = mqttp.CodeRefusedNotAuthorized
+			reason = mqttp.CodeNotAuthorized
 		}
 	}
 
 	// there is a new topic alias
-	if topicAlias > 0 {
+	if (reason == mqttp.CodeSuccess) && (topicAlias > 0) {
 		s.rx.topicAlias[topicAlias] = pkt.Topic()
 	}
 
 	switch pkt.QoS() {
 	case mqttp.QoS2:
 		// [MQTT-2.3.1-1]
-		if id, _ := pkt.ID(); id == 0 {
+		var id mqttp.IDType
+		if id, _ = pkt.ID(); id == 0 {
 			return nil, mqttp.CodeProtocolError
 		}
 
-		if s.rxQuota == 0 {
-			err = mqttp.CodeReceiveMaximumExceeded
-			s.metric.OnRejected(1)
-		} else {
-			s.rxQuota--
-			r := mqttp.NewPubRec(s.version)
-			id, _ := pkt.ID()
-
-			r.SetPacketID(id)
-
-			resp = r
-
-			// [MQTT-4.3.3-9]
-			// store incoming QoS 2 message before sending PUBREC as theoretically PUBREL
-			// might come before store in case message store done after write PUBREC
-			if reason == mqttp.CodeSuccess {
-				s.pubIn.store(pkt)
-				r.SetReason(mqttp.CodeSuccess)
-				// s.metric.OnAddUnAckRecv(1)
+		if reason == mqttp.CodeSuccess {
+			// [MQTT-3.3.4-7]
+			if s.rxQuota == 0 {
+				return nil, mqttp.CodeReceiveMaximumExceeded
 			} else {
-				s.metric.OnRejected(1)
-				r.SetReason(reason)
+				s.rxQuota--
 			}
 		}
+
+		r := mqttp.NewPubRec(s.version)
+		r.SetPacketID(id)
+
+		resp = r
+
+		// [MQTT-4.3.3-9]
+		// store incoming QoS 2 message before sending PUBREC as theoretically PUBREL
+		// might come before store in case message store done after write PUBREC
+		if reason == mqttp.CodeSuccess {
+			if !s.pubIn.store(pkt, false) {
+				reason = mqttp.CodePacketIDInUse
+			}
+			// s.metric.OnAddUnAckRecv(1)
+		} else {
+			s.metric.OnRejected(1)
+		}
+
+		r.SetReason(reason)
 	case mqttp.QoS1:
 		// [MQTT-2.3.1-1]
-		if id, _ := pkt.ID(); id == 0 {
+		var id mqttp.IDType
+		if id, _ = pkt.ID(); id == 0 {
 			return nil, mqttp.CodeProtocolError
 		}
 
-		if s.rxQuota == 0 {
-			err = mqttp.CodeReceiveMaximumExceeded
-			s.metric.OnRejected(1)
-			break
+		if (reason == mqttp.CodeSuccess) && (s.rxQuota == 0) {
+			return nil, mqttp.CodeReceiveMaximumExceeded
 		}
 
 		r := mqttp.NewPubAck(s.version)
-
-		id, _ := pkt.ID()
-
 		r.SetPacketID(id)
 		r.SetReason(reason)
+
 		resp = r
 
 		fallthrough
@@ -979,8 +980,11 @@ func (s *impl) onAck(pkt *mqttp.Ack) mqttp.IFace {
 		id, _ := pkt.ID()
 		r.SetPacketID(id)
 
-		s.pubIn.release(pkt)
-		s.rxQuota++
+		if s.pubIn.release(pkt) {
+			s.rxQuota++
+		} else {
+			r.SetReason(mqttp.CodePacketIDNotFound)
+		}
 		// s.metric.OnSubUnAckRecv(1)
 	default:
 		s.log.Error("Unsupported ack message type",

@@ -304,7 +304,7 @@ func (s *writer) qos12PopPacket() mqttp.IFace {
 				pkt = m
 
 				s.qos12Messages.Remove()
-				s.pubOut.store(pkt)
+				s.pubOut.store(pkt, true)
 				s.metric.OnAddUnAckSent(1)
 			}
 		default:
@@ -409,7 +409,7 @@ func (s *writer) popPackets() []mqttp.IFace {
 		if pkt := s.pubrelMessages.Remove(); pkt != nil {
 			p := pkt.(mqttp.IFace)
 			packets = append(packets, p)
-			s.pubOut.store(p)
+			s.pubOut.store(p, true)
 			s.metric.OnAddUnAckSent(1)
 		}
 
