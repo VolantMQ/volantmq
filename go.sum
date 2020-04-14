@@ -100,6 +100,8 @@ github.com/vbauerster/mpb/v4 v4.9.4 h1:aGaMDanOSnCZxjaAp09+eSlu3v9Eekpj2oBJ7j+UL
 github.com/vbauerster/mpb/v4 v4.9.4/go.mod h1:xMKSr3w3dixpCH9v7svY4wF3mmhuyWYuYtkpy8T5FOk=
 gitlab.com/VolantMQ/vlplugin/persistence/mem v0.0.6 h1:BXFF6psbaP73Qrt1USvCQtSKYERVP3U2LP3Vf5kKz1Q=
 gitlab.com/VolantMQ/vlplugin/persistence/mem v0.0.6/go.mod h1:v4nH8KqUeAtbSR/b8oHS1aUBNb3POlN8U0U7TwYlMJM=
+gitlab.com/VolantMQ/vlplugin/persistence/mem v0.0.7 h1:E2NLgsdnBviLwAxITpwuYVpkdm8M2CVF4HqcL+s2dPs=
+gitlab.com/VolantMQ/vlplugin/persistence/mem v0.0.7/go.mod h1:Z8Gd3SseNsIc4DScndW2L7zUlnqkPSw5mB8F1Y1tWDY=
 go.uber.org/atomic v1.5.0 h1:OI5t8sDa1Or+q8AeE+yKeB/SDYioSHAgcVljj9JIETY=
 go.uber.org/atomic v1.5.0/go.mod h1:sABNBOSYdrvTF6hTgEIbc7YasKWGhgEQZyfxyTvoXHQ=
 go.uber.org/multierr v1.3.0 h1:sFPn2GLc3poCkfrpIXGhBD2X0CMIo4Q/zSULXrj/+uc=

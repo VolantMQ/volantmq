@@ -870,9 +870,9 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 			// [MQTT-3.3.4-7]
 			if s.rxQuota == 0 {
 				return nil, mqttp.CodeReceiveMaximumExceeded
-			} else {
-				s.rxQuota--
 			}
+
+			s.rxQuota--
 		}
 
 		r := mqttp.NewPubRec(s.version)
