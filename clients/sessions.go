@@ -466,7 +466,7 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 			durable:               params.Durable,
 			version:               params.Version,
 			sharedSubscriptions:   m.Config.Options.SubsShared,
-			subscriptionIdAllowed: m.Config.Options.SubsID,
+			subscriptionIDAllowed: m.Config.Options.SubsID,
 			subscriber:            info.sub,
 		}
 

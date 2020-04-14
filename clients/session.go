@@ -39,7 +39,7 @@ type sessionConfig struct {
 	expireIn              *uint32
 	durable               bool
 	sharedSubscriptions   bool // nolint:structcheck
-	subscriptionIdAllowed bool
+	subscriptionIDAllowed bool
 	version               mqttp.ProtocolVersion
 }
 
@@ -120,7 +120,7 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 	// V5.0 [MQTT-3.8.2.1.2]
 	if prop := pkt.PropertyGet(mqttp.PropertySubscriptionIdentifier); prop != nil {
 		if v, e := prop.AsInt(); e == nil {
-			if !s.subscriptionIdAllowed {
+			if !s.subscriptionIDAllowed {
 				return nil, mqttp.CodeSubscriptionIDNotSupported
 			}
 			subsID = v

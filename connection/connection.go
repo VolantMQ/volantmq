@@ -789,6 +789,7 @@ func (s *impl) onConnectionClose(status error) bool {
 // On QoS == 0, we should just take the next step, no ack required
 // On QoS == 1, send back PUBACK, then take the next step
 // On QoS == 2, we need to put it in the ack queue, send back PUBREC
+// nolint: gocyclo
 func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 	// check for topic access
 	var err error
