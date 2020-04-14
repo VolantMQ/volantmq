@@ -171,12 +171,12 @@ func (mT *provider) subscriptionRemove(topic string, sub topicsTypes.Subscriber)
 	return err
 }
 
-func (mT *provider) nodesCleanup(root *node, levels []string) {
+func (mT *provider) nodesCleanup(leafNode *node, levels []string) {
 	// Run up and on each level and check if level has subscriptions and nested nodes
 	// If both are empty tell parent node to remove that token
 	level := len(levels)
 
-	for leafNode := root; leafNode != nil; leafNode = leafNode.parent {
+	for ; leafNode != nil; leafNode = leafNode.parent {
 		// If there are no more subscribers or inner nodes or retained messages remove this node from parent
 		if atomic.LoadInt32(&leafNode.subsCount) == 0 &&
 			atomic.LoadInt32(&leafNode.kidsCount) == 0 &&
@@ -184,20 +184,19 @@ func (mT *provider) nodesCleanup(root *node, levels []string) {
 			leafNode.wgDeleted.Add(1)
 			atomic.StoreInt32(&leafNode.remove, 1)
 
-			if atomic.LoadInt32(&leafNode.subsCount) == 0 &&
-				atomic.LoadInt32(&leafNode.kidsCount) == 0 &&
-				leafNode.retained.Load().(retainer).val == nil {
-				mT.onCleanUnsubscribe(levels[:level])
-				// if this is not root node
-				if leafNode.parent != nil {
-					leafNode.parent.children.Delete(levels[level-1])
-				}
+			mT.onCleanUnsubscribe(levels[:level])
+			// if this is not root node
+			if nd := leafNode.parent; nd != nil {
+				nd.children.Delete(levels[level-1])
+				atomic.AddInt32(&nd.kidsCount, -1)
 			}
 
 			leafNode.wgDeleted.Done()
-		}
 
-		level--
+			level--
+		} else {
+			break
+		}
 	}
 }
 
