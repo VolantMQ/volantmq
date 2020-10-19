@@ -168,11 +168,14 @@ type SessionCallbacks interface {
 // impl of the connection
 type impl struct {
 	SessionCallbacks
-	id               string
+	pubIn            ackQueue
+	onConnDisconnect types.OnceWait
 	username         []byte
+	id               string
 	conn             transport.Conn
 	metric           metrics.Packets
 	permissions      vlauth.Permissions
+	authMethod       string
 	signalAuth       OnAuthCb
 	onConnClose      func(error)
 	callStop         func(error) bool
@@ -180,15 +183,12 @@ type impl struct {
 	rx               *reader
 	quit             chan struct{}
 	connect          chan interface{}
-	onConnDisconnect types.OnceWait
 	onStop           types.Once
-	started          sync.WaitGroup
 	log              *zap.SugaredLogger
-	pubIn            ackQueue
-	authMethod       string
+	state            state
+	started          sync.WaitGroup
 	connectProcessed uint32
 	rxQuota          int32
-	state            state
 	maxRxTopicAlias  uint16
 	version          mqttp.ProtocolVersion
 	retainAvailable  bool
@@ -655,8 +655,7 @@ func (s *impl) processIncoming(p mqttp.IFace) error {
 
 // onReleaseIn ack process for incoming messages
 func (s *impl) onReleaseIn(o, _ mqttp.IFace) {
-	switch p := o.(type) {
-	case *mqttp.Publish:
+	if p, ok := o.(*mqttp.Publish); ok {
 		_ = s.SignalPublish(p)
 	}
 }
@@ -848,7 +847,7 @@ func (s *impl) onPublish(pkt *mqttp.Publish) (mqttp.IFace, error) {
 	//   - ignore the message but send acks
 	//   - return error leading to disconnect
 	if !aclPerformed {
-		if e := s.permissions.ACL(s.id, string(s.username), pkt.Topic(), vlauth.AccessWrite); e != vlauth.StatusAllow {
+		if e := s.permissions.ACL(s.id, string(s.username), pkt.Topic(), vlauth.AccessWrite); !errors.Is(e, vlauth.StatusAllow) {
 			reason = mqttp.CodeNotAuthorized
 		}
 	}
@@ -970,7 +969,6 @@ func (s *impl) onAck(pkt *mqttp.Ack) mqttp.IFace {
 			// Do it before writing into network as theoretically response may come
 			// faster than put into queue
 			// s.tx.pubOut.store(resp)
-			// s.metric.OnAddUnAckSent(1)
 		}
 	case mqttp.PUBREL:
 		// Remote has released PUBLISH
@@ -985,7 +983,6 @@ func (s *impl) onAck(pkt *mqttp.Ack) mqttp.IFace {
 		} else {
 			r.SetReason(mqttp.CodePacketIDNotFound)
 		}
-		// s.metric.OnSubUnAckRecv(1)
 	default:
 		s.log.Error("Unsupported ack message type",
 			zap.String("clientId", s.id),

@@ -118,7 +118,8 @@ func (t *bytes) OnRecv(n int) {
 	t.Recv.AddU64(uint64(n))
 }
 
-// nolint dupl
+// OnSent ...
+// nolint: dupl
 func (t *packets) OnSent(mt mqttp.Type) {
 	t.Total.Sent.AddU64(1)
 
@@ -148,7 +149,8 @@ func (t *packets) OnSent(mt mqttp.Type) {
 	}
 }
 
-// nolint dupl
+// OnRecv ...
+// nolint: dupl
 func (t *packets) OnRecv(mt mqttp.Type) {
 	t.Total.Recv.AddU64(1)
 

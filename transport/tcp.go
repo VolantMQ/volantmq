@@ -5,6 +5,8 @@ import (
 	"net"
 	"time"
 
+	"github.com/pkg/errors"
+
 	"github.com/VolantMQ/volantmq/metrics"
 	"github.com/VolantMQ/volantmq/types"
 
@@ -52,7 +54,6 @@ func NewTCP(config *ConfigTCP, internal *InternalConfig) (Provider, error) {
 		l.protocol = "ssl"
 	} else {
 		l.protocol = "tcp"
-
 	}
 
 	l.log = configuration.GetLogger().Named("listener: " + l.protocol + "://:" + config.transport.Port)
@@ -106,7 +107,6 @@ func (l *tcp) newConn(cn net.Conn, stat metrics.Bytes) Conn {
 
 // Serve start serving connections
 func (l *tcp) Serve() error {
-
 	// accept is a channel to signal about next incoming connection Accept()
 	// results.
 	accept := make(chan error, 1)
@@ -141,9 +141,9 @@ func (l *tcp) Serve() error {
 		// busy. So if there are no free goroutines during 1ms we want to
 		// cooldown the server and do not receive connection for some short
 		// time.
-		if err != nil && err != types.ErrScheduleTimeout {
+		if err != nil && !errors.Is(err, types.ErrScheduleTimeout) {
 			break
-		} else if err == types.ErrScheduleTimeout {
+		} else if errors.Is(err, types.ErrScheduleTimeout) {
 			continue
 		}
 

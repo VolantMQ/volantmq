@@ -80,7 +80,7 @@ type containerInfo struct {
 
 type loadContext struct {
 	bar            *mpb.Bar
-	startTs        time.Time
+	startTS        time.Time
 	preloadConfigs map[string]*preloadConfig
 	delayedWills   []mqttp.IFace
 }
@@ -257,7 +257,7 @@ func (m *Manager) LoadSession(context interface{}, id []byte, state *vlpersisten
 	ctx := context.(*loadContext)
 
 	defer func() {
-		ctx.bar.IncrBy(1, time.Since(ctx.startTs))
+		ctx.bar.IncrBy(1, time.Since(ctx.startTS))
 	}()
 
 	if len(state.Errors) != 0 {
@@ -277,7 +277,7 @@ func (m *Manager) LoadSession(context interface{}, id []byte, state *vlpersisten
 
 	if err = m.decodeSubscriber(ctx, sID, state.Subscriptions); err != nil {
 		m.log.Error("Decode subscriber", zap.String("ClientID", sID), zap.Error(err))
-		if err = m.persistence.SubscriptionsDelete(id); err != nil && err != vlpersistence.ErrNotFound {
+		if err = m.persistence.SubscriptionsDelete(id); err != nil && !errors.Is(err, vlpersistence.ErrNotFound) {
 			m.log.Error("Persisted subscriber delete", zap.Error(err))
 		}
 	}
@@ -365,7 +365,7 @@ func (m *Manager) processConnect(params *connection.ConnectParams, authMngr *aut
 			_ = pkt.SetReturnCode(e)
 			resp = pkt
 		}
-		return nil, nil, params.Error
+		return resp, nil, params.Error
 	}
 
 	if allowed, ok := m.allowedVersions[params.Version]; !ok || !allowed {
@@ -383,7 +383,7 @@ func (m *Manager) processConnect(params *connection.ConnectParams, authMngr *aut
 		} else {
 			var reason mqttp.ReasonCode
 
-			if perm, status := authMngr.Password(params.ID, string(params.Username), string(params.Password)); status == vlauth.StatusAllow {
+			if perm, status := authMngr.Password(params.ID, string(params.Username), string(params.Password)); errors.Is(status, vlauth.StatusAllow) {
 				reason = mqttp.CodeSuccess
 				acl = perm
 			} else {
@@ -420,10 +420,7 @@ func (m *Manager) newSession(cn connection.Initial, params *connection.ConnectPa
 			}
 		}
 
-		if cn.Acknowledge(ack,
-			connection.KeepAlive(keepAlive),
-			connection.Permissions(acl)) == nil {
-
+		if cn.Acknowledge(ack, connection.KeepAlive(keepAlive), connection.Permissions(acl)) == nil {
 			ses.start()
 
 			m.Metrics.Clients().OnConnected()
@@ -537,7 +534,11 @@ func (m *Manager) allocContainer(id string, username string, acl vlauth.Permissi
 	return cont
 }
 
-func (m *Manager) loadContainer(cn connection.Session, params *connection.ConnectParams, acl vlauth.Permissions) (cont *containerInfo, err error) {
+func (m *Manager) loadContainer(
+	cn connection.Session,
+	params *connection.ConnectParams,
+	acl vlauth.Permissions,
+) (cont *containerInfo, err error) {
 	newContainer := m.allocContainer(params.ID, string(params.Username), acl, time.Now(), cn)
 
 	// search for existing container with given id
@@ -627,7 +628,7 @@ func (m *Manager) loadContainer(cn connection.Session, params *connection.Connec
 	if params.CleanStart && persisted {
 		params.Cleaned = true
 		persisted = false
-		if err = m.persistence.Delete([]byte(params.ID)); err != nil && err != vlpersistence.ErrNotFound {
+		if err = m.persistence.Delete([]byte(params.ID)); err != nil && !errors.Is(err, vlpersistence.ErrNotFound) {
 			m.log.Error("Couldn't wipe session", zap.String("clientId", params.ID), zap.Error(err))
 		}
 
@@ -856,7 +857,7 @@ func (m *Manager) decodeSessionExpiry(ctx *loadContext, id string, state *vlpers
 		since, err = time.Parse(time.RFC3339, state.Expire.Since)
 		if err != nil {
 			m.log.Error("parse expiration value", zap.String("clientId", id), zap.Error(err))
-			if e := m.persistence.SubscriptionsDelete([]byte(id)); e != nil && e != vlpersistence.ErrNotFound {
+			if e := m.persistence.SubscriptionsDelete([]byte(id)); e != nil && !errors.Is(e, vlpersistence.ErrNotFound) {
 				m.log.Error("Persisted subscriber delete", zap.Error(e))
 			}
 
@@ -892,7 +893,7 @@ func (m *Manager) decodeSessionExpiry(ctx *loadContext, id string, state *vlpers
 
 			if time.Now().After(expireAt) {
 				// persisted session has expired, wipe it
-				if err = m.persistence.Delete([]byte(id)); err != nil && err != vlpersistence.ErrNotFound {
+				if err = m.persistence.Delete([]byte(id)); err != nil && !errors.Is(err, vlpersistence.ErrNotFound) {
 					m.log.Error("Delete expired session", zap.Error(err))
 				}
 				return nil

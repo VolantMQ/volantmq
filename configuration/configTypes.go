@@ -178,7 +178,9 @@ func (t *TLSConfig) LoadConfig() (*tls.Config, error) {
 		return nil, err
 	}
 
-	c := &tls.Config{}
+	c := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
 
 	c.Certificates = append(c.Certificates, certs)
 

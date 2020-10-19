@@ -1,7 +1,9 @@
-package types
+package types_test
 
 import (
 	"testing"
+
+	"github.com/VolantMQ/volantmq/types"
 )
 
 type one int
@@ -10,12 +12,12 @@ func (o *one) Increment() {
 	*o++
 }
 
-func run(once *Once, o *one, c chan bool) {
+func run(once *types.Once, o *one, c chan bool) {
 	once.Do(func() { o.Increment() })
 	c <- true
 }
 
-func runWait(t *testing.T, once *OnceWait, o *one, c chan bool) {
+func runWait(t *testing.T, once *types.OnceWait, o *one, c chan bool) {
 	once.Do(func() { o.Increment() })
 	if v := *o; v != 1 {
 		t.Errorf("once failed inside run: %d is not 1", v)
@@ -25,7 +27,7 @@ func runWait(t *testing.T, once *OnceWait, o *one, c chan bool) {
 
 func TestOnce(t *testing.T) {
 	o := new(one)
-	once := new(Once)
+	once := new(types.Once)
 	c := make(chan bool)
 	const N = 10
 	for i := 0; i < N; i++ {
@@ -40,7 +42,7 @@ func TestOnce(t *testing.T) {
 }
 
 func TestOncePanic(t *testing.T) {
-	var once Once
+	var once types.Once
 	func() {
 		defer func() {
 			if r := recover(); r == nil {
@@ -59,7 +61,7 @@ func TestOncePanic(t *testing.T) {
 
 func TestOnceWait(t *testing.T) {
 	o := new(one)
-	once := new(OnceWait)
+	once := new(types.OnceWait)
 	c := make(chan bool)
 	const N = 10
 	for i := 0; i < N; i++ {
@@ -74,7 +76,7 @@ func TestOnceWait(t *testing.T) {
 }
 
 func BenchmarkOnce(b *testing.B) {
-	var once Once
+	var once types.Once
 	f := func() {}
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {

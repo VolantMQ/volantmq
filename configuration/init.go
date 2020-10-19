@@ -16,8 +16,8 @@ type config struct {
 
 // Options global MQTT config
 type Options struct {
-	// LogWithTs either display timestamp messages on log or not
-	LogWithTs bool
+	// LogWithTS either display timestamp messages on log or not
+	LogWithTS bool
 }
 
 var cfg config

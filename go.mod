@@ -9,7 +9,7 @@ require (
 	github.com/gobwas/pool v0.2.0 // indirect
 	github.com/gobwas/ws v1.0.2
 	github.com/mitchellh/mapstructure v1.2.2
-	github.com/pkg/errors v0.8.1
+	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.4.0
 	github.com/troian/healthcheck v0.1.3
 	github.com/vbauerster/mpb/v4 v4.9.4

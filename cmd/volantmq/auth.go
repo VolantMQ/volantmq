@@ -90,18 +90,14 @@ func newSimpleAuth(cfg authConfig) (*simpleAuth, error) {
 
 			if entry.ACL.Read == "" {
 				acl.read = s.read
-			} else {
-				if acl.read, e = regexp.Compile(entry.ACL.Read); e != nil {
-					return e
-				}
+			} else if acl.read, e = regexp.Compile(entry.ACL.Read); e != nil {
+				return e
 			}
 
 			if entry.ACL.Write == "" {
 				acl.read = s.write
-			} else {
-				if acl.write, e = regexp.Compile(entry.ACL.Write); e != nil {
-					return e
-				}
+			} else if acl.write, e = regexp.Compile(entry.ACL.Write); e != nil {
+				return e
 			}
 
 			s.creds[entry.User] = creds{

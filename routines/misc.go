@@ -17,9 +17,10 @@ package routines
 
 import (
 	"encoding/binary"
-	"errors"
 	"io"
 	"net"
+
+	"github.com/pkg/errors"
 
 	"github.com/VolantMQ/vlapi/mqttp"
 )
@@ -65,7 +66,7 @@ func GetMessageBuffer(c io.Closer) ([]byte, error) {
 	for {
 		// If we have read 5 bytes and still not done, then there's a problem.
 		if l > 5 {
-			return nil, errors.New("connect/getMessage: 4th byte of remaining length has continuation bit set")
+			return nil, errors.Errorf("connect/getMessage: 4th byte of remaining length has continuation bit set")
 		}
 
 		n, err := conn.Read(b[0:])

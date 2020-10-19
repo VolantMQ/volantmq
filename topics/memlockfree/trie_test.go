@@ -1,4 +1,4 @@
-package memlockfree
+package memlockfree // nolint: testpackage
 
 import (
 	"testing"
@@ -11,6 +11,10 @@ import (
 	"github.com/VolantMQ/volantmq/metrics"
 	"github.com/VolantMQ/volantmq/subscriber"
 	topicstypes "github.com/VolantMQ/volantmq/topics/types"
+)
+
+const (
+	testTopic1 = "sport/tennis/player1/#"
 )
 
 var config *topicstypes.MemConfig
@@ -40,7 +44,7 @@ func TestMatch1(t *testing.T) {
 	sub := &subscriber.Type{}
 
 	req := topicstypes.SubscribeReq{
-		Filter: "sport/tennis/player1/#",
+		Filter: testTopic1,
 		S:      sub,
 		Params: vlsubscriber.SubscriptionParams{
 			Ops: mqttp.SubscriptionOptions(mqttp.QoS1),
@@ -62,7 +66,7 @@ func TestMatch2(t *testing.T) {
 	sub := &subscriber.Type{}
 
 	req := topicstypes.SubscribeReq{
-		Filter: "sport/tennis/player1/#",
+		Filter: testTopic1,
 		S:      sub,
 		Params: vlsubscriber.SubscriptionParams{
 			Ops: mqttp.SubscriptionOptions(mqttp.QoS2),
@@ -308,7 +312,7 @@ func TestInsertRemove(t *testing.T) {
 
 func TestInsert1(t *testing.T) {
 	prov := allocProvider(t)
-	topic := "sport/tennis/player1/#"
+	topic := testTopic1
 
 	sub1 := &subscriber.Type{}
 	p := vlsubscriber.SubscriptionParams{
@@ -494,7 +498,7 @@ func TestSNodeInsertDup(t *testing.T) {
 
 func TestSNodeRemove1(t *testing.T) {
 	prov := allocProvider(t)
-	topic := "sport/tennis/player1/#"
+	topic := testTopic1
 
 	sub1 := &subscriber.Type{}
 	p := vlsubscriber.SubscriptionParams{
@@ -511,7 +515,7 @@ func TestSNodeRemove1(t *testing.T) {
 
 func TestSNodeRemove2(t *testing.T) {
 	prov := allocProvider(t)
-	topic := "sport/tennis/player1/#"
+	topic := testTopic1
 
 	sub1 := &subscriber.Type{}
 	p := vlsubscriber.SubscriptionParams{
@@ -526,7 +530,7 @@ func TestSNodeRemove2(t *testing.T) {
 
 func TestSNodeRemove3(t *testing.T) {
 	prov := allocProvider(t)
-	topic := "sport/tennis/player1/#"
+	topic := testTopic1
 
 	sub1 := &subscriber.Type{}
 	sub2 := &subscriber.Type{}
@@ -538,7 +542,7 @@ func TestSNodeRemove3(t *testing.T) {
 	prov.subscriptionInsert(topic, sub1, p)
 	prov.subscriptionInsert(topic, sub2, p)
 
-	err := prov.subscriptionRemove("sport/tennis/player1/#", nil)
+	err := prov.subscriptionRemove(testTopic1, nil)
 	require.NoError(t, err)
 	require.Equal(t, int32(0), prov.root.subsCount)
 }
@@ -550,7 +554,7 @@ func TestRetain1(t *testing.T) {
 		prov.retain(m)
 	}
 
-	req := &topicstypes.SubscribeReq{
+	req := topicstypes.SubscribeReq{
 		Filter: "#",
 		S:      &subscriber.Type{},
 		Params: vlsubscriber.SubscriptionParams{
@@ -558,21 +562,17 @@ func TestRetain1(t *testing.T) {
 		},
 	}
 
-	resp := &topicstypes.SubscribeResp{}
-
-	prov.subscribe(req, resp)
+	resp := prov.subscribe(req)
 	require.NoError(t, resp.Err)
 	require.Equal(t, 0, len(resp.Retained))
 
 	req.Filter = "$SYS"
-	resp = &topicstypes.SubscribeResp{}
-	prov.subscribe(req, resp)
+	resp = prov.subscribe(req)
 	require.NoError(t, resp.Err)
 	require.Equal(t, 0, len(resp.Retained))
 
 	req.Filter = "$SYS/#"
-	resp = &topicstypes.SubscribeResp{}
-	prov.subscribe(req, resp)
+	resp = prov.subscribe(req)
 	require.NoError(t, resp.Err)
 	require.Equal(t, len(retainedSystree), len(resp.Retained))
 }
@@ -587,7 +587,7 @@ func TestRetain2(t *testing.T) {
 	msg := newPublishMessageLarge("sport/tennis/player1/ricardo", mqttp.QoS1)
 	prov.retain(msg)
 
-	req := &topicstypes.SubscribeReq{
+	req := topicstypes.SubscribeReq{
 		Filter: "#",
 		S:      &subscriber.Type{},
 		Params: vlsubscriber.SubscriptionParams{
@@ -595,14 +595,12 @@ func TestRetain2(t *testing.T) {
 		},
 	}
 
-	resp := &topicstypes.SubscribeResp{}
-	prov.subscribe(req, resp)
+	resp := prov.subscribe(req)
 	require.NoError(t, resp.Err)
 	require.Equal(t, 1, len(resp.Retained))
 
 	req.Filter = "$SYS/#"
-	resp = &topicstypes.SubscribeResp{}
-	prov.subscribe(req, resp)
+	resp = prov.subscribe(req)
 	require.NoError(t, resp.Err)
 	require.Equal(t, len(retainedSystree), len(resp.Retained))
 }
@@ -723,7 +721,7 @@ func TestRNodeMatch(t *testing.T) {
 	require.Equal(t, 3, len(msglist))
 }
 
-// nolint unparam
+// nolint: unparam
 func newPublishMessageLarge(topic string, qos mqttp.QosType) *mqttp.Publish {
 	m, _ := mqttp.New(mqttp.ProtocolV311, mqttp.PUBLISH)
 

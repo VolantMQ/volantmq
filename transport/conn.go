@@ -55,8 +55,7 @@ func (c *conn) Write(b []byte) (int, error) {
 
 // File ...
 func (c *conn) File() (*os.File, error) {
-	switch t := c.Conn.(type) {
-	case *net.TCPConn:
+	if t, ok := c.Conn.(*net.TCPConn); ok {
 		return t.File()
 	}
 

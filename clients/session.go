@@ -9,6 +9,7 @@ import (
 	"github.com/VolantMQ/vlapi/vlpersistence"
 	"github.com/VolantMQ/vlapi/vlsubscriber"
 	"github.com/VolantMQ/vlapi/vltypes"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
 	"github.com/VolantMQ/volantmq/configuration"
@@ -38,7 +39,7 @@ type sessionConfig struct {
 	will                  *mqttp.Publish
 	expireIn              *uint32
 	durable               bool
-	sharedSubscriptions   bool // nolint:structcheck
+	sharedSubscriptions   bool
 	subscriptionIDAllowed bool
 	version               mqttp.ProtocolVersion
 }
@@ -145,7 +146,7 @@ func (s *session) SignalSubscribe(pkt *mqttp.Subscribe) (mqttp.IFace, error) {
 
 		var reason mqttp.ReasonCode
 
-		if e := s.permissions.ACL(s.id, s.username, t.Filter(), vlauth.AccessRead); e == vlauth.StatusAllow {
+		if e := s.permissions.ACL(s.id, s.username, t.Filter(), vlauth.AccessRead); errors.Is(e, vlauth.StatusAllow) {
 			params := vlsubscriber.SubscriptionParams{
 				ID:  subsID,
 				Ops: t.Ops(),
@@ -207,7 +208,7 @@ func (s *session) SignalUnSubscribe(pkt *mqttp.UnSubscribe) (mqttp.IFace, error)
 
 	_ = pkt.ForEachTopic(func(t *mqttp.Topic) error {
 		reason := mqttp.CodeSuccess
-		if e := s.permissions.ACL(s.id, s.username, t.Full(), vlauth.AccessRead); e == vlauth.StatusAllow {
+		if e := s.permissions.ACL(s.id, s.username, t.Full(), vlauth.AccessRead); errors.Is(e, vlauth.StatusAllow) {
 			if e = s.subscriber.UnSubscribe(t.Full()); e != nil {
 				s.log.Error("unsubscribe from topic", zap.String("clientId", s.id), zap.Error(e))
 				reason = mqttp.CodeNoSubscriptionExisted
@@ -252,7 +253,6 @@ func (s *session) SignalDisconnect(pkt *mqttp.Disconnect) error {
 	var err error
 
 	if s.version == mqttp.ProtocolV50 {
-		// FIXME: CodeRefusedBadUsernameOrPassword has same id as CodeDisconnectWithWill
 		if pkt.ReasonCode() != mqttp.CodeRefusedBadUsernameOrPassword {
 			s.will = nil
 		}

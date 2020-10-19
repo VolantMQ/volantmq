@@ -21,11 +21,16 @@ import (
 	"github.com/VolantMQ/vlapi/mqttp"
 	"github.com/VolantMQ/vlapi/vlpersistence"
 	"github.com/VolantMQ/vlapi/vltypes"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
 	"github.com/VolantMQ/volantmq/configuration"
 	"github.com/VolantMQ/volantmq/metrics"
 	topicstypes "github.com/VolantMQ/volantmq/topics/types"
+)
+
+const (
+	chanSize = 1024 * 512
 )
 
 type provider struct {
@@ -57,10 +62,10 @@ func NewMemProvider(config *topicstypes.MemConfig) (topicstypes.Provider, error)
 		metricsSubs:        config.MetricsSubs,
 		persist:            config.Persist,
 		onCleanUnsubscribe: config.OnCleanUnsubscribe,
-		inbound:            make(chan *mqttp.Publish, 1024*512),
-		inRetained:         make(chan vltypes.RetainObject, 1024*512),
-		subIn:              make(chan topicstypes.SubscribeReq, 1024*512),
-		unSubIn:            make(chan topicstypes.UnSubscribeReq, 1024*512),
+		inbound:            make(chan *mqttp.Publish, chanSize),
+		inRetained:         make(chan vltypes.RetainObject, chanSize),
+		subIn:              make(chan topicstypes.SubscribeReq, chanSize),
+		unSubIn:            make(chan topicstypes.UnSubscribeReq, chanSize),
 	}
 	p.root = newNode(p.allowOverlapping, nil)
 
@@ -68,7 +73,7 @@ func NewMemProvider(config *topicstypes.MemConfig) (topicstypes.Provider, error)
 
 	if p.persist != nil {
 		entries, err := p.persist.Load()
-		if err != nil && err != vlpersistence.ErrNotFound {
+		if err != nil && !errors.Is(err, vlpersistence.ErrNotFound) {
 			return nil, err
 		}
 
@@ -88,7 +93,7 @@ func NewMemProvider(config *topicstypes.MemConfig) (topicstypes.Provider, error)
 							p.log.Error("Decode publish expire at", zap.Error(err))
 						}
 					}
-					_ = p.Retain(m) // nolint: errcheck
+					_ = p.Retain(m)
 				} else {
 					p.log.Warn("Unsupported retained message type", zap.String("type", m.Type().Name()))
 				}
@@ -248,12 +253,11 @@ func (mT *provider) retain(obj vltypes.RetainObject) {
 
 	mT.smu.Lock()
 
-	switch t := obj.(type) {
-	case *mqttp.Publish:
+	if t, ok := obj.(*mqttp.Publish); ok {
 		// [MQTT-3.3.1-10]
 		// [MQTT-3.3.1-7]
 		if len(t.Payload()) == 0 || t.QoS() == mqttp.QoS0 {
-			_ = mT.retainRemove(obj.Topic()) // nolint: errcheck
+			_ = mT.retainRemove(obj.Topic())
 			if len(t.Payload()) == 0 {
 				insert = false
 			}

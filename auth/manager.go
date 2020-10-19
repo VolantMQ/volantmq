@@ -7,7 +7,7 @@ import (
 	"github.com/VolantMQ/vlapi/vlauth"
 )
 
-// Manager auth
+// Manager auth manager
 type Manager struct {
 	p []vlauth.IFace
 }
@@ -53,7 +53,7 @@ func NewManager(p []string) (*Manager, error) {
 // Password authentication
 func (m *Manager) Password(clientID, user, password string) (vlauth.Permissions, error) {
 	for _, p := range m.p {
-		if status := p.Password(clientID, user, password); status == vlauth.StatusAllow {
+		if status := p.Password(clientID, user, password); errors.Is(status, vlauth.StatusAllow) {
 			return p, status
 		}
 	}

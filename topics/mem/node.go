@@ -99,7 +99,11 @@ func (mT *provider) leafSearchNode(levels []string) *node {
 	return root
 }
 
-func (mT *provider) subscriptionInsert(filter string, sub topicstypes.Subscriber, p vlsubscriber.SubscriptionParams) bool {
+func (mT *provider) subscriptionInsert(
+	filter string,
+	sub topicstypes.Subscriber,
+	p vlsubscriber.SubscriptionParams,
+) bool {
 	levels := strings.Split(filter, "/")
 
 	root := mT.leafInsertNode(levels)
@@ -265,6 +269,7 @@ func (mT *provider) retainSearch(filter string, retained *[]*mqttp.Publish) {
 	levels := strings.Split(filter, "/")
 	level := levels[0]
 
+	// nolint: gocritic
 	if level == topicstypes.MWC {
 		for t, n := range mT.root.children {
 			if t != "" && !strings.HasPrefix(t, "$") {
@@ -319,11 +324,9 @@ func (sn *node) overlappingSubscribers(publishID uintptr, p *publishes) {
 			if s[0].qos < sub.p.Granted {
 				s[0].qos = sub.p.Granted
 			}
-		} else {
-			if !sub.p.Ops.NL() || id != publishID {
-				pe := sub.acquire()
-				(*p)[id] = append((*p)[id], pe)
-			}
+		} else if !sub.p.Ops.NL() || id != publishID {
+			pe := sub.acquire()
+			(*p)[id] = append((*p)[id], pe)
 		}
 	}
 }

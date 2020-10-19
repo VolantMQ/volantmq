@@ -73,6 +73,7 @@ type Provider interface {
 	Shutdown() error
 }
 
+// SubscribeReq topic subscribe request
 type SubscribeReq struct {
 	Filter string
 	S      Subscriber
@@ -80,18 +81,21 @@ type SubscribeReq struct {
 	Chan   chan SubscribeResp
 }
 
+// SubscribeResp topic subscribe response
 type SubscribeResp struct {
 	Params   vlsubscriber.SubscriptionParams
 	Retained []*mqttp.Publish
 	Err      error
 }
 
+// UnSubscribeReq topic unsubscribe request
 type UnSubscribeReq struct {
 	Filter string
 	S      Subscriber
 	Chan   chan UnSubscribeResp
 }
 
+// UnSubscribeResp topic unsubscribe response
 type UnSubscribeResp struct {
 	Err error
 }

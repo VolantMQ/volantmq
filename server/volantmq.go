@@ -32,6 +32,12 @@ var (
 var (
 	// ErrInvalidNodeName node name does not follow requirements
 	ErrInvalidNodeName = errors.New("node name is invalid")
+	// ErrInvalidListenerType invalid listener type
+	ErrInvalidListenerType = errors.New("invalid listener type")
+	// ErrTransportAlreadyExists transport already exists
+	ErrTransportAlreadyExists = errors.New("transport already exists")
+	// ErrInconsistentPersistenceProvider persistence provider is nil
+	ErrInconsistentPersistenceProvider = errors.New("persistence provider cannot be nil")
 )
 
 // Config configuration of the MQTT server
@@ -110,7 +116,7 @@ func NewServer(config Config) (Server, error) {
 	var err error
 
 	if s.Persistence == nil {
-		return nil, errors.New("persistence provider cannot be nil")
+		return nil, ErrInconsistentPersistenceProvider
 	}
 
 	var persisRetained vlpersistence.Retained
@@ -179,7 +185,7 @@ func (s *server) ListenAndServe(config interface{}) error {
 	case *transport.ConfigWS:
 		l, err = transport.NewWS(c, &internalConfig)
 	default:
-		return errors.New("invalid listener type")
+		return ErrInvalidListenerType
 	}
 
 	if err != nil {
@@ -191,7 +197,7 @@ func (s *server) ListenAndServe(config interface{}) error {
 
 	if _, ok := s.transports.list[l.Port()]; ok {
 		_ = l.Close()
-		return errors.New("already exists")
+		return ErrTransportAlreadyExists
 	}
 
 	s.transports.list[l.Port()] = l

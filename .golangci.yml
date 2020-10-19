@@ -106,23 +106,38 @@ linters-settings:
 
 
 linters:
-  enable:
-    - goimports
-    - golint
-    - gosimple
-    - structcheck
-    - deadcode
-    - staticcheck
-    - errcheck
-    - unused
-    - gosec
-    - dupl
-    - gocyclo
-    - misspell
-    - unparam
-  enable-all: false
+  #  enable:
+  #    - goimports
+  #    - golint
+  #    - gosimple
+  #    - structcheck
+  #    - deadcode
+  #    - staticcheck
+  #    - errcheck
+  #    - unused
+  #    - gosec
+  #    - dupl
+  #    - gocyclo
+  #    - misspell
+  #    - unparam
+  enable-all: true
   disable:
-  disable-all: true
+    - nlreturn
+    - wsl
+    - nestif
+    - gochecknoglobals
+    - godot
+    - gomnd
+    - exhaustive
+    - nakedret
+    - funlen
+    - lll
+    - gocognit
+    - goerr113
+    - gochecknoinits
+    - gci
+    - godox
+    - gofumpt
   presets:
   fast: false
 

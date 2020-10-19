@@ -51,7 +51,7 @@ func (s *expiry) start() {
 		// if will delay is set before and value less than expiration
 		// then timer should fire 2 times
 		if (timerPeriod > 0) && (timerPeriod < *s.expireIn) {
-			*s.expireIn = *s.expireIn - timerPeriod
+			*s.expireIn -= timerPeriod
 		} else {
 			timerPeriod = *s.expireIn
 			*s.expireIn = 0
@@ -101,11 +101,12 @@ func (s *expiry) timerCallback() {
 	// 1. check for will message available
 	if s.will != nil {
 		// publish if exists and wipe state
-		_ = s.messenger.Publish(s.will) // nolint: errcheck
+		_ = s.messenger.Publish(s.will)
 		s.will = nil
 		s.willIn = 0
 	}
 
+	// nolint: godox, gocritic
 	if s.expireIn == nil {
 		// 2.a session has processed delayed will and there is nothing to do
 		// completely shutdown the session

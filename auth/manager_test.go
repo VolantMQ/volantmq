@@ -1,4 +1,4 @@
-package auth
+package auth_test
 
 import (
 	"crypto/sha256"
@@ -7,6 +7,8 @@ import (
 
 	"github.com/VolantMQ/vlapi/vlauth"
 	"github.com/stretchr/testify/require"
+
+	"github.com/VolantMQ/volantmq/auth"
 )
 
 type testAuth struct {
@@ -49,31 +51,31 @@ func (a *testAuth) Shutdown() error {
 }
 
 func TestAuthRegister(t *testing.T) {
-	err := Register("basic", newSimpleAuth())
+	err := auth.Register("basic", newSimpleAuth())
 	require.NoError(t, err)
 }
 
 func TestAuthRegisterDupe(t *testing.T) {
-	err := Register("basic", newSimpleAuth())
+	err := auth.Register("basic", newSimpleAuth())
 	require.Error(t, err, "already exists")
 }
 
 func TestAuthRegisterInvalidArgs(t *testing.T) {
-	err := Register("", newSimpleAuth())
+	err := auth.Register("", newSimpleAuth())
 	require.Error(t, err, "invalid args")
 
-	err = Register("basic", nil)
+	err = auth.Register("basic", nil)
 	require.Error(t, err, "invalid args")
 }
 
 func TestNewManagerUnknownProvider(t *testing.T) {
-	p, err := NewManager([]string{"bla"})
+	p, err := auth.NewManager([]string{"bla"})
 	require.Error(t, err)
 	require.Nil(t, p)
 }
 
 func TestNewManagerKnownProvider(t *testing.T) {
-	p, err := NewManager([]string{"basic"})
+	p, err := auth.NewManager([]string{"basic"})
 	require.NoError(t, err)
 	require.NotNil(t, p)
 
@@ -97,9 +99,9 @@ func TestNewManagerKnownProvider(t *testing.T) {
 }
 
 func TestAuthUnregister(t *testing.T) {
-	UnRegister("basic")
+	auth.UnRegister("basic")
 
-	p, err := NewManager([]string{"basic"})
+	p, err := auth.NewManager([]string{"basic"})
 	require.Error(t, err)
 	require.Nil(t, p)
 }

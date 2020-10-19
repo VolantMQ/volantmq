@@ -78,7 +78,10 @@ func (s *Type) Subscriptions() vlsubscriber.Subscriptions {
 }
 
 // Subscribe to topic
-func (s *Type) Subscribe(topic string, params vlsubscriber.SubscriptionParams) (mqttp.QosType, []*mqttp.Publish, error) {
+func (s *Type) Subscribe(
+	topic string,
+	params vlsubscriber.SubscriptionParams,
+) (mqttp.QosType, []*mqttp.Publish, error) {
 	resp := s.Topics.Subscribe(topicsTypes.SubscribeReq{
 		Filter: topic,
 		Params: params,
@@ -140,6 +143,7 @@ func (s *Type) Publish(pkt *mqttp.Publish, grantedQoS mqttp.QosType, _ mqttp.Sub
 		pkt.SetPacketID(0)
 	}
 
+	// nolint: gocritic
 	switch grantedQoS {
 	// If a subscribing Client has been granted maximum QoS 1 for a particular Topic Filter, then a
 	// QoS 0 Application Message matching the filter is delivered to the Client at QoS 0. This means
@@ -148,7 +152,7 @@ func (s *Type) Publish(pkt *mqttp.Publish, grantedQoS mqttp.QosType, _ mqttp.Sub
 	// Client, so that Client might receive duplicate copies of the Message.
 	case mqttp.QoS1:
 		if pkt.QoS() == mqttp.QoS2 {
-			_ = pkt.SetQoS(mqttp.QoS1) // nolint: errcheck
+			_ = pkt.SetQoS(mqttp.QoS1)
 		}
 
 		// If the subscribing Client has been granted maximum QoS 0, then an Application Message

@@ -1,4 +1,4 @@
-package topics
+package topics_test
 
 import (
 	"testing"
@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/VolantMQ/volantmq/subscriber"
+	"github.com/VolantMQ/volantmq/topics"
 	topicsTypes "github.com/VolantMQ/volantmq/topics/types"
 )
 
@@ -16,6 +17,7 @@ type providerTest struct {
 	config topicsTypes.ProviderConfig
 }
 
+// nolint: gochecknoglobals
 var testProviders []*providerTest
 
 func init() {
@@ -28,7 +30,7 @@ func init() {
 func TestTopicsUnknownProvider(t *testing.T) {
 	var tConfig topicsTypes.ProviderConfig
 
-	_, err := New(tConfig)
+	_, err := topics.New(tConfig)
 	require.Error(t, err)
 	require.EqualError(t, topicsTypes.ErrInvalidArgs, err.Error())
 
@@ -36,15 +38,14 @@ func TestTopicsUnknownProvider(t *testing.T) {
 		Name: "mem",
 	}
 
-	_, err = New(tConfig)
+	_, err = topics.New(tConfig)
 	require.Error(t, err)
 	require.EqualError(t, topicsTypes.ErrUnknownProvider, err.Error())
-
 }
 
 func TestTopicsOpenCloseProvider(t *testing.T) {
 	for _, p := range testProviders {
-		prov, err := New(p.config)
+		prov, err := topics.New(p.config)
 		require.NoError(t, err)
 
 		err = prov.Shutdown()
@@ -54,7 +55,7 @@ func TestTopicsOpenCloseProvider(t *testing.T) {
 
 func TestTopicsSubscribeInvalidQoS(t *testing.T) {
 	for _, p := range testProviders {
-		prov, err := New(p.config)
+		prov, err := topics.New(p.config)
 		require.NoError(t, err)
 
 		sub := &subscriber.Type{}

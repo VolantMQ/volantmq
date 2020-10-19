@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -19,6 +18,7 @@ import (
 	"github.com/VolantMQ/vlapi/vlsubscriber"
 	"github.com/VolantMQ/vlapi/vltypes"
 	"github.com/mitchellh/mapstructure"
+	"github.com/pkg/errors"
 	"github.com/troian/healthcheck"
 	persistenceMem "gitlab.com/VolantMQ/vlplugin/persistence/mem"
 	"go.uber.org/zap"
@@ -157,7 +157,7 @@ func loadMqttListeners(defaultAuth *auth.Manager, lCfg *configuration.ListenersC
 
 				if cfg.TLS != nil {
 					if _, err := cfg.TLS.Validate(); err != nil {
-						return nil, fmt.Errorf("listeners.mqtt.wss: %w", err)
+						return nil, errors.Wrap(err, "listeners.mqtt.wss")
 					}
 					configWs.CertFile = cfg.TLS.Cert
 					configWs.KeyFile = cfg.TLS.Key
@@ -165,7 +165,7 @@ func loadMqttListeners(defaultAuth *auth.Manager, lCfg *configuration.ListenersC
 
 				listeners = append(listeners, configWs)
 			default:
-				return nil, fmt.Errorf("unknown mqtt listener type %s", name)
+				return nil, errors.Errorf("unknown mqtt listener type %s", name)
 			}
 		}
 	}
@@ -197,6 +197,7 @@ func (ctx *appContext) loadPlugins(cfg *configuration.PluginsConfig) {
 
 	if len(plugins) > 0 {
 		for name, pl := range plugins {
+			// nolint: gocritic
 			if len(pl.Errors) > 0 {
 				logger.Info("\t", name, pl.Errors)
 			} else if pl.Plugin == nil {
@@ -222,12 +223,6 @@ func (ctx *appContext) loadPlugins(cfg *configuration.PluginsConfig) {
 }
 
 func configureSimpleAuth(cfg interface{}) (vlauth.IFace, error) {
-	// authConfig, err := vltypes.NormalizeConfig(cfg)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	//
-
 	var c authConfig
 	var err error
 	if err = mapstructure.Decode(cfg, &c); err != nil {
@@ -553,7 +548,7 @@ func (ctx *appContext) configurePlugin(pl vlplugin.Plugin, c interface{}) (inter
 	var plObject interface{}
 
 	if plObject, err = pl.Load(c, sysParams); err != nil {
-		return nil, errors.New(name + ": acquire failed : " + err.Error())
+		return nil, errors.Wrapf(err, "%s: acquire failed", name)
 	}
 
 	ctx.plugins.configured = append(ctx.plugins.configured, plObject)

@@ -18,30 +18,33 @@ import (
 	"github.com/VolantMQ/volantmq/types"
 )
 
-// const maxPacketCount = 0xFFFF
+const (
+	maxPacketCount = 0xFFFF
+	maxPacketSize  = 0xFFFFFFF
+)
 
 type writerOption func(*writer) error
 
 type writer struct {
+	flow              flow
+	pubOut            ackQueue
 	id                string
-	onConnectionClose signalConnectionClose
 	conn              transport.Conn
 	metric            metrics.Packets
 	persist           vlpersistence.Packets
-	flow              flow
-	pubOut            ackQueue
+	onConnectionClose signalConnectionClose
 	gMessages         *types.Queue
 	qos0Messages      *types.Queue
 	qos12Messages     *types.Queue
 	pubrelMessages    *types.Queue
 	quit              chan struct{}
 	topicAlias        map[string]uint16
+	log               *zap.SugaredLogger
+	onStop            types.Once
 	wg                sync.WaitGroup
 	wgRunSync         sync.WaitGroup
 	wgStarted         sync.WaitGroup
-	log               *zap.SugaredLogger
 	onStart           sync.Once
-	onStop            types.Once
 	running           uint32
 	packetMaxSize     uint32
 	topicAliasCurrMax uint16
@@ -62,10 +65,10 @@ func newWriter() *writer {
 		quit:          make(chan struct{}),
 		topicAliasMax: 0,
 		flow: flow{
-			quota: 0xFFFF,
+			quota: maxPacketCount,
 		},
 		running:       0,
-		packetMaxSize: 0xFFFFFFF,
+		packetMaxSize: maxPacketSize,
 	}
 	w.gMessages = types.NewQueue()
 	w.qos0Messages = types.NewQueue()
@@ -100,7 +103,7 @@ func (s *writer) start(start bool) {
 
 			ctx := &packetLoaderCtx{
 				unAck:   true,
-				count:   0xFFFF,
+				count:   maxPacketCount,
 				packets: tmpQueue,
 			}
 
@@ -360,8 +363,7 @@ func (s *writer) routine() {
 
 		if len(packets) > 0 {
 			for _, p := range packets {
-				switch pack := p.(type) {
-				case *mqttp.Publish:
+				if pack, ok := p.(*mqttp.Publish); ok {
 					if _, expireLeft, expired := pack.Expired(); expired {
 						continue
 					} else {
@@ -439,7 +441,7 @@ func (s *writer) setTopicAlias(pkt *mqttp.Publish) {
 				s.topicAliasCurrMax++
 				alias = s.topicAliasCurrMax
 			} else {
-				alias = uint16(rand.Intn(int(s.topicAliasMax)))
+				alias = uint16(rand.Intn(int(s.topicAliasMax))) // nolint: gosec
 			}
 
 			s.topicAlias[pkt.Topic()] = alias
@@ -458,11 +460,9 @@ func (s *writer) packetFitsSize(value interface{}) bool {
 		s.log.Fatal("Object does not belong to allowed types",
 			zap.String("ClientID", s.id),
 			zap.String("Type", reflect.TypeOf(value).String()))
-	} else {
-		if sz, err = obj.Size(); err != nil {
-			s.log.Error("Couldn't calculate message size", zap.String("ClientID", s.id), zap.Error(err))
-			return false
-		}
+	} else if sz, err = obj.Size(); err != nil {
+		s.log.Error("Couldn't calculate message size", zap.String("ClientID", s.id), zap.Error(err))
+		return false
 	}
 
 	// ignore any packet with size bigger than negotiated
@@ -500,6 +500,7 @@ func (s *writer) onReleaseOut(_, n mqttp.IFace) {
 func (s *writer) encodeForPersistence(pkt mqttp.IFace) *vlpersistence.PersistedPacket {
 	pPkt := &vlpersistence.PersistedPacket{}
 
+	// nolint: gocritic
 	switch tp := pkt.(type) {
 	case *mqttp.Publish:
 		if expireAt, _, expired := tp.Expired(); !expired {

@@ -47,14 +47,14 @@ type retainer struct {
 }
 
 type node struct {
-	retained  atomic.Value
-	wgDeleted sync.WaitGroup
 	subs      sync.Map
 	children  sync.Map
+	retained  atomic.Value
+	parent    *node
+	wgDeleted sync.WaitGroup
 	kidsCount int32
 	subsCount int32
 	remove    int32
-	parent    *node
 }
 
 func newNode(parent *node) *node {
@@ -109,7 +109,11 @@ func (mT *provider) leafSearchNode(levels []string) *node {
 	return root
 }
 
-func (mT *provider) subscriptionInsert(filter string, sub topicsTypes.Subscriber, p vlsubscriber.SubscriptionParams) bool {
+func (mT *provider) subscriptionInsert(
+	filter string,
+	sub topicsTypes.Subscriber,
+	p vlsubscriber.SubscriptionParams,
+) bool {
 	levels := strings.Split(filter, "/")
 
 	leaf := mT.leafInsertNode(levels)
@@ -285,6 +289,7 @@ func (mT *provider) retainSearch(filter string, retained *[]*mqttp.Publish) {
 	levels := strings.Split(filter, "/")
 	level := levels[0]
 
+	// nolint: gocritic
 	if level == topicsTypes.MWC {
 		mT.root.children.Range(func(key, value interface{}) bool {
 			t := key.(string)
@@ -311,6 +316,7 @@ func (mT *provider) retainSearch(filter string, retained *[]*mqttp.Publish) {
 func (sn *node) getRetained(retained *[]*mqttp.Publish) {
 	rt := sn.retained.Load().(retainer)
 
+	// nolint: gocritic
 	switch val := rt.val.(type) {
 	case vltypes.RetainObject:
 		var p *mqttp.Publish
