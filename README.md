@@ -223,4 +223,6 @@ docker run --rm -p 1883:1883 -p 8080:8080 -v $(pwd)/examples/config.yaml:/etc/vo
 ### [Contributing guidelines](https://github.com/volantmq/volantmq/blob/master/CONTRIBUTING.md)
 
 ### Credits
+This project is heavily inspired by [surgemq](https://github.com/zentures/surgemq). As it was unmaintained it was forked to here, redesigned and packed with features since then
+ 
 Appreciate [JetBrains](https://jetbrains.com) for granted license
