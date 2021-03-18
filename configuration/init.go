@@ -33,15 +33,19 @@ var PluginsDir string
 func init() {
 	// initialize startup logger
 	logCfg := zap.NewProductionConfig()
+	var err error
 
 	logCfg.DisableStacktrace = true
 	logCfg.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
 	logCfg.EncoderConfig.LevelKey = ""
 	logCfg.EncoderConfig.CallerKey = ""
 	logCfg.Encoding = "console"
-	logCfg.EncoderConfig.EncodeTime = nil
+	logCfg.EncoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout("")
 
-	log, _ := logCfg.Build()
+	log, err := logCfg.Build()
+	if nil != err {
+		panic(err.Error())
+	}
 
 	cfg.humanLog = log.Sugar()
 
@@ -64,7 +68,6 @@ func init() {
 	flag.StringVar(&WorkDir, "work-dir", WorkDir, "service work directory")
 	flag.StringVar(&PluginsDir, "plugins-dir", PluginsDir, "service plugins directory")
 
-	var err error
 	WorkDir, err = filepath.Abs(WorkDir)
 	if err != nil {
 		panic(err.Error())
