@@ -237,7 +237,8 @@ func configureSimpleAuth(cfg interface{}) (vlauth.IFace, error) {
 
 	if len(sAuth.creds) == 0 {
 		logger.Warn("\tsimpleAuth config without users. setting default to guest:guest")
-		_ = sAuth.addUser("guest", string(sha256.New().Sum([]byte("guest"))), "", "")
+		h := sha256.Sum256([]byte("guest"))
+		_ = sAuth.addUser("guest", string(h[:]), "", "")
 	}
 
 	return sAuth, nil
